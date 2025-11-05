@@ -1,7 +1,9 @@
 from fastapi import FastAPI
-
+# from app.routers import register_routers
 
 app = FastAPI(title="GrowFit API")
+# register_routers(app)
+
 
 try:
     from app.routers import api as api_router  # 권장: app/routers.py에서 APIRouter 집계
