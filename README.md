@@ -1,5 +1,3 @@
-아래를 `README.md`로 사용하면 된다.
-
 # GrowFit Backend
 
 FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 **pgvector**, 추후 **Qdrant**로 전환 예정. 티어는 **Superviser → Partner → User(Student)**.
