@@ -1,3 +1,4 @@
+# Base, MetaData(naming_convention)만
 from __future__ import annotations
 
 from datetime import datetime

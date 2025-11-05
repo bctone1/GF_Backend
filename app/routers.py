@@ -8,15 +8,15 @@
 # from app.routers.common.files import router as files
 # from app.routers.common.webhooks import router as webhooks
 #
-# # ----- superviser (전역 스코프) -----
-# from app.routers.superviser.dashboard import router as sv_dash
-# from app.routers.superviser.organizations import router as sv_orgs
-# from app.routers.superviser.users import router as sv_users
-# from app.routers.superviser.billing import router as sv_billing
-# from app.routers.superviser.analytics import router as sv_analytics
-# from app.routers.superviser.reports import router as sv_reports
-# from app.routers.superviser.system import router as sv_system
-# from app.routers.superviser.settings import router as sv_settings
+# # ----- supervisor (전역 스코프) -----
+# from app.routers.supervisor.dashboard import router as sv_dash
+# from app.routers.supervisor.organizations import router as sv_orgs
+# from app.routers.supervisor.users import router as sv_users
+# from app.routers.supervisor.billing import router as sv_billing
+# from app.routers.supervisor.analytics import router as sv_analytics
+# from app.routers.supervisor.reports import router as sv_reports
+# from app.routers.supervisor.system import router as sv_system
+# from app.routers.supervisor.settings import router as sv_settings
 #
 # # ----- partner (조직 스코프) -----
 # from app.routers.partner.partners import router as pt_self
@@ -47,15 +47,15 @@
 #     app.include_router(files,    prefix="/files",     tags=["files"])
 #     app.include_router(webhooks, prefix="/webhooks",  tags=["webhooks"])
 #
-#     # superviser
-#     app.include_router(sv_dash,      prefix="/superviser/dashboard",     tags=["superviser.dashboard"])
-#     app.include_router(sv_orgs,      prefix="/superviser/organizations", tags=["superviser.organizations"])
-#     app.include_router(sv_users,     prefix="/superviser/users",         tags=["superviser.users"])
-#     app.include_router(sv_billing,   prefix="/superviser/billing",       tags=["superviser.billing"])
-#     app.include_router(sv_analytics, prefix="/superviser/analytics",     tags=["superviser.analytics"])
-#     app.include_router(sv_reports,   prefix="/superviser/reports",       tags=["superviser.reports"])
-#     app.include_router(sv_system,    prefix="/superviser/system",        tags=["superviser.system"])
-#     app.include_router(sv_settings,  prefix="/superviser/settings",      tags=["superviser.settings"])
+#     # supervisor
+#     app.include_router(sv_dash,      prefix="/supervisor/dashboard",     tags=["supervisor.dashboard"])
+#     app.include_router(sv_orgs,      prefix="/supervisor/organizations", tags=["supervisor.organizations"])
+#     app.include_router(sv_users,     prefix="/supervisor/users",         tags=["supervisor.users"])
+#     app.include_router(sv_billing,   prefix="/supervisor/billing",       tags=["supervisor.billing"])
+#     app.include_router(sv_analytics, prefix="/supervisor/analytics",     tags=["supervisor.analytics"])
+#     app.include_router(sv_reports,   prefix="/supervisor/reports",       tags=["supervisor.reports"])
+#     app.include_router(sv_system,    prefix="/supervisor/system",        tags=["supervisor.system"])
+#     app.include_router(sv_settings,  prefix="/supervisor/settings",      tags=["supervisor.settings"])
 #
 #     # partner (조직별 경로 변수 고정)
 #     app.include_router(pt_self,     prefix="/partners/{partner_id}",                tags=["partner.self"])

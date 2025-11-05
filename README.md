@@ -1,6 +1,6 @@
 # GrowFit Backend
 
-FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 **pgvector**, 추후 **Qdrant**로 전환 예정. 티어는 **Superviser → Partner → User(Student)**.
+FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 **pgvector**, 추후 **Qdrant**로 전환 예정. 티어는 **supervisor → Partner → User(Student)**.
 
 ## 기술 스택
 
@@ -14,7 +14,7 @@ FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 *
 
 ## 권한 티어와 데이터 스코프
 
-* **Superviser**: 플랫폼 전역 운영. 조직/사용자 총괄, 과금·리포트, 시스템 설정·모니터링. 관련 화면: 플랫폼 설정(API/보안), 시스템 모니터링, 분석 리포트 예약/내보내기.
+* **supervisor**: 플랫폼 전역 운영. 조직/사용자 총괄, 과금·리포트, 시스템 설정·모니터링. 관련 화면: 플랫폼 설정(API/보안), 시스템 모니터링, 분석 리포트 예약/내보내기.
 * **Partner**: 개별 조직 단위 운영. 파트너 대시보드, 조직/사용자 관리. 관련 화면: 파트너 대시보드, 조직 관리 테이블·필터, 사용자 관리 데이터/성능 로그.
 * **User(Student)**: 프로젝트·문서·에이전트·AI 실습 사용. 문서 업로드→임베딩→대화 연계, 히스토리에서 실습/문서로 이동.
 
@@ -103,8 +103,8 @@ uvicorn main:app --reload --port 8000
 
 ## 데이터베이스 가이드
 
-* 스키마 권장: `superviser`, `partner`, `user` 3단 구성.
-* 외래키는 상위→하위 방향으로 제약. 전역 테이블(superviser.*)은 상위 기준 관리.
+* 스키마 권장: `supervisor`, `partner`, `user` 3단 구성.
+* 외래키는 상위→하위 방향으로 제약. 전역 테이블(supervisor.*)은 상위 기준 관리.
 * 스냅샷·로그성 테이블은 쓰기 전용, 조회 API 분리(추후 분석·리포트와 분리).
 
 ## 벡터 스토어 추상화와 **pgvector → Qdrant** 전환
