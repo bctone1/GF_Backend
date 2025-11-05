@@ -1,31 +1,27 @@
+# schemas/partner/analytics.py
 from __future__ import annotations
-
 from datetime import date
 from decimal import Decimal
-from typing import Any, Optional
-from pydantic import BaseModel, Field, field_serializer
+from typing import Optional, Dict, Any
+from schemas.base import ORMBase
 
-from schemas.base import ORMModel
 
-class PartnerAnalyticsSnapshotCreate(BaseModel):
-    partner_id: int = Field(..., ge=1)
-    snapshot_date: date
-    metric_type: str
-    metric_value: Decimal
-    metadata: Optional[dict[str, Any]] = None
-
-    @field_serializer('metric_value', when_used='json')
-    def _ser_metric(self, v: Decimal) -> str:
-        return format(v, 'f')
-
-class PartnerAnalyticsSnapshotOut(ORMModel):
+# ========= partner.analytics_snapshots (READ-ONLY) =========
+class AnalyticsSnapshotResponse(ORMBase):
     id: int
     partner_id: int
     snapshot_date: date
     metric_type: str
     metric_value: Decimal
-    metadata: Optional[dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
 
-    @field_serializer('metric_value', when_used='json')
-    def _ser_metric(self, v: Decimal) -> str:
-        return format(v, 'f')
+
+# ========= partner.project_finance_monthly (READ-ONLY) =========
+class ProjectFinanceMonthlyResponse(ORMBase):
+    id: int
+    project_id: int
+    month: date
+    contract_amount: Decimal
+    api_cost: Decimal
+    platform_fee: Decimal
+    payout_amount: Decimal
