@@ -22,7 +22,8 @@ class AnalyticsSnapshot(Base):
     snapshot_date = Column(Date, nullable=False)
     metric_type = Column(Text, nullable=False)
     metric_value = Column(Numeric(18, 4), nullable=False)
-    metadata = Column(JSONB, nullable=True)
+    meta = Column("metadata", JSONB, nullable=True)
+
 
     __table_args__ = (
         UniqueConstraint(

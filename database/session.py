@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-import database.base as base
+from temp import database as base
 import psycopg2
 
 engine = create_engine(base.DATABASE_URL, echo=True)

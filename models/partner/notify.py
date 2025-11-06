@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import INET
 from models.base import Base
 
 
+
 # ========= partner.notification_preferences =========
 class NotificationPreference(Base):
     __tablename__ = "notification_preferences"
@@ -81,23 +82,22 @@ class MfaSetting(Base):
 
 
 # ========= partner.login_activity =========
+
 class LoginActivity(Base):
     __tablename__ = "login_activity"
 
+    # ORM이 객체 식별용으로만 씀, 실제 DDL에서 PK 제약은 생성되지 않음
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-
     partner_user_id = Column(
         BigInteger,
         ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
         nullable=True,
     )
     login_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    ip_address = Column(INET, nullable=True)
-    user_agent = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, server_default=text("'success'"))  # 'success','failed' 등
+    ip_address = Column(INET)
+    user_agent = Column(Text)
+    status = Column(Text, server_default=text("'success'"), nullable=False)
 
     __table_args__ = (
-        Index("idx_login_activity_user_time", "partner_user_id", "login_at"),
-        Index("idx_login_activity_status_time", "status", "login_at"),
         {"schema": "partner", "postgresql_partition_by": "RANGE (login_at)"},
     )

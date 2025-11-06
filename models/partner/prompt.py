@@ -51,7 +51,8 @@ class PromptTemplateVersion(Base):
     )
     version = Column(Integer, nullable=False)
     content = Column(Text, nullable=False)
-    metadata = Column(JSONB, nullable=True)
+    meta = Column("metadata", JSONB, nullable=True)
+
     created_by = Column(
         BigInteger,
         ForeignKey("partner.partner_users.id", ondelete="SET NULL"),

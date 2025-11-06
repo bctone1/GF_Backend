@@ -22,7 +22,7 @@ class UserActivityEvent(Base):
     event_type = Column(Text, nullable=False)
     related_type = Column(Text, nullable=True)  # 'project' | 'document' | 'agent' | ...
     related_id = Column(BigInteger, nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    meta = Column("metadata", JSONB, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
@@ -106,7 +106,7 @@ class UserAchievement(Base):
     )
     achievement_key = Column(Text, nullable=False)        # e.g., 'first_100_messages'
     earned_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    metadata = Column(JSONB, nullable=True)
+    meta = Column("metadata", JSONB, nullable=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "achievement_key", name="uq_user_achievements_user_key"),
