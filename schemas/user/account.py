@@ -1,30 +1,42 @@
 # schemas/user/account.py
 from __future__ import annotations
 from datetime import datetime
-from decimal import Decimal
-from typing import Optional, Dict, Any, List
+from typing import Optional, List
 from pydantic import EmailStr, ConfigDict
 from schemas.base import ORMBase
 
-
-# =========================================================
-# users
-# =========================================================
-class UserCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)  # payload, not ORM
+# =========================
+# Auth I/O
+# =========================
+class LoginInput(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     email: EmailStr
-    password_hash: str
-    status: Optional[str] = None          # server may default to 'active'
-    default_role: Optional[str] = None    # server may default to 'member'
+    password: str
 
+class AuthTokens(ORMBase):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+# =========================
+# users
+# =========================
+class UserCreate(ORMBase):
+    # 엔드포인트 입력용: 평문 password 수신
+    model_config = ConfigDict(from_attributes=False)
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None          # 프로필 초기값에 사용 가능
+    status: Optional[str] = None             # 서버 기본값 'active' 사용 가능
+    default_role: Optional[str] = None       # 서버 기본값 'member' 사용 가능
 
 class UserUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     email: Optional[EmailStr] = None
-    password_hash: Optional[str] = None
+    password: Optional[str] = None
     status: Optional[str] = None
     default_role: Optional[str] = None
-
 
 class UserResponse(ORMBase):
     user_id: int
@@ -36,9 +48,9 @@ class UserResponse(ORMBase):
     updated_at: datetime
 
 
-# =========================================================
+# =========================
 # user_profiles
-# =========================================================
+# =========================
 class UserProfileCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     user_id: int
@@ -51,7 +63,6 @@ class UserProfileCreate(ORMBase):
     avatar_url: Optional[str] = None
     avatar_initials: Optional[str] = None
 
-
 class UserProfileUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     full_name: Optional[str] = None
@@ -62,7 +73,6 @@ class UserProfileUpdate(ORMBase):
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
     avatar_initials: Optional[str] = None
-
 
 class UserProfileResponse(ORMBase):
     user_id: int
@@ -77,9 +87,9 @@ class UserProfileResponse(ORMBase):
     updated_at: datetime
 
 
-# =========================================================
+# =========================
 # user_security_settings
-# =========================================================
+# =========================
 class UserSecuritySettingCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     user_id: int
@@ -88,14 +98,12 @@ class UserSecuritySettingCreate(ORMBase):
     backup_codes: Optional[List[str]] = None
     recovery_email: Optional[EmailStr] = None
 
-
 class UserSecuritySettingUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     two_factor_enabled: Optional[bool] = None
     two_factor_method: Optional[str] = None
     backup_codes: Optional[List[str]] = None
     recovery_email: Optional[EmailStr] = None
-
 
 class UserSecuritySettingResponse(ORMBase):
     user_id: int
@@ -107,24 +115,21 @@ class UserSecuritySettingResponse(ORMBase):
     updated_at: datetime
 
 
-# =========================================================
+# =========================
 # user_login_sessions
-# =========================================================
+# =========================
 class UserLoginSessionCreate(ORMBase):
+    # 엔드포인트 입력용: user_id, is_current는 서버가 설정
     model_config = ConfigDict(from_attributes=False)
-    user_id: int
     device_name: Optional[str] = None
-    ip_address: Optional[str] = None   # INET -> str, server-side validation
+    ip_address: Optional[str] = None   # INET -> str, 서버 검증
     location: Optional[str] = None
     user_agent: Optional[str] = None
-    is_current: Optional[bool] = None  # server may set True by default
-
 
 class UserLoginSessionUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     logged_out_at: Optional[datetime] = None
     is_current: Optional[bool] = None
-
 
 class UserLoginSessionResponse(ORMBase):
     session_id: int
@@ -138,9 +143,9 @@ class UserLoginSessionResponse(ORMBase):
     is_current: bool
 
 
-# =========================================================
+# =========================
 # user_privacy_settings
-# =========================================================
+# =========================
 class UserPrivacySettingCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     user_id: int
@@ -148,13 +153,11 @@ class UserPrivacySettingCreate(ORMBase):
     allow_data_collection: Optional[bool] = None
     allow_personalized_ai: Optional[bool] = None
 
-
 class UserPrivacySettingUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     save_conversation_history: Optional[bool] = None
     allow_data_collection: Optional[bool] = None
     allow_personalized_ai: Optional[bool] = None
-
 
 class UserPrivacySettingResponse(ORMBase):
     user_id: int

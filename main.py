@@ -1,17 +1,9 @@
+# main.py
 from fastapi import FastAPI
-# from app.routers import register_routers
+from app.routers import register_routers
 
 app = FastAPI(title="GrowFit API")
-# register_routers(app)
-
-
-try:
-    from app.routers import api as api_router  # 권장: app/routers.py에서 APIRouter 집계
-    app.include_router(api_router)
-except Exception:
-    pass
-
-
+register_routers(app)
 
 if __name__ == "__main__":
     import uvicorn

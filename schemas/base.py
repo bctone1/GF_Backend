@@ -15,7 +15,7 @@ class MoneyBase(ORMBase):
         json_encoders={Decimal: lambda v: format(v, "f")},
     )
 
-class Page(Generic[T], ORMBase):
+class Page(ORMBase, Generic[T]):
     items: list[T]
     total: int
     page: int
