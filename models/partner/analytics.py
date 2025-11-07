@@ -1,8 +1,8 @@
 # models/partner/analytics.py
 # READ-ONLY 집계. ETL/스케줄러만 적재.
 from sqlalchemy import (
-    Column, BigInteger, Text, Date, Numeric,
-    ForeignKey, UniqueConstraint, CheckConstraint, Index
+    Column, BigInteger, Text, Date, Numeric, ForeignKey,
+    UniqueConstraint, CheckConstraint, Index, text
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from models.base import Base
@@ -19,11 +19,10 @@ class AnalyticsSnapshot(Base):
         ForeignKey("partner.partners.id", ondelete="CASCADE"),
         nullable=False,
     )
-    snapshot_date = Column(Date, nullable=False)
+    snapshot_date = Column(Date, nullable=False)  # 일 단위 스냅샷
     metric_type = Column(Text, nullable=False)
     metric_value = Column(Numeric(18, 4), nullable=False)
     meta = Column("metadata", JSONB, nullable=True)
-
 
     __table_args__ = (
         UniqueConstraint(
@@ -37,30 +36,28 @@ class AnalyticsSnapshot(Base):
     )
 
 
-# ========= partner.project_finance_monthly =========
-class ProjectFinanceMonthly(Base):
-    __tablename__ = "project_finance_monthly"
+# ========= partner.enrollment_finance_monthly =========
+class EnrollmentFinanceMonthly(Base):
+    __tablename__ = "enrollment_finance_monthly"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    enrollment_id = Column(BigInteger, ForeignKey("partner.enrollments.id", ondelete="CASCADE"), nullable=False)
+    month = Column(Date, nullable=False)  # YYYY-MM-01 고정
 
-    project_id = Column(
-        BigInteger,
-        ForeignKey("partner.projects.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    month = Column(Date, nullable=False)  # YYYY-MM-01 권장
-
-    contract_amount = Column(Numeric(14, 2), nullable=False, default=0)
-    api_cost = Column(Numeric(14, 2), nullable=False, default=0)
-    platform_fee = Column(Numeric(14, 2), nullable=False, default=0)
-    payout_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    contract_amount = Column(Numeric(14, 2), nullable=False, server_default=text("0"))
+    api_cost        = Column(Numeric(14, 2), nullable=False, server_default=text("0"))
+    platform_fee    = Column(Numeric(14, 2), nullable=False, server_default=text("0"))
+    payout_amount   = Column(Numeric(14, 2), nullable=False, server_default=text("0"))
 
     __table_args__ = (
-        UniqueConstraint("project_id", "month", name="uq_pfm_project_month"),
-        CheckConstraint("contract_amount >= 0", name="chk_pfm_contract_nonneg"),
-        CheckConstraint("api_cost >= 0", name="chk_pfm_api_cost_nonneg"),
-        CheckConstraint("platform_fee >= 0", name="chk_pfm_platform_fee_nonneg"),
-        CheckConstraint("payout_amount >= 0", name="chk_pfm_payout_nonneg"),
-        Index("idx_pfm_project_month", "project_id", "month"),
+        UniqueConstraint("enrollment_id", "month", name="uq_efm_enrollment_month"),
+        CheckConstraint("contract_amount >= 0 AND api_cost >= 0 AND platform_fee >= 0 AND payout_amount >= 0",
+                        name="chk_efm_amounts_nonneg"),
+        # month는 해당 월의 첫날이어야 함 (PG 전용)
+        CheckConstraint("date_trunc('month', month::timestamp) = month::timestamp",
+                        name="chk_efm_month_is_first_day"),
+        Index("idx_efm_enrollment_month", "enrollment_id", "month"),
+        Index("idx_efm_partner_month", "partner_id", "month"),
         {"schema": "partner"},
     )

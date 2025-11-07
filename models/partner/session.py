@@ -16,20 +16,21 @@ class AiSession(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    project_id = Column(
-        BigInteger,
-        ForeignKey("partner.projects.id", ondelete="CASCADE"),
-        nullable=False,
-    )
     student_id = Column(
         BigInteger,
         ForeignKey("partner.students.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # 분반 컨텍스트(선택사항임, 널 트루)
+    class_id = Column(
+        BigInteger,
+        ForeignKey("partner.classes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     mode = Column(Text, nullable=False)                    # 'single' | 'parallel'
     model_name = Column(Text, nullable=False)
-    status = Column(Text, nullable=False, server_default=text("'active'"))
+    status = Column(Text, nullable=False, server_default=text("'active'"))  # active|completed|canceled|error
 
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     ended_at = Column(DateTime(timezone=True), nullable=True)
@@ -44,21 +45,26 @@ class AiSession(Base):
         nullable=True,
     )
 
-    messages = relationship("SessionMessage", back_populates="session", passive_deletes=True)
+    messages = relationship(
+        "SessionMessage",
+        back_populates="session",
+        passive_deletes=True,
+        cascade="all, delete-orphan",
+        order_by="SessionMessage.created_at",
+    )
 
     __table_args__ = (
         CheckConstraint("mode IN ('single','parallel')", name="chk_ai_sessions_mode"),
-        CheckConstraint(
-            "(ended_at IS NULL) OR (ended_at >= started_at)",
-            name="chk_ai_sessions_time",
-        ),
+        CheckConstraint("status IN ('active','completed','canceled','error')", name="chk_ai_sessions_status"),
+        CheckConstraint("(ended_at IS NULL) OR (ended_at >= started_at)", name="chk_ai_sessions_time"),
         CheckConstraint("total_messages >= 0", name="chk_ai_sessions_msgs_nonneg"),
         CheckConstraint("total_tokens   >= 0", name="chk_ai_sessions_tokens_nonneg"),
         CheckConstraint("total_cost     >= 0", name="chk_ai_sessions_cost_nonneg"),
-        Index("idx_ai_sessions_project_time", "project_id", "started_at"),
         Index("idx_ai_sessions_status", "status"),
         Index("idx_ai_sessions_mode", "mode"),
         Index("idx_ai_sessions_student", "student_id"),
+        Index("idx_ai_sessions_class", "class_id"),
+        Index("idx_ai_sessions_started", "started_at"),
         {"schema": "partner"},
     )
 
@@ -78,11 +84,13 @@ class SessionMessage(Base):
     sender_type = Column(Text, nullable=False)             # 'student' | 'staff' | 'system'
     sender_id = Column(BigInteger, nullable=True)          # 참조 없음(옵션)
 
-    message_type = Column(Text, nullable=False, server_default=text("'text'"))
+    message_type = Column(Text, nullable=False, server_default=text("'text'"))  # text|image|audio|file|tool
     content = Column(Text, nullable=False)
 
     tokens = Column(Integer, nullable=True)
     latency_ms = Column(Integer, nullable=True)
+
+    meta = Column(JSONB, nullable=True)                    # 추가 메타(툴콜, 파일정보 등)
 
     # pgvector(1536)
     content_vector = Column(Vector(1536), nullable=True)
@@ -93,12 +101,13 @@ class SessionMessage(Base):
 
     __table_args__ = (
         CheckConstraint("sender_type IN ('student','staff','system')", name="chk_session_messages_sender"),
+        CheckConstraint("message_type IN ('text','image','audio','file','tool')", name="chk_session_messages_type"),
         CheckConstraint("tokens IS NULL OR tokens >= 0", name="chk_session_messages_tokens_nonneg"),
         CheckConstraint("latency_ms IS NULL OR latency_ms >= 0", name="chk_session_messages_latency_nonneg"),
         Index("idx_session_messages_session_time", "session_id", "created_at"),
         Index("idx_session_messages_type_time", "message_type", "created_at"),
         Index("idx_session_messages_sender", "sender_type", "sender_id"),
-        # 벡터 근사검색 인덱스(코사인). 실제 생성은 pgvector 확장 후 사용.
+        # 벡터 근사검색 인덱스(코사인). pgvector 확장 필요.
         Index(
             "idx_session_messages_vec_ivfflat",
             "content_vector",

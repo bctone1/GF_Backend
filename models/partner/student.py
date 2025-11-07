@@ -5,6 +5,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import CITEXT
 from models.base import Base
 
 
@@ -21,8 +22,8 @@ class Student(Base):
     )
 
     full_name = Column(Text, nullable=False)
-    email = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, server_default=text("'active'"))
+    email = Column(CITEXT, nullable=True)
+    status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|archived
     joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     primary_contact = Column(Text, nullable=True)
@@ -31,8 +32,17 @@ class Student(Base):
     enrollments = relationship("Enrollment", back_populates="student", passive_deletes=True)
 
     __table_args__ = (
+        CheckConstraint("status IN ('active','inactive','archived')", name="chk_students_status"),
         Index("idx_students_partner_status", "partner_id", "status"),
         Index("idx_students_partner_email", "partner_id", "email"),
+
+        #  파트너 내 이메일 단일, NULL 허용
+        Index(
+            "uq_students_partner_email_notnull",
+            "partner_id", "email",
+            unique=True,
+            postgresql_where=text("email IS NOT NULL"),
+        ),
         {"schema": "partner"},
     )
 
@@ -43,9 +53,9 @@ class Enrollment(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    project_id = Column(
+    class_id = Column(
         BigInteger,
-        ForeignKey("partner.projects.id", ondelete="CASCADE"),
+        ForeignKey("partner.classes.id", ondelete="CASCADE"),
         nullable=False,
     )
     student_id = Column(
@@ -53,22 +63,28 @@ class Enrollment(Base):
         ForeignKey("partner.students.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # 선택: 초대코드 트래킹
+    invite_code_id = Column(
+        BigInteger,
+        ForeignKey("partner.invite_codes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
-    status = Column(Text, nullable=False, server_default=text("'active'"))
+    status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|completed|dropped
     enrolled_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     progress_percent = Column(Numeric(5, 2), nullable=False, server_default=text("0"))
+    final_grade = Column(Text, nullable=True)
 
-    project = relationship("Project", passive_deletes=True)
+    clazz = relationship("Class", back_populates="enrollments", passive_deletes=True)
     student = relationship("Student", back_populates="enrollments", passive_deletes=True)
 
     __table_args__ = (
-        UniqueConstraint("project_id", "student_id", name="uq_enrollments_project_student"),
-        CheckConstraint(
-            "progress_percent >= 0 AND progress_percent <= 100",
-            name="chk_enrollments_progress_0_100",
-        ),
-        Index("idx_enrollments_project", "project_id"),
+        UniqueConstraint("class_id", "student_id", name="uq_enrollments_class_student"),
+        CheckConstraint("status IN ('active','inactive','completed','dropped')", name="chk_enrollments_status"),
+        CheckConstraint("progress_percent >= 0 AND progress_percent <= 100", name="chk_enrollments_progress_0_100"),
+        CheckConstraint("(completed_at IS NULL) OR (completed_at >= enrolled_at)", name="chk_enrollments_time"),
+        Index("idx_enrollments_class", "class_id"),
         Index("idx_enrollments_student", "student_id"),
         Index("idx_enrollments_status_time", "status", "enrolled_at"),
         {"schema": "partner"},
