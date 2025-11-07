@@ -1,25 +1,34 @@
 # schemas/partner/prompt.py
 from __future__ import annotations
-from typing import Optional, Dict, Any
+
 from datetime import datetime
-from schemas.base import ORMBase
+from typing import Optional, Literal, Any, List
+
+from pydantic import ConfigDict
+
+from schemas.base import ORMBase, Page
 
 
-# ========= partner.prompt_templates =========
+# ==============================
+# prompt_templates
+# ==============================
+TemplateScope = Literal["partner", "global"]
+
 class PromptTemplateCreate(ORMBase):
-    partner_id: Optional[int] = None         # 전역 템플릿 허용
+    partner_id: Optional[int] = None  # scope='partner'면 필요, 'global'이면 None
     name: str
     description: Optional[str] = None
-    scope: str = "partner"                   # 'partner' 등
+    scope: Optional[TemplateScope] = None  # DB default 'partner'
     created_by: Optional[int] = None
-    is_archived: bool = False
+    is_archived: Optional[bool] = None  # DB default false
 
 
 class PromptTemplateUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     partner_id: Optional[int] = None
     name: Optional[str] = None
     description: Optional[str] = None
-    scope: Optional[str] = None
+    scope: Optional[TemplateScope] = None
     created_by: Optional[int] = None
     is_archived: Optional[bool] = None
 
@@ -29,25 +38,33 @@ class PromptTemplateResponse(ORMBase):
     partner_id: Optional[int] = None
     name: str
     description: Optional[str] = None
-    scope: str
+    scope: TemplateScope
     created_by: Optional[int] = None
     is_archived: bool
     created_at: datetime
+    # 선택: 버전 동시 반환 시
+    versions: Optional[List["PromptTemplateVersionResponse"]] = None  # noqa: F821
 
 
-# ========= partner.prompt_template_versions =========
+PromptTemplatePage = Page[PromptTemplateResponse]
+
+
+# ==============================
+# prompt_template_versions
+# ==============================
 class PromptTemplateVersionCreate(ORMBase):
     template_id: int
     version: int
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = None
     created_by: Optional[int] = None
 
 
 class PromptTemplateVersionUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     version: Optional[int] = None
     content: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = None
     created_by: Optional[int] = None
 
 
@@ -56,22 +73,30 @@ class PromptTemplateVersionResponse(ORMBase):
     template_id: int
     version: int
     content: str
-    metadata: Optional[Dict[str, Any]] = None
+    meta: Optional[dict[str, Any]] = None
     created_by: Optional[int] = None
     created_at: datetime
 
 
-# ========= partner.prompt_bindings =========
+PromptTemplateVersionPage = Page[PromptTemplateVersionResponse]
+
+
+# ==============================
+# prompt_bindings
+# ==============================
+BindingScope = Literal["class", "global"]
+
 class PromptBindingCreate(ORMBase):
     template_version_id: int
-    scope_type: str                         # 'project' | 'global'
-    scope_id: Optional[int] = None          # global이면 None
-    is_active: bool = True
+    scope_type: BindingScope  # 'class'|'global'
+    scope_id: Optional[int] = None            # scope_type='class'면 필요
+    is_active: Optional[bool] = None          # DB default true
 
 
 class PromptBindingUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     template_version_id: Optional[int] = None
-    scope_type: Optional[str] = None
+    scope_type: Optional[BindingScope] = None
     scope_id: Optional[int] = None
     is_active: Optional[bool] = None
 
@@ -79,7 +104,10 @@ class PromptBindingUpdate(ORMBase):
 class PromptBindingResponse(ORMBase):
     id: int
     template_version_id: int
-    scope_type: str
+    scope_type: BindingScope
     scope_id: Optional[int] = None
     is_active: bool
     created_at: datetime
+
+
+PromptBindingPage = Page[PromptBindingResponse]

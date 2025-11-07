@@ -1,31 +1,45 @@
 # schemas/partner/session.py
 from __future__ import annotations
-from typing import Optional, List
-from decimal import Decimal
+
 from datetime import datetime
-from schemas.base import ORMBase, MoneyBase
+from decimal import Decimal
+from typing import Optional, Any, List
+
+from pydantic import ConfigDict
+
+from schemas.base import ORMBase, MoneyBase, Page
+from schemas.enums import (
+    SessionMode,        # 'single' | 'parallel'
+    SessionStatus,      # 'active' | 'completed' | 'canceled' | 'error'
+    SessionMessageType, # 'text' | 'image' | 'audio' | 'file' | 'tool'
+    SenderType,         # 'student' | 'staff' | 'system'
+)
 
 
-# ========== partner.ai_sessions ==========
-class AiSessionCreate(MoneyBase):
-    project_id: int
+# ==============================
+# ai_sessions
+# ==============================
+class AiSessionCreate(ORMBase):
     student_id: Optional[int] = None
-    mode: str                          # 'single' | 'parallel'
+    class_id: Optional[int] = None
+    mode: SessionMode
     model_name: str
-    status: Optional[str] = None       # DB default 'active'
-    started_at: Optional[datetime] = None
+    status: Optional[SessionStatus] = None              # DB default 'active'
+    started_at: Optional[datetime] = None               # 서버 채움 권장
     ended_at: Optional[datetime] = None
-    total_messages: Optional[int] = 0
-    total_tokens: Optional[int] = 0
-    total_cost: Optional[Decimal] = Decimal("0")
+    total_messages: Optional[int] = None                # DB default 0
+    total_tokens: Optional[int] = None                  # DB default 0
+    total_cost: Optional[Decimal] = None                # DB default 0
     initiated_by: Optional[int] = None
 
 
-class AiSessionUpdate(MoneyBase):
+class AiSessionUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     student_id: Optional[int] = None
-    mode: Optional[str] = None
+    class_id: Optional[int] = None
+    mode: Optional[SessionMode] = None
     model_name: Optional[str] = None
-    status: Optional[str] = None
+    status: Optional[SessionStatus] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     total_messages: Optional[int] = None
@@ -36,50 +50,61 @@ class AiSessionUpdate(MoneyBase):
 
 class AiSessionResponse(MoneyBase):
     id: int
-    project_id: int
     student_id: Optional[int] = None
-    mode: str
+    class_id: Optional[int] = None
+    mode: SessionMode
     model_name: str
-    status: str
+    status: SessionStatus
     started_at: datetime
     ended_at: Optional[datetime] = None
     total_messages: int
     total_tokens: int
     total_cost: Decimal
     initiated_by: Optional[int] = None
+    # 선택: 메시지 동시 반환 시 사용
+    messages: Optional[List["SessionMessageResponse"]] = None  # noqa: F821
 
 
-# ========== partner.session_messages ==========
+AiSessionPage = Page[AiSessionResponse]
+
+
+# ==============================
+# session_messages
+# ==============================
 class SessionMessageCreate(ORMBase):
     session_id: int
-    sender_type: str                    # 'student' | 'staff' | 'system'
+    sender_type: SenderType
     sender_id: Optional[int] = None
-    message_type: str = "text"
+    message_type: SessionMessageType = "text"  # DB default 'text'
     content: str
     tokens: Optional[int] = None
     latency_ms: Optional[int] = None
-    # 벡터는 응답·내부용. 생성 시 필요하면 허용.
-    content_vector: Optional[List[float]] = None
+    meta: Optional[dict[str, Any]] = None
+    # content_vector는 응답 비노출. 입력도 일반적으로 받지 않음.
 
 
 class SessionMessageUpdate(ORMBase):
-    sender_type: Optional[str] = None
+    model_config = ConfigDict(from_attributes=False)
+    sender_type: Optional[SenderType] = None
     sender_id: Optional[int] = None
-    message_type: Optional[str] = None
+    message_type: Optional[SessionMessageType] = None
     content: Optional[str] = None
     tokens: Optional[int] = None
     latency_ms: Optional[int] = None
-    content_vector: Optional[List[float]] = None
+    meta: Optional[dict[str, Any]] = None
 
 
 class SessionMessageResponse(ORMBase):
     id: int
     session_id: int
-    sender_type: str
+    sender_type: SenderType
     sender_id: Optional[int] = None
-    message_type: str
+    message_type: SessionMessageType
     content: str
     tokens: Optional[int] = None
     latency_ms: Optional[int] = None
-    content_vector: Optional[List[float]] = None
+    meta: Optional[dict[str, Any]] = None
     created_at: datetime
+
+
+SessionMessagePage = Page[SessionMessageResponse]

@@ -1,24 +1,32 @@
 # schemas/partner/notify.py
 from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional
-from schemas.base import ORMBase
+from typing import Optional, Literal
+
+from pydantic import ConfigDict
+
+from schemas.base import ORMBase, Page
+from schemas.enums import EmailSubscriptionType, MfaMethod
 
 
-# ========= partner.notification_preferences =========
+# ==============================
+# notification_preferences
+# ==============================
 class NotificationPreferenceCreate(ORMBase):
     partner_user_id: int
-    new_student_email: bool = True
-    project_deadline_email: bool = True
-    settlement_email: bool = True
-    api_cost_alert_email: bool = True
-    system_notice: bool = True
-    marketing_opt_in: bool = False
+    new_student_email: Optional[bool] = None          # DB default true
+    class_deadline_email: Optional[bool] = None       # DB default true
+    settlement_email: Optional[bool] = None           # DB default true
+    api_cost_alert_email: Optional[bool] = None       # DB default true
+    system_notice: Optional[bool] = None              # DB default true
+    marketing_opt_in: Optional[bool] = None           # DB default false
 
 
 class NotificationPreferenceUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     new_student_email: Optional[bool] = None
-    project_deadline_email: Optional[bool] = None
+    class_deadline_email: Optional[bool] = None
     settlement_email: Optional[bool] = None
     api_cost_alert_email: Optional[bool] = None
     system_notice: Optional[bool] = None
@@ -29,7 +37,7 @@ class NotificationPreferenceResponse(ORMBase):
     id: int
     partner_user_id: int
     new_student_email: bool
-    project_deadline_email: bool
+    class_deadline_email: bool
     settlement_email: bool
     api_cost_alert_email: bool
     system_notice: bool
@@ -37,67 +45,85 @@ class NotificationPreferenceResponse(ORMBase):
     updated_at: datetime
 
 
-# ========= partner.email_subscriptions =========
+NotificationPreferencePage = Page[NotificationPreferenceResponse]
+
+
+# ==============================
+# email_subscriptions
+# ==============================
 class EmailSubscriptionCreate(ORMBase):
     partner_user_id: int
-    subscription_type: str
-    is_subscribed: bool = True
+    subscription_type: EmailSubscriptionType  # 'weekly_digest'|'alerts'|'marketing'
+    is_subscribed: Optional[bool] = None      # DB default true
 
 
 class EmailSubscriptionUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    subscription_type: Optional[EmailSubscriptionType] = None
     is_subscribed: Optional[bool] = None
 
 
 class EmailSubscriptionResponse(ORMBase):
     id: int
     partner_user_id: int
-    subscription_type: str
+    subscription_type: EmailSubscriptionType
     is_subscribed: bool
     updated_at: datetime
 
 
-# ========= partner.mfa_settings =========
+EmailSubscriptionPage = Page[EmailSubscriptionResponse]
+
+
+# ==============================
+# mfa_settings
+# ==============================
 class MfaSettingCreate(ORMBase):
     partner_user_id: int
-    is_enabled: bool = False
-    method: Optional[str] = None          # 'totp' | 'sms' | 'email' 등 운영에서 검증
+    is_enabled: Optional[bool] = None          # DB default false
+    method: Optional[MfaMethod] = None         # 'totp'|'sms'|'email'
+    # secret_encrypted는 입력은 허용하되, 응답에는 포함하지 않음
     secret_encrypted: Optional[str] = None
-    last_enabled_at: Optional[datetime] = None
 
 
 class MfaSettingUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
     is_enabled: Optional[bool] = None
-    method: Optional[str] = None
+    method: Optional[MfaMethod] = None
     secret_encrypted: Optional[str] = None
-    last_enabled_at: Optional[datetime] = None
 
 
 class MfaSettingResponse(ORMBase):
     partner_user_id: int
     is_enabled: bool
-    method: Optional[str] = None
-    secret_encrypted: Optional[str] = None
+    method: Optional[MfaMethod] = None
     last_enabled_at: Optional[datetime] = None
     updated_at: datetime
+    # secret_encrypted 제외
 
 
-# ========= partner.login_activity =========
+MfaSettingPage = Page[MfaSettingResponse]
+
+
+# ==============================
+# login_activity (append-only)
+# ==============================
+LoginStatus = Literal["success", "failed"]
+
 class LoginActivityCreate(ORMBase):
     partner_user_id: Optional[int] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
-    status: str = "success"               # 운영에서 값 집합 검증
-
-
-class LoginActivityUpdate(ORMBase):
-    # 일반적으로 수정 불가. 상태 정정만 허용할 경우 사용.
-    status: Optional[str] = None
+    status: Optional[LoginStatus] = None       # DB default 'success'
+    login_at: Optional[datetime] = None        # 서버에서 채움 권장
 
 
 class LoginActivityResponse(ORMBase):
+    login_at: datetime
     id: int
     partner_user_id: Optional[int] = None
-    login_at: datetime
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
-    status: str
+    status: LoginStatus
+
+
+LoginActivityPage = Page[LoginActivityResponse]
