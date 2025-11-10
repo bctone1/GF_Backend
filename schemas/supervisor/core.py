@@ -8,87 +8,6 @@ from schemas.base import ORMBase, MoneyBase
 
 
 # =========================
-# plans
-# =========================
-class PlanCreate(MoneyBase):
-    plan_name: str
-    billing_cycle: str = "monthly"
-    price_mrr: Decimal = Decimal("0")
-    price_arr: Decimal = Decimal("0")
-    features_json: Optional[dict[str, Any]] = None
-    max_users: Optional[int] = None
-    is_active: bool = True
-
-
-class PlanUpdate(MoneyBase):
-    plan_name: Optional[str] = None
-    billing_cycle: Optional[str] = None
-    price_mrr: Optional[Decimal] = None
-    price_arr: Optional[Decimal] = None
-    features_json: Optional[dict[str, Any]] = None
-    max_users: Optional[int] = None
-    is_active: Optional[bool] = None
-
-
-class PlanResponse(MoneyBase):
-    plan_id: int
-    plan_name: str
-    billing_cycle: str
-    price_mrr: Decimal
-    price_arr: Decimal
-    features_json: Optional[dict[str, Any]] = None
-    max_users: Optional[int] = None
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-# =========================
-# organizations
-# =========================
-class OrganizationCreate(MoneyBase):
-    name: str
-    plan_id: Optional[int] = None
-    industry: Optional[str] = None
-    company_size: Optional[str] = None
-    status: str = "active"  # 'active' | 'trial' | 'suspended'
-    joined_at: Optional[date] = None
-    trial_end_at: Optional[date] = None
-    mrr: Decimal = Decimal("0")
-    notes: Optional[str] = None
-    created_by: Optional[int] = None
-
-
-class OrganizationUpdate(MoneyBase):
-    name: Optional[str] = None
-    plan_id: Optional[int] = None
-    industry: Optional[str] = None
-    company_size: Optional[str] = None
-    status: Optional[str] = None
-    joined_at: Optional[date] = None
-    trial_end_at: Optional[date] = None
-    mrr: Optional[Decimal] = None
-    notes: Optional[str] = None
-    created_by: Optional[int] = None
-
-
-class OrganizationResponse(MoneyBase):
-    organization_id: int
-    name: str
-    plan_id: Optional[int] = None
-    industry: Optional[str] = None
-    company_size: Optional[str] = None
-    status: str
-    joined_at: date
-    trial_end_at: Optional[date] = None
-    mrr: Decimal
-    notes: Optional[str] = None
-    created_by: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
-
-
-# =========================
 # users
 # =========================
 class SupervisorUserCreate(ORMBase):
@@ -220,3 +139,87 @@ class PromotionResponse(BaseModel):
     partner_user_id: int
     user_id: int
     role: str
+
+
+# =========================
+# organizations
+# =========================
+class OrganizationCreate(MoneyBase):
+    name: str
+    plan_id: Optional[int] = None
+    industry: Optional[str] = None
+    company_size: Optional[str] = None
+    status: str = "active"  # 'active' | 'trial' | 'suspended'
+    joined_at: Optional[date] = None
+    trial_end_at: Optional[date] = None
+    mrr: Decimal = Decimal("0")
+    notes: Optional[str] = None
+    created_by: Optional[int] = None
+
+
+class OrganizationUpdate(MoneyBase):
+    name: Optional[str] = None
+    plan_id: Optional[int] = None
+    industry: Optional[str] = None
+    company_size: Optional[str] = None
+    status: Optional[str] = None
+    joined_at: Optional[date] = None
+    trial_end_at: Optional[date] = None
+    mrr: Optional[Decimal] = None
+    notes: Optional[str] = None
+    created_by: Optional[int] = None
+
+
+class OrganizationResponse(MoneyBase):
+    organization_id: int
+    name: str
+    plan_id: Optional[int] = None
+    industry: Optional[str] = None
+    company_size: Optional[str] = None
+    status: str
+    joined_at: date
+    trial_end_at: Optional[date] = None
+    mrr: Decimal
+    notes: Optional[str] = None
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+
+
+
+# =========================
+# plans
+# =========================
+class PlanCreate(MoneyBase):
+    plan_name: str
+    billing_cycle: str = "monthly"
+    price_mrr: Decimal = Decimal("0")
+    price_arr: Decimal = Decimal("0")
+    features_json: Optional[dict[str, Any]] = None
+    max_users: Optional[int] = None
+    is_active: bool = True
+
+
+class PlanUpdate(MoneyBase):
+    plan_name: Optional[str] = None
+    billing_cycle: Optional[str] = None
+    price_mrr: Optional[Decimal] = None
+    price_arr: Optional[Decimal] = None
+    features_json: Optional[dict[str, Any]] = None
+    max_users: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class PlanResponse(MoneyBase):
+    plan_id: int
+    plan_name: str
+    billing_cycle: str
+    price_mrr: Decimal
+    price_arr: Decimal
+    features_json: Optional[dict[str, Any]] = None
+    max_users: Optional[int] = None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
