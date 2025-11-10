@@ -18,10 +18,10 @@ from fastapi import FastAPI
 # from app.endpoints.supervisor.system import router as super_system
 # from app.endpoints.supervisor.settings import router as super_settings
 
-# ----- partner (조직 스코프) -----
+# ----- partner (파트너 스코프) -----
 # from app.endpoints.partner.partners import router as partner_self
 # from app.endpoints.partner.users import router as partner_users
-# from app.endpoints.partner.projects import router as partner_projects
+from app.endpoints.partner.course import router as partner_course
 # from app.endpoints.partner.students import router as partner_students
 # from app.endpoints.partner.sessions import router as partner_sessions
 # from app.endpoints.partner.catalog import router as partner_catalog
@@ -58,16 +58,16 @@ def register_routers(app: FastAPI) -> None:
     # app.include_router(super_settings,    prefix="/supervisor/settings",      tags=["super.settings"])
 
     # partner (조직별 경로 변수 고정)
-    # app.include_router(partner_self,      prefix="/partners/{partner_id}",            tags=["partner.self"])
-    # app.include_router(partner_users,     prefix="/partners/{partner_id}/users",      tags=["partner.users"])
-    # app.include_router(partner_projects,  prefix="/partners/{partner_id}/projects",   tags=["partner.projects"])
-    # app.include_router(partner_students,  prefix="/partners/{partner_id}/students",   tags=["partner.students"])
-    # app.include_router(partner_sessions,  prefix="/partners/{partner_id}/sessions",   tags=["partner.sessions"])
-    # app.include_router(partner_catalog,   prefix="/partners/{partner_id}/catalog",    tags=["partner.catalog"])
-    # app.include_router(partner_prompts,   prefix="/partners/{partner_id}/prompts",    tags=["partner.prompts"])
-    # app.include_router(partner_usage,     prefix="/partners/{partner_id}/usage",      tags=["partner.usage"])
-    # app.include_router(partner_analytics, prefix="/partners/{partner_id}/analytics",  tags=["partner.analytics"])
-    # app.include_router(partner_billing,   prefix="/partners/{partner_id}/billing",    tags=["partner.billing"])
+    # app.include_router(partner_self,      prefix="/partners/{partner_id}",            tags=["partner/self"])
+    # app.include_router(partner_users,     prefix="/partners/{partner_id}/users",      tags=["partner/users"])
+    app.include_router(partner_course,  prefix="/partners/{partner_id}/course",   tags=["partner/course"])
+    # app.include_router(partner_students,  prefix="/partners/{partner_id}/students",   tags=["partner/students"])
+    # app.include_router(partner_sessions,  prefix="/partners/{partner_id}/sessions",   tags=["partner/sessions"])
+    # app.include_router(partner_catalog,   prefix="/partners/{partner_id}/catalog",    tags=["partner/catalog"])
+    # app.include_router(partner_prompts,   prefix="/partners/{partner_id}/prompts",    tags=["partner/prompts"])
+    # app.include_router(partner_usage,     prefix="/partners/{partner_id}/usage",      tags=["partner/usage"])
+    # app.include_router(partner_analytics, prefix="/partners/{partner_id}/analytics",  tags=["partner/analytics"])
+    # app.include_router(partner_billing,   prefix="/partners/{partner_id}/billing",    tags=["partner/billing"])
 
     # user (/my/* 라우트를 내부에서 직접 선언했음을 가정. 추가 prefix 없음)
     app.include_router(my_account, tags=["my_account"])

@@ -32,10 +32,11 @@ import models.supervisor.growth
 import models.supervisor.env
 import models.supervisor.api_usage
 import models.partner.partner_core
-import models.partner.project
+
 import models.partner.student
 import models.partner.session
 import models.partner.catalog
+import models.partner.course
 import models.partner.prompt
 import models.partner.compare
 import models.partner.usage
