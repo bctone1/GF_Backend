@@ -33,85 +33,6 @@ def _slugify_code(name: str, max_len: int = 12) -> str:
     return base
 
 
-# ==============================
-# Plans
-# ==============================
-def create_plan(db: Session, *, name: str, billing_cycle: str = "monthly",
-                price_mrr: float = 0, price_arr: float = 0,
-                features_json: Optional[dict] = None, max_users: Optional[int] = None,
-                is_active: bool = True) -> Plan:
-    plan = Plan(
-        plan_name=name, billing_cycle=billing_cycle, price_mrr=price_mrr, price_arr=price_arr,
-        features_json=features_json, max_users=max_users, is_active=is_active,
-    )
-    db.add(plan)
-    db.commit()
-    db.refresh(plan)
-    return plan
-
-def get_plan(db: Session, plan_id: int) -> Optional[Plan]:
-    return db.get(Plan, plan_id)
-
-def list_plans(db: Session, *, q: Optional[str] = None) -> Sequence[Plan]:
-    stmt = select(Plan).order_by(Plan.plan_name)
-    if q:
-        stmt = stmt.where(Plan.plan_name.ilike(f"%{q}%"))
-    return db.execute(stmt).scalars().all()
-
-def update_plan(db: Session, plan_id: int, **fields) -> Optional[Plan]:
-    stmt = update(Plan).where(Plan.plan_id == plan_id).values(**fields).returning(Plan)
-    row = db.execute(stmt).fetchone()
-    if not row:
-        return None
-    db.commit()
-    return row[0]
-
-def delete_plan(db: Session, plan_id: int) -> bool:
-    res = db.execute(delete(Plan).where(Plan.plan_id == plan_id))
-    db.commit()
-    return res.rowcount > 0
-
-
-# ==============================
-# Organizations
-# ==============================
-def create_org(db: Session, *, name: str, plan_id: Optional[int] = None,
-               industry: Optional[str] = None, company_size: Optional[str] = None,
-               status: str = "active", created_by: Optional[int] = None,
-               notes: Optional[str] = None) -> Organization:
-    org = Organization(
-        name=name, plan_id=plan_id, industry=industry, company_size=company_size,
-        status=status, created_by=created_by, notes=notes,
-    )
-    db.add(org)
-    db.commit()
-    db.refresh(org)
-    return org
-
-def get_org(db: Session, org_id: int) -> Optional[Organization]:
-    return db.get(Organization, org_id)
-
-def list_orgs(db: Session, *, status: Optional[str] = None, q: Optional[str] = None) -> Sequence[Organization]:
-    stmt = select(Organization).order_by(Organization.created_at.desc())
-    if status:
-        stmt = stmt.where(Organization.status == status)
-    if q:
-        stmt = stmt.where(Organization.name.ilike(f"%{q}%"))
-    return db.execute(stmt).scalars().all()
-
-def update_org(db: Session, org_id: int, **fields) -> Optional[Organization]:
-    stmt = update(Organization).where(Organization.organization_id == org_id).values(**fields).returning(Organization)
-    row = db.execute(stmt).fetchone()
-    if not row:
-        return None
-    db.commit()
-    return row[0]
-
-def delete_org(db: Session, org_id: int) -> bool:
-    res = db.execute(delete(Organization).where(Organization.organization_id == org_id))
-    db.commit()
-    return res.rowcount > 0
-
 
 # ==============================
 # Supervisor Users
@@ -244,6 +165,48 @@ def promote_user_to_partner(
     return partner, pu
 
 
+
+# ==============================
+# Organizations
+# ==============================
+def create_org(db: Session, *, name: str, plan_id: Optional[int] = None,
+               industry: Optional[str] = None, company_size: Optional[str] = None,
+               status: str = "active", created_by: Optional[int] = None,
+               notes: Optional[str] = None) -> Organization:
+    org = Organization(
+        name=name, plan_id=plan_id, industry=industry, company_size=company_size,
+        status=status, created_by=created_by, notes=notes,
+    )
+    db.add(org)
+    db.commit()
+    db.refresh(org)
+    return org
+
+def get_org(db: Session, org_id: int) -> Optional[Organization]:
+    return db.get(Organization, org_id)
+
+def list_orgs(db: Session, *, status: Optional[str] = None, q: Optional[str] = None) -> Sequence[Organization]:
+    stmt = select(Organization).order_by(Organization.created_at.desc())
+    if status:
+        stmt = stmt.where(Organization.status == status)
+    if q:
+        stmt = stmt.where(Organization.name.ilike(f"%{q}%"))
+    return db.execute(stmt).scalars().all()
+
+def update_org(db: Session, org_id: int, **fields) -> Optional[Organization]:
+    stmt = update(Organization).where(Organization.organization_id == org_id).values(**fields).returning(Organization)
+    row = db.execute(stmt).fetchone()
+    if not row:
+        return None
+    db.commit()
+    return row[0]
+
+def delete_org(db: Session, org_id: int) -> bool:
+    res = db.execute(delete(Organization).where(Organization.organization_id == org_id))
+    db.commit()
+    return res.rowcount > 0
+
+
 # ==============================
 # Convenience: bootstrap roles
 # ==============================
@@ -258,3 +221,44 @@ def bootstrap_default_roles(db: Session) -> Sequence[UserRole]:
     for name, perms in defaults:
         out.append(get_or_create_role(db, role_name=name, permissions=perms))
     return out
+
+
+
+
+# ==============================
+# Plans
+# ==============================
+def create_plan(db: Session, *, name: str, billing_cycle: str = "monthly",
+                price_mrr: float = 0, price_arr: float = 0,
+                features_json: Optional[dict] = None, max_users: Optional[int] = None,
+                is_active: bool = True) -> Plan:
+    plan = Plan(
+        plan_name=name, billing_cycle=billing_cycle, price_mrr=price_mrr, price_arr=price_arr,
+        features_json=features_json, max_users=max_users, is_active=is_active,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return plan
+
+def get_plan(db: Session, plan_id: int) -> Optional[Plan]:
+    return db.get(Plan, plan_id)
+
+def list_plans(db: Session, *, q: Optional[str] = None) -> Sequence[Plan]:
+    stmt = select(Plan).order_by(Plan.plan_name)
+    if q:
+        stmt = stmt.where(Plan.plan_name.ilike(f"%{q}%"))
+    return db.execute(stmt).scalars().all()
+
+def update_plan(db: Session, plan_id: int, **fields) -> Optional[Plan]:
+    stmt = update(Plan).where(Plan.plan_id == plan_id).values(**fields).returning(Plan)
+    row = db.execute(stmt).fetchone()
+    if not row:
+        return None
+    db.commit()
+    return row[0]
+
+def delete_plan(db: Session, plan_id: int) -> bool:
+    res = db.execute(delete(Plan).where(Plan.plan_id == plan_id))
+    db.commit()
+    return res.rowcount > 0
