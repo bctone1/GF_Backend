@@ -200,3 +200,23 @@ class SessionResponse(ORMBase):
     duration_sec: Optional[int] = None
     device_info: Optional[dict[str, Any]] = None
     ip_address: Optional[str] = None
+
+
+# =========================
+# promotions
+# =========================
+class PromotionRequest(BaseModel):
+    model_config = ConfigDict(from_attributes=False)
+    email: EmailStr
+    partner_name: str
+    partner_code: Optional[str] = None
+    partner_user_role: Optional[str] = None  # default: 'partner_admin' (서버에서 기본값 처리)
+
+class PromotionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    partner_id: int
+    partner_code: str
+    partner_name: str
+    partner_user_id: int
+    user_id: int
+    role: str

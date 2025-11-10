@@ -11,6 +11,7 @@ from fastapi import FastAPI
 # 별칭: super_*
 # from app.endpoints.supervisor.dashboard import router as super_dashboard
 # from app.endpoints.supervisor.organizations import router as super_organizations
+from app.endpoints.supervisor.core import router as super_core
 # from app.endpoints.supervisor.users import router as super_users
 # from app.endpoints.supervisor.billing import router as super_billing
 # from app.endpoints.supervisor.analytics import router as super_analytics
@@ -48,14 +49,15 @@ def register_routers(app: FastAPI) -> None:
     # app.include_router(webhooks, prefix="/webhooks",  tags=["webhooks"])
 
     # supervisor (URL path는 유지: /supervisor/*)
-    # app.include_router(super_dashboard,   prefix="/supervisor/dashboard",     tags=["super.dashboard"])
-    # app.include_router(super_organizations, prefix="/supervisor/organizations", tags=["super.organizations"])
-    # app.include_router(super_users,       prefix="/supervisor/users",         tags=["super.users"])
-    # app.include_router(super_billing,     prefix="/supervisor/billing",       tags=["super.billing"])
-    # app.include_router(super_analytics,   prefix="/supervisor/analytics",     tags=["super.analytics"])
-    # app.include_router(super_reports,     prefix="/supervisor/reports",       tags=["super.reports"])
-    # app.include_router(super_system,      prefix="/supervisor/system",        tags=["super.system"])
-    # app.include_router(super_settings,    prefix="/supervisor/settings",      tags=["super.settings"])
+    # app.include_router(super_dashboard,   prefix="/supervisor/dashboard",     tags=["super/dashboard"])
+    # app.include_router(super_organizations, prefix="/supervisor/organizations", tags=["super/organizations"])
+    app.include_router(super_core,       prefix="/supervisor/core",         tags=["super/core"])
+    # app.include_router(super_users,       prefix="/supervisor/users",         tags=["super/users"])
+    # app.include_router(super_billing,     prefix="/supervisor/billing",       tags=["super/billing"])
+    # app.include_router(super_analytics,   prefix="/supervisor/analytics",     tags=["super/analytics"])
+    # app.include_router(super_reports,     prefix="/supervisor/reports",       tags=["super/reports"])
+    # app.include_router(super_system,      prefix="/supervisor/system",        tags=["super/system"])
+    # app.include_router(super_settings,    prefix="/supervisor/settings",      tags=["super/settings"])
 
     # partner (조직별 경로 변수 고정)
     # app.include_router(partner_self,      prefix="/partners/{partner_id}",            tags=["partner/self"])

@@ -3,15 +3,24 @@ from __future__ import annotations
 from typing import Optional, Generator
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.config import DB, DB_USER, DB_PASSWORD, DB_SERVER, DB_PORT, DB_NAME
+
+# user/partner 인증에 사용
 from models.user.account import User
 from models.partner.partner_core import PartnerUser  # 파트너 권한 확인용
+
+# supervisor 인증·권한에 사용
+from models.supervisor.core import (
+    User as SupUser,
+    UserRole,
+    UserRoleAssignment,
+)
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -127,3 +136,67 @@ def get_current_partner_member(
     if not pu:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return pu
+
+
+# ==============================
+# Supervisor 인증/권한
+# - Authorization: Bearer sup-access-{supervisor_user_id}
+# - 또는 개발 편의: X-Debug-Email: <supervisor-email>
+# ==============================
+def get_current_supervisor(
+    request: Request,
+    creds: HTTPAuthorizationCredentials = Security(_bearer),
+    db: Session = Depends(get_db),
+) -> SupUser:
+    token = creds.credentials if creds else None
+    prefix = "sup-access-"
+
+    # 1) 토큰으로 식별
+    if token and token.startswith(prefix):
+        sid_str = token[len(prefix):]
+        if not sid_str.isdigit():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+        sup = db.get(SupUser, int(sid_str))
+        if not sup or (sup.status or "").lower() != "active":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="inactive supervisor")
+        return sup
+
+    # 2) 개발용 이메일 헤더
+    dbg_email = request.headers.get("X-Debug-Email")
+    if dbg_email:
+        stmt = select(SupUser).where(func.lower(SupUser.email) == func.lower(dbg_email))
+        sup = db.execute(stmt).scalar_one_or_none()
+        if not sup:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+        if (sup.status or "").lower() != "active":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="inactive supervisor")
+        return sup
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+
+
+def require_supervisor_admin(
+    me: SupUser = Depends(get_current_supervisor),
+    db: Session = Depends(get_db),
+) -> SupUser:
+    """
+    권한 체크:
+    - 직접 컬럼: me.role == 'supervisor_admin'
+    - 또는 역할 할당 테이블: user_role_assignments ↔ user_roles(role_name='supervisor_admin')
+    """
+    if (me.role or "").lower() == "supervisor_admin":
+        return me
+
+    stmt = (
+        select(UserRoleAssignment)
+        .join(UserRole, UserRole.role_id == UserRoleAssignment.role_id)
+        .where(
+            UserRoleAssignment.user_id == me.user_id,
+            func.lower(UserRole.role_name) == "supervisor_admin",
+        )
+        .limit(1)
+    )
+    if db.execute(stmt).first():
+        return me
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
