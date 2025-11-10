@@ -148,3 +148,16 @@ class ComparisonItemStatus(str, Enum):
     running = "running"
     success = "success"
     error = "error"
+
+
+# ===== 학생/수강 상태 =====
+class StudentStatus(str, Enum):
+    active = "active"
+    inactive = "inactive"
+    archived = "archived"
+
+class EnrollmentStatus(str, Enum):
+    active = "active"
+    inactive = "inactive"
+    completed = "completed"
+    dropped = "dropped"

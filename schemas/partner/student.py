@@ -9,7 +9,8 @@ from pydantic import ConfigDict, EmailStr
 
 from schemas.base import ORMBase, Page
 from schemas.enums import StudentStatus, EnrollmentStatus
-
+# StudentStatus : active|inactive|archived
+# EnrollmentStatus : active|inactive|completed|dropped
 
 # ==============================
 # students
