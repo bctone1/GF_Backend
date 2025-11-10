@@ -9,8 +9,6 @@ from pydantic import ConfigDict
 
 from schemas.base import ORMBase, MoneyBase, Page
 from schemas.enums import ComparisonRunStatus, ComparisonItemStatus
-# ComparisonRunStatus: 'running' | 'completed' | 'failed' | 'canceled'
-# ComparisonItemStatus: 'pending' | 'running' | 'success' | 'error'
 
 
 # ==============================

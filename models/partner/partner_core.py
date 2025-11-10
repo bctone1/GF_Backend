@@ -43,10 +43,10 @@ class PartnerUser(Base):
         ForeignKey("partner.partners.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # supervisor.users.user_id 참조
+    # user.users.user_id 참조
     user_id = Column(
         BigInteger,
-        ForeignKey("supervisor.users.user_id", ondelete="SET NULL"),
+        ForeignKey('user.users.user_id', ondelete='SET NULL'),
         nullable=True,
     )
 

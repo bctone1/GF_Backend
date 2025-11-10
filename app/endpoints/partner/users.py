@@ -1,1 +1,0 @@
-# partner_users, 멤버 관리

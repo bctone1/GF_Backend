@@ -110,3 +110,18 @@ class InviteTargetRole(str, Enum):
 class InstructorRole(str, Enum):
     lead = "lead"
     assistant = "assistant"
+from enum import Enum
+
+# 비교 실행 상태
+class ComparisonRunStatus(str, Enum):
+    running = "running"
+    completed = "completed"
+    failed = "failed"
+    canceled = "canceled"
+
+# 비교 아이템 상태
+class ComparisonItemStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    success = "success"
+    error = "error"

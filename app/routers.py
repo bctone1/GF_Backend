@@ -23,6 +23,7 @@ from app.endpoints.supervisor.core import router as super_core
 # from app.endpoints.partner.partners import router as partner_self
 # from app.endpoints.partner.users import router as partner_users
 from app.endpoints.partner.course import router as partner_course
+from app.endpoints.partner.partner_core import router as partner_core
 # from app.endpoints.partner.students import router as partner_students
 # from app.endpoints.partner.sessions import router as partner_sessions
 # from app.endpoints.partner.catalog import router as partner_catalog
@@ -48,7 +49,7 @@ def register_routers(app: FastAPI) -> None:
     # app.include_router(files,    prefix="/files",     tags=["files"])
     # app.include_router(webhooks, prefix="/webhooks",  tags=["webhooks"])
 
-    # supervisor (URL path는 유지: /supervisor/*)
+# supervisor (URL path는 유지: /supervisor/*)
     # app.include_router(super_dashboard,   prefix="/supervisor/dashboard",     tags=["super/dashboard"])
     # app.include_router(super_organizations, prefix="/supervisor/organizations", tags=["super/organizations"])
     app.include_router(super_core,       prefix="/supervisor/core",         tags=["super/core"])
@@ -59,10 +60,11 @@ def register_routers(app: FastAPI) -> None:
     # app.include_router(super_system,      prefix="/supervisor/system",        tags=["super/system"])
     # app.include_router(super_settings,    prefix="/supervisor/settings",      tags=["super/settings"])
 
-    # partner (조직별 경로 변수 고정)
+# partner (조직별 경로 변수 고정)
     # app.include_router(partner_self,      prefix="/partners/{partner_id}",            tags=["partner/self"])
     # app.include_router(partner_users,     prefix="/partners/{partner_id}/users",      tags=["partner/users"])
-    app.include_router(partner_course,  prefix="/partners/{partner_id}/course",   tags=["partner/course"])
+    app.include_router(partner_course,      prefix="/partners/{partner_id}/course",   tags=["partner/course"])
+    app.include_router(partner_core,        prefix="/partners/{partner_id}/core", tags=["partner/core"])
     # app.include_router(partner_students,  prefix="/partners/{partner_id}/students",   tags=["partner/students"])
     # app.include_router(partner_sessions,  prefix="/partners/{partner_id}/sessions",   tags=["partner/sessions"])
     # app.include_router(partner_catalog,   prefix="/partners/{partner_id}/catalog",    tags=["partner/catalog"])
@@ -71,7 +73,7 @@ def register_routers(app: FastAPI) -> None:
     # app.include_router(partner_analytics, prefix="/partners/{partner_id}/analytics",  tags=["partner/analytics"])
     # app.include_router(partner_billing,   prefix="/partners/{partner_id}/billing",    tags=["partner/billing"])
 
-    # user (/my/* 라우트를 내부에서 직접 선언했음을 가정. 추가 prefix 없음)
+# user (/my/* 라우트를 내부에서 직접 선언했음을 가정. 추가 prefix 없음)
     app.include_router(my_account, tags=["my_account"])
     # app.include_router(my_projects,  tags=["my_projects"])
     # app.include_router(my_documents, tags=["my_documents"])
