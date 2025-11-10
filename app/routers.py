@@ -24,7 +24,7 @@ from app.endpoints.supervisor.core import router as super_core
 # from app.endpoints.partner.users import router as partner_users
 from app.endpoints.partner.course import router as partner_course
 from app.endpoints.partner.partner_core import router as partner_core
-# from app.endpoints.partner.students import router as partner_students
+from app.endpoints.partner.student import router as partner_student
 # from app.endpoints.partner.sessions import router as partner_sessions
 # from app.endpoints.partner.catalog import router as partner_catalog
 # from app.endpoints.partner.prompts import router as partner_prompts
@@ -62,10 +62,9 @@ def register_routers(app: FastAPI) -> None:
 
 # partner (조직별 경로 변수 고정)
     # app.include_router(partner_self,      prefix="/partners/{partner_id}",            tags=["partner/self"])
-    # app.include_router(partner_users,     prefix="/partners/{partner_id}/users",      tags=["partner/users"])
     app.include_router(partner_course,      prefix="/partners/{partner_id}/course",   tags=["partner/course"])
     app.include_router(partner_core,        prefix="/partners/{partner_id}/core", tags=["partner/core"])
-    # app.include_router(partner_students,  prefix="/partners/{partner_id}/students",   tags=["partner/students"])
+    app.include_router(partner_student,  prefix="/partners/{partner_id}/students",   tags=["partner/students"])
     # app.include_router(partner_sessions,  prefix="/partners/{partner_id}/sessions",   tags=["partner/sessions"])
     # app.include_router(partner_catalog,   prefix="/partners/{partner_id}/catalog",    tags=["partner/catalog"])
     # app.include_router(partner_prompts,   prefix="/partners/{partner_id}/prompts",    tags=["partner/prompts"])
