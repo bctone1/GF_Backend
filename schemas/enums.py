@@ -86,3 +86,27 @@ class Currency(str, Enum):
     KRW = "KRW"
     USD = "USD"
     JPY = "JPY"
+
+# ===== 코스/클래스/초대코드 =====
+class CourseStatus(str, Enum):
+    draft = "draft"        # 생성만 된 상태
+    active = "active"      # 운영 중
+    archived = "archived"  # 보관
+
+class ClassStatus(str, Enum):
+    planned = "planned"    # 개강 전
+    ongoing = "ongoing"    # 진행 중
+    ended = "ended"        # 종료
+
+class InviteCodeStatus(str, Enum):
+    active = "active"      # 사용 가능
+    expired = "expired"    # 만료
+    disabled = "disabled"  # 비활성화
+
+class InviteTargetRole(str, Enum):
+    instructor = "instructor"
+    student = "student"
+
+class InstructorRole(str, Enum):
+    lead = "lead"
+    assistant = "assistant"
