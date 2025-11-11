@@ -1,4 +1,3 @@
-# schemas/supervisor/core.py
 from __future__ import annotations
 from typing import Any, Optional
 from decimal import Decimal
@@ -8,7 +7,7 @@ from schemas.base import ORMBase, MoneyBase
 
 
 # =========================
-# users
+# Supervisor Users
 # =========================
 class SupervisorUserCreate(ORMBase):
     organization_id: int
@@ -72,13 +71,13 @@ class UserRoleResponse(ORMBase):
 # user_role_assignments
 # =========================
 class UserRoleAssignmentCreate(ORMBase):
+    # SupervisorUser.id를 참조
     user_id: int
     role_id: int
     assigned_by: Optional[int] = None
 
 
 class UserRoleAssignmentUpdate(ORMBase):
-    # 일반적으로 수정할 필드는 거의 없음. assigned_by 정도만 허용.
     assigned_by: Optional[int] = None
 
 
@@ -94,13 +93,14 @@ class UserRoleAssignmentResponse(ORMBase):
 # sessions
 # =========================
 class SessionCreate(ORMBase):
+    # SupervisorUser.id를 참조
     user_id: int
     organization_id: int
     started_at: datetime
     ended_at: Optional[datetime] = None
     duration_sec: Optional[int] = None
     device_info: Optional[dict[str, Any]] = None
-    ip_address: Optional[str] = None  # INET → str, 서버단 검증
+    ip_address: Optional[str] = None  # INET → str
 
 
 class SessionUpdate(ORMBase):
@@ -129,7 +129,8 @@ class PromotionRequest(BaseModel):
     email: EmailStr
     partner_name: str
     partner_code: Optional[str] = None
-    partner_user_role: Optional[str] = None  # default: 'partner_admin' (서버에서 기본값 처리)
+    partner_user_role: Optional[str] = None  # default handled server-side
+
 
 class PromotionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -149,7 +150,7 @@ class OrganizationCreate(MoneyBase):
     plan_id: Optional[int] = None
     industry: Optional[str] = None
     company_size: Optional[str] = None
-    status: str = "active"  # 'active' | 'trial' | 'suspended'
+    status: str = "active"
     joined_at: Optional[date] = None
     trial_end_at: Optional[date] = None
     mrr: Decimal = Decimal("0")
@@ -184,9 +185,6 @@ class OrganizationResponse(MoneyBase):
     created_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
-
-
-
 
 
 # =========================

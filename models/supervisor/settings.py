@@ -18,7 +18,7 @@ class PlatformSetting(Base):
     value = Column(Text, nullable=True)
     value_type = Column(String(32), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    updated_by = Column(BigInteger, ForeignKey("supervisor.users.user_id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(BigInteger, ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("category", "key", name="uq_platform_settings_category_key"),
@@ -37,7 +37,7 @@ class ApiKey(Base):
     key_hash = Column(Text, nullable=False, unique=True)  # 원문 저장 금지
     status = Column(String(32), nullable=False, server_default=text("'active'"))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    created_by = Column(BigInteger, ForeignKey("supervisor.users.user_id", ondelete="SET NULL"), nullable=True)
+    created_by = Column(BigInteger, ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"), nullable=True)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -63,7 +63,7 @@ class RateLimit(Base):
     window_sec = Column(Integer, nullable=False)
 
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    updated_by = Column(BigInteger, ForeignKey("supervisor.users.user_id", ondelete="SET NULL"), nullable=True)
+    updated_by = Column(BigInteger, ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         # plan_id 또는 organization_id 중 정확히 하나만 설정

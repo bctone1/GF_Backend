@@ -12,7 +12,7 @@ class ApiUsage(Base):
 
     usage_id = Column(BigInteger, autoincrement=True, nullable=False)
     organization_id = Column(BigInteger, ForeignKey("supervisor.organizations.organization_id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(BigInteger, ForeignKey("supervisor.users.user_id", ondelete="SET NULL"))
+    user_id = Column(BigInteger, ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"))
     provider = Column(String(64), nullable=False)
     endpoint = Column(String(128), nullable=False)
     tokens = Column(BigInteger, nullable=False, server_default=text("0"))

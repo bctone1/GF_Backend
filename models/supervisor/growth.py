@@ -33,7 +33,7 @@ class UserAcquisition(Base):
 
     user_id = Column(
         BigInteger,
-        ForeignKey("supervisor.users.user_id", ondelete="CASCADE"),
+        ForeignKey("supervisor.supervisors.user_id", ondelete="CASCADE"),
         nullable=False,
     )
     # SET NULL을 사용하려면 nullable=True여야 함(명세의 충돌 해소)
@@ -63,7 +63,7 @@ class Feedback(Base):
 
     user_id = Column(
         BigInteger,
-        ForeignKey("supervisor.users.user_id", ondelete="SET NULL"),
+        ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"),
         nullable=True,
     )
     organization_id = Column(

@@ -17,7 +17,7 @@ from crud.user.account import (
     user_privacy_crud,
     user_login_session_crud,
 )
-from models.user.account import User, UserLoginSession
+from models.user.account import AppUser, UserLoginSession
 
 from schemas.user.account import (
     UserCreate, UserResponse,

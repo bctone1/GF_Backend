@@ -9,11 +9,12 @@ from sqlalchemy.sql import func, text
 
 from models.base import Base
 
+
 # =========================
-# users
+# supervisor.supervisors
 # =========================
-class User(Base):
-    __tablename__ = "users"
+class SupervisorUser(Base):
+    __tablename__ = "supervisors"
 
     user_id = Column(BigInteger, primary_key=True, autoincrement=True)
     organization_id = Column(
@@ -32,7 +33,8 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
-    organization = relationship("Organization", back_populates="users")
+    # 관계
+    organization = relationship("Organization", back_populates="supervisors")  # ← 통일
     sessions = relationship(
         "Session", back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -41,10 +43,10 @@ class User(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("email", name="uq_users_email"),
-        Index("ix_users_org_id", "organization_id"),
-        Index("ix_users_status", "status"),
-        Index("ix_users_signup_at", "signup_at"),
+        UniqueConstraint("email", name="uq_supervisors_email"),
+        Index("ix_supervisors_org_id", "organization_id"),
+        Index("ix_supervisors_status", "status"),
+        Index("ix_supervisors_signup_at", "signup_at"),
         {"schema": "supervisor"},
     )
 
@@ -80,7 +82,7 @@ class UserRoleAssignment(Base):
     assignment_id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(
         BigInteger,
-        ForeignKey("supervisor.users.user_id", ondelete="CASCADE"),
+        ForeignKey("supervisor.supervisors.user_id", ondelete="CASCADE"),
         nullable=False,
     )
     role_id = Column(
@@ -91,7 +93,7 @@ class UserRoleAssignment(Base):
     assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     assigned_by = Column(BigInteger)
 
-    user = relationship("User", back_populates="role_assignments")
+    user = relationship("SupervisorUser", back_populates="role_assignments")
     role = relationship("UserRole", back_populates="assignments")
 
     __table_args__ = (
@@ -109,9 +111,10 @@ class Session(Base):
     __tablename__ = "sessions"
 
     session_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
     user_id = Column(
         BigInteger,
-        ForeignKey("supervisor.users.user_id", ondelete="CASCADE"),
+        ForeignKey("supervisor.supervisors.user_id", ondelete="CASCADE"),
         nullable=False,
     )
     organization_id = Column(
@@ -119,14 +122,15 @@ class Session(Base):
         ForeignKey("supervisor.organizations.organization_id", ondelete="CASCADE"),
         nullable=False,
     )
+
     started_at = Column(DateTime(timezone=True), nullable=False)
     ended_at = Column(DateTime(timezone=True))
     duration_sec = Column(Integer)
     device_info = Column(JSONB)
     ip_address = Column(INET)
 
-    user = relationship("User", back_populates="sessions")
-    organization = relationship("Organization")
+    user = relationship("SupervisorUser", back_populates="sessions")
+    organization = relationship("Organization", back_populates="sessions")
 
     __table_args__ = (
         CheckConstraint("duration_sec IS NULL OR duration_sec >= 0", name="chk_sessions_duration_nonneg"),
@@ -161,8 +165,11 @@ class Organization(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     plan = relationship("Plan", back_populates="organizations")
-    users = relationship(
-        "User", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True
+    supervisors = relationship(
+        "SupervisorUser", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True
+    )
+    sessions = relationship(  # ← 추가
+        "Session", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True
     )
 
     __table_args__ = (
@@ -174,9 +181,8 @@ class Organization(Base):
     )
 
 
-
 # =========================
-# plans (추후 삭제 가능성 있는 기능)
+# plans
 # =========================
 class Plan(Base):
     __tablename__ = "plans"

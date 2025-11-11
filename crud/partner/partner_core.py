@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.partner.partner_core import Partner, PartnerUser
-from models.user.account import User as AppUser  # user.users
+from models.user.account import AppUser
 
 
 # ========= Exceptions =========

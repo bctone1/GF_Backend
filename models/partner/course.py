@@ -60,6 +60,14 @@ class Class(Base):
     instructors = relationship("ClassInstructor", back_populates="clazz", cascade="all, delete-orphan", passive_deletes=True)
     invite_codes = relationship("InviteCode", back_populates="clazz", cascade="all, delete-orphan", passive_deletes=True)
 
+    # 추가: Enrollment ↔ Class 양방향 매핑
+    enrollments = relationship(
+        "Enrollment",
+        back_populates="class_",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
     __table_args__ = (
         UniqueConstraint("course_id", "section_code", name="uq_classes_course_section", postgresql_nulls_not_distinct=True),
         CheckConstraint("status IN ('planned','ongoing','ended')", name="chk_classes_status"),

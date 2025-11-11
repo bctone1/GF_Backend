@@ -1,4 +1,4 @@
-# models/env.py
+# models/supervisor/env.py
 from sqlalchemy import (
     Column, BigInteger, String, Text, Boolean, DateTime, Date, Integer, Numeric,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text

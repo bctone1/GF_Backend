@@ -28,3 +28,11 @@ def issue_tokens(user_id: int) -> dict:
 def get_current_session_id():
     # DI용 헬퍼가 필요하면 구현. 현재 endpoints는 deps.get_current_session_id 사용
     return None
+
+
+def issue_supervisor_tokens(sup_user_id: int) -> dict:
+    return {
+        "access_token": f"sup-access-{sup_user_id}",
+        "refresh_token": f"sup-refresh-{sup_user_id}",
+        "token_type": "bearer",
+    }

@@ -1,25 +1,22 @@
 # crud/user/account.py
 from __future__ import annotations
-
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel
-from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy import update, func
 
 from crud.base import CRUDBase
 from models.user.account import (
-    User,
+    AppUser as UserModel,
     UserProfile,
     UserSecuritySetting,
     UserLoginSession,
     UserPrivacySetting,
 )
 
-# ---- Pydantic 스키마 타입 힌트(프로젝트 스키마 네이밍에 맞춰 사용) ----
-# 존재하지 않는 경우 dict로도 동작하도록 BaseModel | dict 허용
+# ---- Pydantic 스키마 ----
 try:
     from schemas.user.account import (
         UserCreate, UserUpdate,
@@ -29,17 +26,24 @@ try:
         UserLoginSessionCreate, UserLoginSessionUpdate,
     )
 except Exception:
-    UserCreate = UserUpdate = UserProfileUpdate = UserSecuritySettingUpdate = UserPrivacySettingUpdate = UserLoginSessionCreate = UserLoginSessionUpdate = BaseModel  # type: ignore
+    from pydantic import BaseModel
+    UserCreate = UserUpdate = UserProfileUpdate = (
+        UserSecuritySettingUpdate
+    ) = UserPrivacySettingUpdate = UserLoginSessionCreate = UserLoginSessionUpdate = BaseModel  # type: ignore
 
 
 # =========================
 # User
 # =========================
-class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
-    def get_by_email(self, db: Session, *, email: str) -> Optional[User]:
-        stmt = select(self.model).where(self.model.email == email)
-        return db.execute(stmt).scalars().first()
+class CRUDUser:
+    def __init__(self, model: type[UserModel]):
+        self.model = model
 
+    # ---- 기본 조회 ----
+    def get_by_email(self, db: Session, email: str) -> Optional[UserModel]:
+        return db.query(self.model).filter(self.model.email == email).first()
+
+    # ---- 생성 + 프로필 ----
     def create_with_profile(
         self,
         db: Session,
@@ -47,42 +51,47 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         user_in: UserCreate | dict[str, Any],
         profile_in: Optional[UserProfileUpdate | dict[str, Any]] = None,
         ensure_settings: bool = True,
-    ) -> User:
+    ) -> UserModel:
         data = self._to_data(user_in)
-        # 이메일 소문자 정규화는 서비스 계층에서 수행 권장(CITEXT 여도 일관성 위해)
-        db_obj = self.model(**data)  # type: ignore
+        db_obj = self.model(**data)
         db.add(db_obj)
+
         try:
             db.commit()
-        except IntegrityError as e:
+        except IntegrityError:
             db.rollback()
-            # email unique 위반 등
             raise
         db.refresh(db_obj)
 
-        # 프로필 생성(있으면 업데이트)
+        # 프로필 생성/업데이트
         if profile_in is not None:
             pdata = self._to_data(profile_in)
             self._upsert_profile(db, user_id=db_obj.user_id, data=pdata)
 
         if ensure_settings:
-            # 보안/프라이버시 기본 레코드 확보
             self._ensure_security_row(db, db_obj.user_id)
             self._ensure_privacy_row(db, db_obj.user_id)
 
         return db_obj
 
-
+    # ---- 로그인 시각 업데이트 ----
     def set_last_login(self, db: Session, *, user_id: int, at: Optional[datetime] = None) -> None:
         stmt = (
             update(self.model)
             .where(self.model.user_id == user_id)
-            .values(last_login_at=(at if at is not None else func.now()),
-                    updated_at=func.now()))
+            .values(last_login_at=(at or func.now()), updated_at=func.now())
+        )
         db.execute(stmt)
         db.commit()
 
     # ---- 내부 유틸 ----
+    def _to_data(self, obj: Any) -> dict[str, Any]:
+        if isinstance(obj, dict):
+            return obj
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump(exclude_unset=True)
+        return vars(obj)
+
     def _upsert_profile(self, db: Session, *, user_id: int, data: dict[str, Any]) -> UserProfile:
         prof = db.get(UserProfile, user_id)
         if prof is None:
@@ -226,9 +235,9 @@ class CRUDUserLoginSession(CRUDBase[UserLoginSession, UserLoginSessionCreate, Us
 
 
 # =========================
-# 모델별 CRUD 동작을 재사용 가능케하려고 캡슐화한 실행 인스턴스(싱글톤)
+# CRUD 인스턴스
 # =========================
-user_crud = CRUDUser(User)
+user_crud = CRUDUser(UserModel)
 user_profile_crud = CRUDUserProfile(UserProfile)
 user_security_crud = CRUDUserSecurity(UserSecuritySetting)
 user_privacy_crud = CRUDUserPrivacy(UserPrivacySetting)

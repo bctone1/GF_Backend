@@ -1,4 +1,3 @@
-# models/partner/student.py
 from sqlalchemy import (
     Column, BigInteger, Text, Boolean, DateTime, Numeric,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text
@@ -35,8 +34,7 @@ class Student(Base):
         CheckConstraint("status IN ('active','inactive','archived')", name="chk_students_status"),
         Index("idx_students_partner_status", "partner_id", "status"),
         Index("idx_students_partner_email", "partner_id", "email"),
-
-        #  파트너 내 이메일 단일, NULL 허용
+        # 파트너 내 이메일 단일, NULL 허용
         Index(
             "uq_students_partner_email_notnull",
             "partner_id", "email",
@@ -76,7 +74,8 @@ class Enrollment(Base):
     progress_percent = Column(Numeric(5, 2), nullable=False, server_default=text("0"))
     final_grade = Column(Text, nullable=True)
 
-    clazz = relationship("Class", back_populates="enrollments", passive_deletes=True)
+    # 표준 이름: class_  (Class 모델의 enrollments와 짝)
+    class_ = relationship("Class", back_populates="enrollments", passive_deletes=True)
     student = relationship("Student", back_populates="enrollments", passive_deletes=True)
 
     __table_args__ = (

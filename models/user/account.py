@@ -10,7 +10,7 @@ from models.base import Base
 
 
 # ========== user.users ==========
-class User(Base):
+class AppUser(Base):
     __tablename__ = "users"
 
     user_id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -51,7 +51,7 @@ class UserProfile(Base):
     avatar_initials = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    user = relationship("User", back_populates="profile", passive_deletes=True)
+    user = relationship("AppUser", back_populates="profile", passive_deletes=True)
 
     __table_args__ = (
         {"schema": "user"},
@@ -75,7 +75,7 @@ class UserSecuritySetting(Base):
     recovery_email = Column(CITEXT, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    user = relationship("User", back_populates="security", passive_deletes=True)
+    user = relationship("AppUser", back_populates="security", passive_deletes=True)
 
     __table_args__ = (
         {"schema": "user"},

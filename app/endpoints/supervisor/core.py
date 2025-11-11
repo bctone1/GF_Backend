@@ -19,7 +19,6 @@ from schemas.supervisor.core import (
 
 router = APIRouter()
 
-
 # ==============================
 # Supervisor Users
 # ==============================
@@ -109,7 +108,6 @@ def promote_user_to_partner(
     except super_crud.PromotionConflict as e:
         raise HTTPException(status_code=409, detail=str(e))
 
-
 # ==============================
 # Organizations
 # ==============================
@@ -173,9 +171,8 @@ def delete_organization(
         raise HTTPException(status_code=404, detail="organization not found")
     return None
 
-
 # ==============================
-# Plans (추후 삭제 가능성 있음-삭제될 기능)
+# Plans
 # ==============================
 @router.get("/plans", response_model=List[PlanResponse])
 def list_plans(

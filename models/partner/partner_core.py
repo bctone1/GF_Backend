@@ -18,6 +18,14 @@ class Partner(Base):
     code = Column(Text, nullable=False)
     status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|suspended
     timezone = Column(Text, nullable=False, server_default=text("'UTC'"))
+
+    # 추가: 생성자(슈퍼바이저 사용자)
+    created_by = Column(
+        BigInteger,
+        ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -28,6 +36,7 @@ class Partner(Base):
         CheckConstraint("status IN ('active','inactive','suspended')", name="chk_partners_status"),
         Index("idx_partners_status", "status"),
         Index("idx_partners_created", "created_at"),
+        Index("idx_partners_created_by", "created_by"),
         {"schema": "partner"},
     )
 
@@ -46,7 +55,7 @@ class PartnerUser(Base):
     # user.users.user_id 참조
     user_id = Column(
         BigInteger,
-        ForeignKey('user.users.user_id', ondelete='SET NULL'),
+        ForeignKey("user.users.user_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -62,9 +71,7 @@ class PartnerUser(Base):
     partner = relationship("Partner", back_populates="users", passive_deletes=True)
 
     __table_args__ = (
-        # 파트너-유저 1회 매핑(Null은 여러 개 허용)
         UniqueConstraint("partner_id", "user_id", name="uq_partner_users_partner_user"),
-        # 파트너 범위 내 이메일 유일
         UniqueConstraint("partner_id", "email", name="uq_partner_users_partner_email"),
         CheckConstraint("role IN ('partner_admin','instructor','assistant')", name="chk_partner_users_role"),
         Index("idx_partner_users_partner_email", "partner_id", "email"),

@@ -9,10 +9,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.supervisor.core import (
-    Plan, Organization, User as SupUser, UserRole, UserRoleAssignment, Session as SupSession,
+    Plan, Organization, SupervisorUser as SupUser, UserRole, UserRoleAssignment, Session as SupSession,
 )
 # user tier 가입 사용자
-from models.user.account import User as AppUser  # table: user.users (PK: user_id, email)
+from models.user.account import AppUser as AppUser  # table: user.users (PK: user_id, email)
 # partner tier
 from models.partner.partner_core import Partner, PartnerUser  # partners, partner_users
 
@@ -173,13 +173,19 @@ def create_org(db: Session, *, name: str, plan_id: Optional[int] = None,
                industry: Optional[str] = None, company_size: Optional[str] = None,
                status: str = "active", created_by: Optional[int] = None,
                notes: Optional[str] = None) -> Organization:
+
+    # 0은 FK 불가 → None 처리
+    if plan_id in (0, "0"):
+        plan_id = None
+    # 유효성 체크(선택)
+    if plan_id is not None and db.get(Plan, plan_id) is None:
+        raise ValueError(f"invalid plan_id={plan_id}")
+
     org = Organization(
         name=name, plan_id=plan_id, industry=industry, company_size=company_size,
         status=status, created_by=created_by, notes=notes,
     )
-    db.add(org)
-    db.commit()
-    db.refresh(org)
+    db.add(org); db.commit(); db.refresh(org)
     return org
 
 def get_org(db: Session, org_id: int) -> Optional[Organization]:
