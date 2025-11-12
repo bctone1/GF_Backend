@@ -37,7 +37,7 @@ class PlatformSettingResponse(ORMBase):
 class ApiKeyCreate(ORMBase):
     name: str
     key_hash: str          # 원문 저장 금지
-    status: str = "active" # 'active' | 'revoked' | 'disabled'
+    status: str = "active"     # 'active' | 'revoked' | 'disabled'
     created_by: Optional[int] = None
     last_used_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
