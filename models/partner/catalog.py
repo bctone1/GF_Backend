@@ -41,7 +41,7 @@ class ModelCatalog(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     provider = Column(Text, nullable=False)
     model_name = Column(Text, nullable=False)
-    modality = Column(Text, nullable=False, server_default=text("'chat'"))  # chat | embedding | stt | image ...
+    modality = Column(Text, nullable=False, server_default=text("'chat'"))  # chat | embedding | stt | image
     supports_parallel = Column(Boolean, nullable=False, server_default=text("false"))
     default_pricing = Column(JSONB)  # {input_per_1k, output_per_1k, audio_per_sec, ...}
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
