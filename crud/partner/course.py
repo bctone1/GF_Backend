@@ -20,8 +20,8 @@ def get_course(db: Session, course_id: int) -> Optional[Course]:
     return db.get(Course, course_id)
 
 
-def get_course_by_code(db: Session, partner_id: int, code: str) -> Optional[Course]:
-    stmt = select(Course).where(Course.partner_id == partner_id, Course.code == code)
+def get_course_by_course_key(db: Session, partner_id: int, course_key: str) -> Optional[Course]:
+    stmt = select(Course).where(Course.partner_id == partner_id, Course.course_key == course_key)
     return db.execute(stmt).scalars().first()
 
 
@@ -40,7 +40,7 @@ def list_courses(
         conds.append(Course.status == status)
     if search:
         like = f"%{search}%"
-        conds.append(or_(Course.title.ilike(like), Course.code.ilike(like)))
+        conds.append(or_(Course.title.ilike(like), Course.course_key.ilike(like)))
 
     base = select(Course).where(and_(*conds))
     total = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
@@ -59,7 +59,7 @@ def create_course(
     *,
     partner_id: int,
     title: str,
-    code: str,
+    course_key: str,
     status: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
@@ -68,7 +68,7 @@ def create_course(
     obj = Course(
         partner_id=partner_id,
         title=title,
-        code=code,
+        course_key=course_key,
         status=status or "draft",
         start_date=start_date,
         end_date=end_date,
@@ -85,7 +85,7 @@ def update_course(
     course_id: int,
     *,
     title: Optional[str] = None,
-    code: Optional[str] = None,
+    course_key: Optional[str] = None,
     status: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
@@ -96,8 +96,8 @@ def update_course(
         return None
     if title is not None:
         obj.title = title
-    if code is not None:
-        obj.code = code
+    if course_key is not None:
+        obj.course_key = course_key
     if status is not None:
         obj.status = status
     if start_date is not None:

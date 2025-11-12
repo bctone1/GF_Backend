@@ -15,7 +15,7 @@ from schemas.enums import CourseStatus, ClassStatus
 # ==============================
 class CourseBase(ORMBase):
     title: str
-    code: str
+    course_key: str
     status: Optional[CourseStatus] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
@@ -29,7 +29,7 @@ class CourseCreate(CourseBase):
 class CourseUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     title: Optional[str] = None
-    code: Optional[str] = None
+    course_key: Optional[str] = None
     status: Optional[CourseStatus] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None

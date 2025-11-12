@@ -16,7 +16,7 @@ class Course(Base):
     partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
 
     title = Column(Text, nullable=False)
-    code = Column(Text, nullable=False)  # unique within partner
+    course_key = Column(Text, nullable=False)  # unique within partner
     status = Column(Text, nullable=False, server_default=text("'draft'"))  # draft|active|archived
     start_date = Column(Date)
     end_date = Column(Date)
@@ -28,7 +28,7 @@ class Course(Base):
     classes = relationship("Class", back_populates="course", cascade="all, delete-orphan", passive_deletes=True)
 
     __table_args__ = (
-        UniqueConstraint("partner_id", "code", name="uq_courses_partner_code"),
+        UniqueConstraint("partner_id", "course_key", name="uq_courses_partner_course_key"),
         CheckConstraint("status IN ('draft','active','archived')", name="chk_courses_status"),
         Index("idx_courses_partner_status", "partner_id", "status"),
         {"schema": "partner"},
