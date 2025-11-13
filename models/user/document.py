@@ -6,6 +6,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
 from models.base import Base
 
 
@@ -31,9 +32,14 @@ class Document(Base):
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+    # 기존 관계
     jobs = relationship("DocumentProcessingJob", back_populates="document", passive_deletes=True)
     tags = relationship("DocumentTagAssignment", back_populates="document", passive_deletes=True)
     usages = relationship("DocumentUsage", back_populates="document", passive_deletes=True)
+
+    # 페이지/청크
+    pages = relationship("DocumentPage", back_populates="document", passive_deletes=True)
+    chunks = relationship("DocumentChunk", back_populates="document", passive_deletes=True)
 
     __table_args__ = (
         CheckConstraint("file_size_bytes >= 0", name="chk_documents_size_nonneg"),
@@ -150,5 +156,74 @@ class DocumentUsage(Base):
         CheckConstraint("usage_count >= 0", name="chk_document_usage_count_nonneg"),
         Index("idx_document_usage_doc_time", "document_id", "last_used_at"),
         Index("idx_document_usage_user_time", "user_id", "last_used_at"),
+        {"schema": "user"},
+    )
+
+
+# ========== user.document_pages (기존 KnowledgePage 리팩토링) ==========
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
+
+    page_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    document_id = Column(
+        BigInteger,
+        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    page_no = Column(Integer, nullable=True)       # 1부터
+    image_url = Column(Text, nullable=True)        # WebP 권장 (옵션)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    document = relationship("Document", back_populates="pages", passive_deletes=True)
+    chunks = relationship("DocumentChunk", back_populates="page", passive_deletes=True)
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "page_no", name="uq_document_pages_doc_page"),
+        CheckConstraint("page_no IS NULL OR page_no >= 1", name="chk_document_pages_page_no_ge_1"),
+        Index("idx_document_pages_doc_page", "document_id", "page_no"),
+        {"schema": "user"},
+    )
+
+
+# ========== user.document_chunks (기존 KnowledgeChunk 리팩토링) ==========
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+
+    chunk_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    document_id = Column(
+        BigInteger,
+        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    page_id = Column(
+        BigInteger,
+        ForeignKey("user.document_pages.page_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    chunk_index = Column(Integer, nullable=False)  # 1부터
+    chunk_text = Column(Text, nullable=False)
+    vector_memory = Column(Vector(1536), nullable=False)  # 기존 이름 그대로 사용
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    document = relationship("Document", back_populates="chunks", passive_deletes=True)
+    page = relationship("DocumentPage", back_populates="chunks", passive_deletes=True)
+
+    __table_args__ = (
+        CheckConstraint("chunk_index >= 1", name="chk_document_chunks_index_ge_1"),
+        UniqueConstraint("document_id", "chunk_index", name="uq_document_chunks_doc_idx"),
+        Index("idx_document_chunks_doc_index", "document_id", "chunk_index"),
+        Index("idx_document_chunks_doc_page", "document_id", "page_id"),
+        Index(
+            "idx_document_chunks_vec_ivfflat",
+            "vector_memory",
+            postgresql_using="ivfflat",
+            postgresql_with={"lists": 100},
+            postgresql_ops={"vector_memory": "vector_cosine_ops"},
+        ),
         {"schema": "user"},
     )

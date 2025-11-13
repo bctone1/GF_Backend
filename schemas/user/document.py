@@ -146,3 +146,65 @@ class DocumentUsageResponse(ORMBase):
     usage_type: str
     usage_count: int
     last_used_at: datetime
+
+
+# =========================================================
+# user.document_pages  (models.user.DocumentPage 대응)
+# =========================================================
+class DocumentPageCreate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    document_id: int
+    page_no: Optional[int] = None         # 1부터, NULL 허용
+    image_url: Optional[str] = None
+    created_at: Optional[datetime] = None  # 보통 서버에서 채움
+
+
+class DocumentPageUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    page_no: Optional[int] = None
+    image_url: Optional[str] = None
+    # created_at은 보통 수정 안 함
+
+
+class DocumentPageResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+    page_id: int
+    document_id: int
+    page_no: Optional[int] = None
+    image_url: Optional[str] = None
+    created_at: datetime
+
+
+# =========================================================
+# user.document_chunks  (models.user.DocumentChunk 대응)
+# =========================================================
+class DocumentChunkCreate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    document_id: int
+    page_id: Optional[int] = None
+    chunk_index: int
+    chunk_text: str
+    # vector_memory는 서버에서 임베딩 후 채우는 게 자연스러움
+    # created_at 역시 보통 서버에서 채움
+    created_at: Optional[datetime] = None
+
+
+class DocumentChunkUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    page_id: Optional[int] = None
+    chunk_index: Optional[int] = None
+    chunk_text: Optional[str] = None
+    # vector_memory를 갱신하는 경우가 특별히 필요하면 여기 추가 가능
+
+
+
+class DocumentChunkResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+    chunk_id: int
+    document_id: int
+    page_id: Optional[int] = None
+    chunk_index: int
+    chunk_text: str
+    created_at: datetime
+    # 벡터는 보통 외부로 내보내지 않지만, 필요하면 아래처럼 타입 추가 가능
+    # vector_memory: list[float] | None = None
