@@ -1,11 +1,11 @@
 # langchain_service/embedding/get_vector.py
+# 임베딩 생성기
 from __future__ import annotations
 
 from typing import List, Optional, Literal
 
 import numpy as np
 from langchain_core.embeddings import Embeddings
-
 from langchain_service.embedding.factory import get_embeddings, ProviderType
 
 
