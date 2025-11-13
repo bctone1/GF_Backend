@@ -1,3 +1,4 @@
+# app/routers.py
 from fastapi import FastAPI
 
 # supervisor
@@ -13,10 +14,11 @@ from app.endpoints.partner.session import router as partner_session
 from app.endpoints.partner.usage import router as partner_usage
 from app.endpoints.partner.notify import router as partner_notify
 from app.endpoints.partner.billing import router as partner_billing
+from app.endpoints.partner.prompt import router as partner_prompt
+from app.endpoints.partner.analytics import router as partner_analytics  # ← 추가
 
 # user
 from app.endpoints.user.account import router as my_account
-
 
 def register_routers(app: FastAPI) -> None:
     # ==============================
@@ -36,6 +38,8 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(partner_usage,   prefix="/partners/{partner_id}/usage",     tags=["partner/usage"])
     app.include_router(partner_notify,  prefix="/partners/{partner_id}/notify",    tags=["partner/notify"])
     app.include_router(partner_billing, prefix="/partners/{partner_id}/billing",   tags=["partner/billing"])
+    app.include_router(partner_prompt,  prefix="/partners/{partner_id}/prompt",    tags=["partner/prompt"])
+    app.include_router(partner_analytics, prefix="/partners/{partner_id}/analytics", tags=["partner/analytics"])  # ← 추가
 
     # ==============================
     # User
