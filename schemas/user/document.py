@@ -184,8 +184,6 @@ class DocumentChunkCreate(ORMBase):
     page_id: Optional[int] = None
     chunk_index: int
     chunk_text: str
-    # vector_memory는 서버에서 임베딩 후 채우는 게 자연스러움
-    # created_at 역시 보통 서버에서 채움
     created_at: Optional[datetime] = None
 
 
