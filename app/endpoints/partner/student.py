@@ -97,6 +97,9 @@ def deactivate_student(
     db: Session = Depends(get_db),
     _ = Depends(get_current_partner_admin),
 ):
+    """
+    비활성화 시킴(종료와 다름)
+    """
     updated = student_crud.deactivate_student(db, student_id)
     if not updated or updated.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="student not found")
