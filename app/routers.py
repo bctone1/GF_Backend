@@ -18,7 +18,7 @@ from app.endpoints.partner.prompt import router as partner_prompt
 from app.endpoints.partner.analytics import router as partner_analytics
 
 # user
-from app.endpoints.user.account import router as my_account
+from app.endpoints.user.account import router as account
 
 
 def register_routers(app: FastAPI) -> None:
@@ -45,5 +45,5 @@ def register_routers(app: FastAPI) -> None:
     # ==============================
     # User
     # ==============================
-    # /user/signup, /user/login, /my, /my/profile, /my/security, /my/privacy, /my/sessions ...
-    app.include_router(my_account, tags=["my_account"])
+
+    app.include_router(account, tags=["user/account"])
