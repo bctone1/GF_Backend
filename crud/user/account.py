@@ -32,7 +32,6 @@ except Exception:
     ) = UserPrivacySettingUpdate = UserLoginSessionCreate = UserLoginSessionUpdate = BaseModel  # type: ignore
 
 
-# =========================
 # User
 # =========================
 class CRUDUser:

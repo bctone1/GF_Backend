@@ -29,8 +29,6 @@ from schemas.user.account import (
 )
 
 router = APIRouter()
-
-
 # ---------- 유틸 ----------
 def _client_meta(req: Request) -> dict[str, Any]:
     ip = (req.client.host if req.client else None) or req.headers.get("x-forwarded-for") or None
