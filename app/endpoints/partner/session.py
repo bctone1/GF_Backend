@@ -1,11 +1,8 @@
 # app/endpoints/partner/session.py
 from __future__ import annotations
-
 from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
-
 from core.deps import get_db, get_current_partner_admin
 from crud.partner import session as session_crud
 from schemas.partner.session import (
@@ -20,8 +17,7 @@ from schemas.partner.session import (
 )
 from schemas.enums import SessionMode, SessionStatus
 
-router = APIRouter()  # prefix는 routers.py에서 넣어줄 거야
-
+router = APIRouter()
 
 # ==============================
 # AiSession 엔드포인트
