@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-# 스타일 프리셋
-# key 값은 qa_chain 에서 넘기는 style 문자열과 동일하게 맞추면 됨
 STYLE_MAP: Dict[str, str] = {
     "friendly": (
         "너는 GrowFit 사용자들을 돕는 친절한 AI 어시스턴트다.\n"

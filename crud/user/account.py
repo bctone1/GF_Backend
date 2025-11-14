@@ -120,7 +120,6 @@ def create_with_profile(
     ensure_settings: bool = False,
 ) -> AppUser:
     """
-    기존 코드 호환용:
     user_crud.create_with_profile(db, user_in={...}, profile_in={...}, ensure_settings=True)
 
     - user.users 생성
@@ -157,7 +156,7 @@ def set_last_login(
     at: Optional[datetime] = None,
 ) -> None:
     """
-    기존 코드 호환용: 마지막 로그인 시각 업데이트.
+    마지막 로그인 시각 업데이트.
     """
     at = at or datetime.now(timezone.utc)
     stmt = (
@@ -170,16 +169,19 @@ def set_last_login(
 
 
 # -----------------------------------------------------------------------------
-# NOTE (service/user/auth.py 예시)
+# NOTE (service/user/account_service.py 예시)
 #
-# def register_user(db, data: UserCreate) -> AppUser:
+# def signup(db, payload: UserCreate) -> UserResponse:
 #     1) 이메일 중복 체크(get_by_email)
 #     2) 비밀번호 해시 생성
 #     3) create_with_profile(...) 호출
 #
-# def authenticate_user(db, email: str, password: str) -> AppUser | None:
-#     1) get_by_email
-#     2) verify_password
+# def login(db, payload: LoginInput, meta: dict[str, str]) -> AuthTokens:
+#     1) get_by_email + verify_password
+#     2) close_all_sessions_for_user
+#     3) create_login_session
+#     4) set_last_login
+#     5) issue_tokens
 # -----------------------------------------------------------------------------
 
 
@@ -225,7 +227,7 @@ def delete_profile(
 
 
 # -----------------------------------------------------------------------------
-# NOTE (service/user/account.py 예시)
+# NOTE (service/user/account_service.py 예시)
 #
 # def update_my_profile(db, me_id: int, payload: UserProfileUpdate) -> UserProfile:
 #     data = payload.model_dump(exclude_unset=True)
@@ -272,7 +274,7 @@ def delete_security_setting(
 
 
 # -----------------------------------------------------------------------------
-# NOTE (service/user/security.py 예시)
+# NOTE (service/user/security_service.py 예시)
 #
 # def enable_2fa(db, user_id: int, method: str, backup_codes: list[str]) -> UserSecuritySetting:
 #     data = {"two_factor_enabled": True, "two_factor_method": method, "backup_codes": backup_codes}
@@ -283,8 +285,6 @@ def delete_security_setting(
 # =============================================================================
 # UserLoginSession (user.user_login_sessions)
 # =============================================================================
-
-
 def get_login_session(db: Session, session_id: int) -> Optional[UserLoginSession]:
     return db.get(UserLoginSession, session_id)
 
@@ -383,7 +383,8 @@ def close_all_sessions_for_user(
     at: Optional[datetime] = None,
 ) -> None:
     """
-    2FA 재설정 / 비밀번호 변경 등에서 모든 세션 종료할 때 사용.
+    2FA 재설정 / 비밀번호 변경 / 강제 로그아웃 등에서
+    해당 유저의 현재 세션을 모두 종료할 때 사용.
     """
     at = at or datetime.now(timezone.utc)
     stmt = (
@@ -399,12 +400,15 @@ def close_all_sessions_for_user(
 
 
 # -----------------------------------------------------------------------------
-# NOTE (service/user/auth.py 예시)
+# NOTE (service/user/account_service.py 예시)
 #
-# def issue_login_session(db, user_id: int, req: Request) -> UserLoginSession:
-#     ua = req.headers.get("user-agent")
-#     ip = req.client.host if req.client else None
-#     data = {"user_agent": ua, "ip_address": ip, "device_name": "..."}
+# def issue_login_session(db, user_id: int, meta: dict[str, str]) -> UserLoginSession:
+#     data = {
+#         "user_agent": meta.get("user_agent"),
+#         "ip_address": meta.get("ip_address"),
+#         "device_name": meta.get("device_name"),
+#         "location": meta.get("location"),
+#     }
 #     return create_login_session(db, user_id=user_id, data=data)
 # -----------------------------------------------------------------------------
 
@@ -412,8 +416,6 @@ def close_all_sessions_for_user(
 # =============================================================================
 # UserPrivacySetting (user.user_privacy_settings)
 # =============================================================================
-
-
 def get_privacy_setting(db: Session, user_id: int) -> Optional[UserPrivacySetting]:
     return db.get(UserPrivacySetting, user_id)
 
@@ -450,7 +452,7 @@ def delete_privacy_setting(
 
 
 # -----------------------------------------------------------------------------
-# NOTE (service/user/privacy.py 예시)
+# NOTE (service/user/privacy_service.py 예시)
 #
 # def update_my_privacy(db, me_id: int, payload: UserPrivacySettingUpdate) -> UserPrivacySetting:
 #     data = payload.model_dump(exclude_unset=True)

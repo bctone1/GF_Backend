@@ -1,4 +1,4 @@
-# models/api_usage.py
+# models/supervisor/api_usage.py
 from sqlalchemy import (
     Column, BigInteger, String, Integer, DateTime, Numeric,
     ForeignKey, CheckConstraint, Index, text, PrimaryKeyConstraint

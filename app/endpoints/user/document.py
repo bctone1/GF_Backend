@@ -3,14 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, List, Tuple
 
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Query,
-    Path,
-    status,
-)
+from fastapi import APIRouter,File, Depends, HTTPException, Query, Path, status,UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -42,6 +35,7 @@ from schemas.user.document import (
     DocumentChunkResponse,
 )
 
+from service.user.upload_pipeline import UploadPipeline
 router = APIRouter()
 
 
@@ -324,3 +318,28 @@ def list_document_chunks(
         page_id=page_id,
     )
     return [DocumentChunkResponse.model_validate(c) for c in chunks]
+
+
+@router.post(
+    "/upload",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_document",
+)
+def upload_document(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="file required",
+        )
+
+    # 로그인한 유저 기준으로 업로드 파이프라인 실행
+    pipeline = UploadPipeline(db, user_id=me.user_id)
+    doc = pipeline.run(file)
+
+    # SQLAlchemy 객체 → Pydantic 응답 스키마
+    return DocumentResponse.model_validate(doc)

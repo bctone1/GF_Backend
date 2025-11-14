@@ -81,3 +81,37 @@ TEAM_ID = os.getenv("TEAM_ID")
 FRIENDLI_TOKEN = os.getenv("FRIENDLI_TOKEN")
 FRIENDLI_BASE_URL = os.getenv("FRIENDLI_BASE_URL")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL")
+
+# 12) cost usage 설정
+API_PRICING = {
+    "embedding": {
+        "text-embedding-3-small": {"per_1k_token_usd": 0.00002},
+        # "text-embedding-3-large": {"per_1k_token_usd": 0.13},
+    },
+    "llm": {
+        "gpt-4o-mini": {"per_1k_token_usd": 0.00004},    # 대략적으로 잡음
+    },
+    "stt": {
+        "CLOVA_STT": {"per_second_usd": 0.0002},  # 엄밀히 0.00019(환율차로 무의미)
+    },
+}
+
+
+TIMEZONE = "Asia/Seoul"
+COST_PRECISION = 6
+TOKEN_UNIT = 1000
+LLM_TOKEN_MODE = "merged"
+
+DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
+DEFAULT_LLM_MODEL = "gpt-4o-mini"
+DEFAULT_STT_MODEL = "CLOVA_STT"
+
+ENABLE_API_USAGE_LOG = False  # 기본은 로그 비활성화
+
+
+# CLOVA STT 과금 규칙
+CLOVA_STT_BILLING_UNIT_SECONDS = 6   # 6초 단위 과금
+CLOVA_STT_PRICE_PER_UNIT_KRW = 1.6      # 15초당 4원
+FX_KRW_PER_USD = 1400                 # 원→달러 환산. 미사용 시 None
+
+DEFAULT_ORGANIZATION_ID = "1"

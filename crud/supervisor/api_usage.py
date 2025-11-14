@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional, Tuple, List
 
 from sqlalchemy import select, func
@@ -12,7 +13,9 @@ from schemas.supervisor.api_usage import (
     ApiUsageCreate,
     ApiUsageUpdate,
 )
-
+from core import config
+import logging
+log = logging.getLogger("api_usage")
 
 class ApiUsageCRUD:
     """
@@ -148,3 +151,61 @@ class ApiUsageCRUD:
 
 
 api_usage_crud = ApiUsageCRUD()
+
+
+# ============================================================
+# 편의 함수: add_event (UploadPipeline 등에서 사용)
+# ============================================================
+def add_event(
+    db: Session,
+    *,
+    ts_utc: datetime,
+    product: str,
+    model: str,
+    llm_tokens: int,
+    embedding_tokens: int,
+    audio_seconds: int,  # 현재는 사용 안 하지만 시그니처 호환용
+    cost_usd: float | Decimal,
+    organization_id: Optional[int] = None,
+    user_id: Optional[int] = None,
+    status: str = "success",
+    response_time_ms: Optional[int] = None,
+) -> Optional[ApiUsage]:
+    """
+    UploadPipeline 등에서 쓰는 간단 로깅 헬퍼.
+
+    - 기존 호출 시그니처를 그대로 받되
+      supervisor.api_usage 모델에 맞춰 필드를 매핑해서 저장
+    - organization_id 가 None 이면 config.DEFAULT_ORGANIZATION_ID 를 사용
+    - 최종적으로 org_id 를 알 수 없으면 조용히 넘어감 (None 반환)
+    """
+    if not getattr(config, "ENABLE_API_USAGE_LOG", False):
+        return None
+
+    # NOTE 추후에 SQL 토큰값 집계 설정 후에 다시 시도
+    # # 조직 ID 결정 (없으면 기본값 시도)
+    # org_id = organization_id or getattr(config, "DEFAULT_ORGANIZATION_ID", None)
+    # if org_id is None:
+    #     # 아직 조직 컨텍스트를 안 붙였으면 기록 스킵
+    #     return None
+    #
+    # # 토큰 합산 (chat + embedding 등)
+    # total_tokens = int((llm_tokens or 0) + (embedding_tokens or 0))
+    #
+    # # 단순 매핑: product → provider, model → endpoint
+    # provider = product              # 예: "embedding", "chat", "stt"
+    # endpoint = model                # 예: "text-embedding-3-small", "gpt-4o-mini"
+    #
+    # payload = ApiUsageCreate(
+    #     organization_id=org_id,
+    #     user_id=user_id,
+    #     provider=provider,
+    #     endpoint=endpoint,
+    #     tokens=total_tokens,
+    #     cost=Decimal(str(cost_usd)),
+    #     status=status,
+    #     response_time_ms=response_time_ms,
+    #     # requested_at 은 DB default (NOW()) 사용
+    # )
+    #
+    # return api_usage_crud.create(db, payload)

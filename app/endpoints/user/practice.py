@@ -1,6 +1,6 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
-from service.user.practice import set_primary_model_for_session
+
 from typing import Optional, List
 
 from fastapi import (
@@ -23,7 +23,6 @@ from crud.user.practice import (
     practice_rating_crud,
     model_comparison_crud,
 )
-
 from schemas.base import Page
 from schemas.user.practice import (
     PracticeSessionCreate,
@@ -41,6 +40,12 @@ from schemas.user.practice import (
     ModelComparisonCreate,
     ModelComparisonUpdate,
     ModelComparisonResponse,
+)
+
+from service.user.practice import (
+    set_primary_model_for_session,
+    run_practice_turn,  # 추후 LLM 연동 시 사용
+    create_model_comparison_from_metrics,  # 메트릭 기반 비교 생성 시 사용
 )
 
 
@@ -127,7 +132,6 @@ def create_practice_session(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    # user_id는 토큰 기준으로 강제
     data_in = data.model_copy(update={"user_id": me.user_id})
     session = practice_session_crud.create(db, data_in)
     db.commit()
@@ -231,13 +235,33 @@ def update_practice_session_model(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    model, _ = _ensure_my_session_model(db, session_model_id, me)
+    model, _session = _ensure_my_session_model(db, session_model_id, me)
+
+    # 1) is_primary 변경 요청이 포함된 경우 → service에서 처리
+    if data.is_primary is True:
+        target = set_primary_model_for_session(
+            db,
+            me=me,
+            session_id=model.session_id,
+            target_session_model_id=session_model_id,
+        )
+        db.commit()
+        return PracticeSessionModelResponse.model_validate(target)
+
+    # 2) 일반 업데이트 (model_name 등)
     updated = practice_session_model_crud.update(
-        db, session_model_id=session_model_id, data=data
+        db,
+        session_model_id=session_model_id,
+        data=data,
     )
     db.commit()
+
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="model not found",
+        )
+
     return PracticeSessionModelResponse.model_validate(updated)
 
 
@@ -297,9 +321,9 @@ def create_practice_response(
     db.commit()
     return PracticeResponseResponse.model_validate(resp)
 
-    # NOTE : service/user/practice_chat.py
-    # - 실제 LLM 호출 + token_usage/latency 계산 후
-    #   이 엔드포인트 대신 서비스 계층에서 CRUD 호출하는 방식으로 확장 가능
+    # NOTE:
+    # - 실제 LLM 호출 + token_usage/latency 계산은
+    #   service.user.practice.run_practice_turn 을 사용해 별도 /chat 엔드포인트로 빼는 방식 추천
 
 
 @router.get(
@@ -465,9 +489,9 @@ def create_model_comparison(
     db.commit()
     return ModelComparisonResponse.model_validate(comp)
 
-    # NOTE : service/user/practice_compare.py
-    # - 실제 두 모델 응답/토큰/레이턴시 받아서
-    #   ModelComparisonCreate 구성 후 이 CRUD 호출하는 플로우 작성
+    # NOTE:
+    # - 메트릭 기반 비교 생성은 service.user.practice.create_model_comparison_from_metrics
+    #   를 사용하는 별도 엔드포인트로 빼는 방식 추천
 
 
 @router.patch(
@@ -481,7 +505,7 @@ def update_model_comparison(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    comp, _session = _ensure_my_comparison(db, comparison_id, me)
+    _comp, _session = _ensure_my_comparison(db, comparison_id, me)
     updated = model_comparison_crud.update(
         db, comparison_id=comparison_id, data=body
     )
