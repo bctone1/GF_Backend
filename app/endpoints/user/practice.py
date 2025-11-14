@@ -1,6 +1,6 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
-
+from service.user.practice import set_primary_model_for_session
 from typing import Optional, List
 
 from fastapi import (
