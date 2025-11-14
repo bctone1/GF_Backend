@@ -1,8 +1,7 @@
 # crud/user/document.py
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
-from datetime import datetime
+from typing import Optional, Sequence, Tuple, List
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
@@ -46,10 +45,10 @@ class DocumentCRUD:
             folder_path=data.folder_path,
             status=data.status or "processing",
             chunk_count=data.chunk_count or 0,
-            uploaded_at=data.uploaded_at or datetime.now(datetime.utc),
+            # uploaded_at, updated_at 은 DB server_default(func.now())에 맡김
         )
         db.add(obj)
-        db.commit()
+        db.flush()
         db.refresh(obj)
         return obj
 
@@ -69,6 +68,7 @@ class DocumentCRUD:
     ) -> Tuple[Sequence[Document], int]:
         """
         단순 목록 조회 + 페이징.
+        commit 은 바깥(service/endpoint)에서 처리
         """
         stmt = select(Document).where(Document.owner_id == owner_id)
 
@@ -76,7 +76,6 @@ class DocumentCRUD:
             stmt = stmt.where(Document.status == status)
 
         if q:
-            # 아주 단순 name LIKE 검색 (pg_trgm 인덱스는 DB 쪽에 있음)
             like = f"%{q}%"
             stmt = stmt.where(Document.name.ilike(like))
 
@@ -98,26 +97,27 @@ class DocumentCRUD:
         document_id: int,
         data: DocumentUpdate,
     ) -> Optional[Document]:
+        values = {
+            k: v
+            for k, v in data.model_dump(exclude_unset=True).items()
+            if v is not None
+        }
+        if not values:
+            return self.get(db, document_id)
+
         stmt = (
             update(Document)
             .where(Document.document_id == document_id)
-            .values(
-                **{
-                    k: v
-                    for k, v in data.model_dump(exclude_unset=True).items()
-                    if v is not None
-                }
-            )
-            .returning(Document)
+            .values(**values)
         )
-        result = db.execute(stmt).scalar_one_or_none()
-        db.commit()
-        return result
+        db.execute(stmt)
+        db.flush()
+        return self.get(db, document_id)
 
     def delete(self, db: Session, document_id: int) -> None:
         stmt = delete(Document).where(Document.document_id == document_id)
         db.execute(stmt)
-        db.commit()
+        db.flush()
 
 
 document_crud = DocumentCRUD()
@@ -137,7 +137,7 @@ class DocumentProcessingJobCRUD:
             completed_at=data.completed_at,
         )
         db.add(obj)
-        db.commit()
+        db.flush()
         db.refresh(obj)
         return obj
 
@@ -149,7 +149,7 @@ class DocumentProcessingJobCRUD:
         stmt = (
             select(DocumentProcessingJob)
             .where(DocumentProcessingJob.document_id == document_id)
-            .order_by(DocumentProcessingJob.started_at.nullsfirst())
+            .order_by(DocumentProcessingJob.started_at.asc().nullsfirst())
         )
         return db.scalars(stmt).all()
 
@@ -159,20 +159,27 @@ class DocumentProcessingJobCRUD:
         job_id: int,
         data: DocumentProcessingJobUpdate,
     ) -> Optional[DocumentProcessingJob]:
+        values = {
+            k: v
+            for k, v in data.model_dump(exclude_unset=True).items()
+        }
+        if not values:
+            stmt = select(DocumentProcessingJob).where(
+                DocumentProcessingJob.job_id == job_id
+            )
+            return db.scalar(stmt)
+
         stmt = (
             update(DocumentProcessingJob)
             .where(DocumentProcessingJob.job_id == job_id)
-            .values(
-                **{
-                    k: v
-                    for k, v in data.model_dump(exclude_unset=True).items()
-                }
-            )
-            .returning(DocumentProcessingJob)
+            .values(**values)
         )
-        result = db.execute(stmt).scalar_one_or_none()
-        db.commit()
-        return result
+        db.execute(stmt)
+        db.flush()
+        stmt = select(DocumentProcessingJob).where(
+            DocumentProcessingJob.job_id == job_id
+        )
+        return db.scalar(stmt)
 
 
 document_job_crud = DocumentProcessingJobCRUD()
@@ -189,18 +196,23 @@ class DocumentTagCRUD:
     def create(self, db: Session, data: DocumentTagCreate) -> DocumentTag:
         obj = DocumentTag(name=data.name)
         db.add(obj)
-        db.commit()
+        db.flush()
         db.refresh(obj)
         return obj
 
     def ensure(self, db: Session, name: str) -> DocumentTag:
         """
         태그 있으면 반환, 없으면 생성.
+        (동시성까지 완벽하게 보장하진 않고, 단일 트랜잭션 환경 가정)
         """
         tag = self.get_by_name(db, name)
         if tag:
             return tag
-        return self.create(db, DocumentTagCreate(name=name))
+        tag = DocumentTag(name=name)
+        db.add(tag)
+        db.flush()
+        db.refresh(tag)
+        return tag
 
     def update(
         self,
@@ -208,20 +220,23 @@ class DocumentTagCRUD:
         tag_id: int,
         data: DocumentTagUpdate,
     ) -> Optional[DocumentTag]:
+        values = {
+            k: v
+            for k, v in data.model_dump(exclude_unset=True).items()
+        }
+        if not values:
+            stmt = select(DocumentTag).where(DocumentTag.tag_id == tag_id)
+            return db.scalar(stmt)
+
         stmt = (
             update(DocumentTag)
             .where(DocumentTag.tag_id == tag_id)
-            .values(
-                **{
-                    k: v
-                    for k, v in data.model_dump(exclude_unset=True).items()
-                }
-            )
-            .returning(DocumentTag)
+            .values(**values)
         )
-        result = db.execute(stmt).scalar_one_or_none()
-        db.commit()
-        return result
+        db.execute(stmt)
+        db.flush()
+        stmt = select(DocumentTag).where(DocumentTag.tag_id == tag_id)
+        return db.scalar(stmt)
 
 
 document_tag_crud = DocumentTagCRUD()
@@ -236,12 +251,23 @@ class DocumentTagAssignmentCRUD:
         db: Session,
         data: DocumentTagAssignmentCreate,
     ) -> DocumentTagAssignment:
+        """
+        (document_id, tag_id) 조합이 이미 있으면 기존 row 반환.
+        """
+        stmt = select(DocumentTagAssignment).where(
+            DocumentTagAssignment.document_id == data.document_id,
+            DocumentTagAssignment.tag_id == data.tag_id,
+        )
+        existing = db.scalar(stmt)
+        if existing:
+            return existing
+
         obj = DocumentTagAssignment(
             document_id=data.document_id,
             tag_id=data.tag_id,
         )
         db.add(obj)
-        db.commit()
+        db.flush()
         db.refresh(obj)
         return obj
 
@@ -264,7 +290,7 @@ class DocumentTagAssignmentCRUD:
             DocumentTagAssignment.assignment_id == assignment_id
         )
         db.execute(stmt)
-        db.commit()
+        db.flush()
 
 
 document_tag_assignment_crud = DocumentTagAssignmentCRUD()
@@ -283,6 +309,7 @@ class DocumentUsageCRUD:
     ) -> DocumentUsage:
         """
         (document_id, user_id, usage_type) 단위로 사용량 증가.
+        commit 은 바깥에서 한 번만
         """
         stmt = select(DocumentUsage).where(
             DocumentUsage.document_id == data.document_id,
@@ -291,7 +318,7 @@ class DocumentUsageCRUD:
         )
         usage = db.scalar(stmt)
 
-        now = data.last_used_at or datetime.now(datetime.utc)
+        now_expr = data.last_used_at or func.now()
 
         if usage is None:
             usage = DocumentUsage(
@@ -299,14 +326,14 @@ class DocumentUsageCRUD:
                 user_id=data.user_id,
                 usage_type=data.usage_type,
                 usage_count=data.usage_count or increment,
-                last_used_at=now,
+                last_used_at=now_expr,
             )
             db.add(usage)
         else:
-            usage.usage_count += increment
-            usage.last_used_at = now
+            usage.usage_count = (usage.usage_count or 0) + increment
+            usage.last_used_at = now_expr
 
-        db.commit()
+        db.flush()
         db.refresh(usage)
         return usage
 
@@ -326,20 +353,23 @@ class DocumentUsageCRUD:
         usage_id: int,
         data: DocumentUsageUpdate,
     ) -> Optional[DocumentUsage]:
+        values = {
+            k: v
+            for k, v in data.model_dump(exclude_unset=True).items()
+        }
+        if not values:
+            stmt = select(DocumentUsage).where(DocumentUsage.usage_id == usage_id)
+            return db.scalar(stmt)
+
         stmt = (
             update(DocumentUsage)
             .where(DocumentUsage.usage_id == usage_id)
-            .values(
-                **{
-                    k: v
-                    for k, v in data.model_dump(exclude_unset=True).items()
-                }
-            )
-            .returning(DocumentUsage)
+            .values(**values)
         )
-        result = db.execute(stmt).scalar_one_or_none()
-        db.commit()
-        return result
+        db.execute(stmt)
+        db.flush()
+        stmt = select(DocumentUsage).where(DocumentUsage.usage_id == usage_id)
+        return db.scalar(stmt)
 
 
 document_usage_crud = DocumentUsageCRUD()
@@ -354,10 +384,10 @@ class DocumentPageCRUD:
             document_id=data.document_id,
             page_no=data.page_no,
             image_url=data.image_url,
-            created_at=data.created_at or datetime.now(datetime.utc),
+            # created_at 은 DB default 사용
         )
         db.add(obj)
-        db.commit()
+        db.flush()
         db.refresh(obj)
         return obj
 
@@ -367,17 +397,15 @@ class DocumentPageCRUD:
         pages: list[DocumentPageCreate],
     ) -> list[DocumentPage]:
         objs: list[DocumentPage] = []
-        now = datetime.now(datetime.utc)
         for p in pages:
             obj = DocumentPage(
                 document_id=p.document_id,
                 page_no=p.page_no,
                 image_url=p.image_url,
-                created_at=p.created_at or now,
             )
             db.add(obj)
             objs.append(obj)
-        db.commit()
+        db.flush()
         for obj in objs:
             db.refresh(obj)
         return objs
@@ -402,35 +430,74 @@ document_page_crud = DocumentPageCRUD()
 # Document Chunks CRUD
 # =========================================================
 class DocumentChunkCRUD:
-    def create(self, db: Session, data: DocumentChunkCreate) -> DocumentChunk:
+    def create(
+        self,
+        db: Session,
+        data: DocumentChunkCreate,
+        *,
+        vector: Sequence[float],
+    ) -> DocumentChunk:
+        """
+        vector_memory 는 service 레이어에서 임베딩 계산 후 주입
+
+        예시 (service/user/document_ingest.py)
+        ----------------------------------------------------------------
+        # chunks: list[tuple[DocumentChunkCreate, list[float]]]
+        # for schema_obj, vec in chunks:
+        #     document_chunk_crud.create(db, schema_obj, vector=vec)
+        ----------------------------------------------------------------
+        """
         obj = DocumentChunk(
             document_id=data.document_id,
             page_id=data.page_id,
             chunk_index=data.chunk_index,
             chunk_text=data.chunk_text,
-            # vector_memory는 service 레이어에서 임베딩 후 세팅
-            created_at=data.created_at or datetime.now(datetime.utc),
+            vector_memory=list(vector),
+            # created_at 은 DB default 사용
         )
         db.add(obj)
-        db.commit()
+        db.flush()
         db.refresh(obj)
         return obj
 
     def bulk_create(
         self,
         db: Session,
-        chunks: list[DocumentChunk],
+        items: list[tuple[DocumentChunkCreate, Sequence[float]]],
     ) -> list[DocumentChunk]:
         """
-        service 레이어에서 이미 vector_memory까지 채운 DocumentChunk 인스턴스를
-        한 번에 넣고 싶을 때 사용.
+        items: (DocumentChunkCreate, vector) 튜플 리스트
+
+        예시 (service/user/document_ingest.py)
+        ----------------------------------------------------------------
+        # items = []
+        # for idx, (text, page_id) in enumerate(parsed_chunks, start=1):
+        #     schema_obj = DocumentChunkCreate(
+        #         document_id=document_id,
+        #         page_id=page_id,
+        #         chunk_index=idx,
+        #         chunk_text=text,
+        #     )
+        #     vec = embedding_client.embed_text(text)
+        #     items.append((schema_obj, vec))
+        # document_chunk_crud.bulk_create(db, items)
+        ----------------------------------------------------------------
         """
-        for ch in chunks:
-            db.add(ch)
-        db.commit()
-        for ch in chunks:
-            db.refresh(ch)
-        return chunks
+        objs: list[DocumentChunk] = []
+        for data, vector in items:
+            obj = DocumentChunk(
+                document_id=data.document_id,
+                page_id=data.page_id,
+                chunk_index=data.chunk_index,
+                chunk_text=data.chunk_text,
+                vector_memory=list(vector),
+            )
+            db.add(obj)
+            objs.append(obj)
+        db.flush()
+        for obj in objs:
+            db.refresh(obj)
+        return objs
 
     def list_by_document(
         self,
@@ -458,5 +525,49 @@ class DocumentChunkCRUD:
         stmt = stmt.order_by(DocumentChunk.chunk_index.asc())
         return db.scalars(stmt).all()
 
+    def search_by_vector(
+        self,
+        db: Session,
+        *,
+        query_vector: Sequence[float],
+        document_id: Optional[int] = None,
+        top_k: int = 8,
+    ) -> List[DocumentChunk]:
+        """
+        pgvector 코사인 거리 기반 상위 N개 청크 검색
+        document_id가 있으면 해당 문서 내에서만 검색
+        """
+        stmt = select(DocumentChunk)
+        if document_id is not None:
+            stmt = stmt.where(DocumentChunk.document_id == document_id)
+
+        stmt = (
+            stmt.order_by(
+                DocumentChunk.vector_memory.cosine_distance(query_vector)  # type: ignore[attr-defined]
+            )
+            .limit(top_k)
+        )
+        chunks = db.scalars(stmt).all()
+        return list(chunks)
 
 document_chunk_crud = DocumentChunkCRUD()
+
+
+def search_chunks_by_vector(
+    db: Session,
+    *,
+    query_vector: Sequence[float],
+    knowledge_id: Optional[int] = None,
+    top_k: int = 8,
+) -> List[DocumentChunk]:
+    """
+    qa_chain 등에서 쓰기 위한 헬퍼
+    knowledge_id == document_id 로 해석해서 전달
+    """
+    return document_chunk_crud.search_by_vector(
+        db=db,
+        query_vector=query_vector,
+        document_id=knowledge_id,
+        top_k=top_k,
+    )
+
