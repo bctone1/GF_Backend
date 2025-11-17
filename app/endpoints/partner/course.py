@@ -11,7 +11,7 @@ from schemas.partner.course import (
     CourseCreate, CourseUpdate, CourseResponse, CoursePage,
     ClassCreate, ClassUpdate, ClassResponse, ClassPage,
     InviteCodeCreate, InviteCodeUpdate, InviteCodeResponse, InviteCodePage,
-    InviteSendRequest, InviteAssignRequest, InviteResendRequest, InviteSendResponse,  # ← 추가
+    InviteSendRequest, InviteAssignRequest, InviteResendRequest, InviteSendResponse,
 )
 from crud.partner import course as crud_course
 from service.partner import invite as invite_service
@@ -461,3 +461,61 @@ def assign_invite_by_email(
         is_existing_user=result.is_existing_user,
         email_sent=result.email_sent,
     )
+
+# ==============================
+# redeem instructor invite
+# ==============================
+@router.post("/redeem-invite", status_code=status.HTTP_200_OK)
+def redeem_invite_and_attach_instructor(
+    invite_code: str,
+    user_id: int,
+    db: Session = Depends(get_db),
+):
+    """
+    초대코드 입력 → 유효성 검증 → instructor 등록
+    """
+    try:
+        partner_id, class_id, role = crud_course.redeem_invite_and_attach_instructor(
+            db,
+            invite_code=invite_code,
+            user_id=user_id,
+        )
+        return {"partner_id": partner_id, "class_id": class_id, "role": role}
+    except crud_course.InviteError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==============================
+# redeem student invite
+# ==============================
+@router.post("/invites/redeem-student", status_code=status.HTTP_200_OK)
+def redeem_student_invite_and_enroll(
+    invite_code: str,
+    full_name: str,
+    email: Optional[str] = None,
+    primary_contact: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    학생 초대코드 입력 → 유효성 검증 → Student 생성/조회 + 수강 등록 멱등 처리
+    - target_role == 'student' 인 초대코드만 허용
+    - InviteCode.class_id 필수
+    """
+    try:
+        student, enrollment, inv = crud_course.redeem_student_invite_and_enroll(
+            db,
+            invite_code=invite_code,
+            email=email,
+            full_name=full_name,
+            primary_contact=primary_contact,
+        )
+    except crud_course.InviteError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "student_id": student.id,
+        "enrollment_id": enrollment.id,
+        "partner_id": inv.partner_id,
+        "class_id": inv.class_id,
+        "invite_code": inv.code,
+    }
