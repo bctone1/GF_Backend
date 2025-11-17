@@ -321,3 +321,52 @@ def ensure_enrollment_by_email(
         status="active",
     )
     return student, enr
+
+def ensure_enrollment_for_invite(
+    db: Session,
+    *,
+    partner_id: int,
+    class_id: int,
+    invite_code_id: int,
+    email: Optional[str],
+    full_name: str,
+    primary_contact: Optional[str] = None,
+) -> Tuple[Student, Enrollment]:
+    """
+    학생 초대코드 redeem 시에 사용하는 헬퍼.
+
+    1) partner_id + email 기준으로 Student 멱등 생성/조회
+    2) 해당 학생을 class_id에 멱등 수강 등록
+    3) Enrollment.invite_code_id 세팅 (기존 등록이 있으면 필요 시만 업데이트)
+    """
+    # 1) 학생 보장
+    student = ensure_student(
+        db,
+        partner_id=partner_id,
+        email=email,
+        full_name=full_name,
+        primary_contact=primary_contact,
+    )
+
+    # 2) 기존 수강 여부 확인
+    existing = find_enrollment(db, class_id=class_id, student_id=student.id)
+    if existing:
+        # 이미 등록된 경우라도, 초대코드 트래킹이 없다면 채워 넣어 줄 수 있음
+        updates = {}
+        if existing.invite_code_id is None:
+            updates["invite_code_id"] = invite_code_id
+
+        if updates:
+            existing = update_enrollment(db, existing.id, **updates) or existing
+
+        return student, existing
+
+    # 3) 새로 수강 등록
+    enrollment = enroll_student(
+        db,
+        class_id=class_id,
+        student_id=student.id,
+        invite_code_id=invite_code_id,
+        status="active",
+    )
+    return student, enrollment

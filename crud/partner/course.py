@@ -12,7 +12,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models.partner.course import Course, Class, ClassInstructor, InviteCode
 from models.partner.partner_core import PartnerUser  # partner_user 업서트용
-
+from models.partner.student import Student, Enrollment
+from crud.partner import student as student_crud
 
 # ==============================
 # Course
@@ -522,16 +523,71 @@ def redeem_invite_and_attach_instructor(
     if not inv:
         raise InviteNotFound("invite not found")
 
+    # instructor 전용 코드만 허용
+    if inv.target_role != "instructor":
+        raise InviteError("invite is not for instructor")
+
     check_invite_usable(inv)
 
+    # 사용량 증가 (원자적)
     inv = increment_invite_use(db, code=invite_code)
 
-    if inv.target_role == "instructor":
-        upsert_partner_user_role(
-            db,
-            partner_id=inv.partner_id,
-            user_id=user_id,
-            role="instructor",
-        )
+    # 파트너-유저 instructor 롤 부여/업서트
+    upsert_partner_user_role(
+        db,
+        partner_id=inv.partner_id,
+        user_id=user_id,
+        role="instructor",
+    )
 
     return inv.partner_id, inv.class_id, inv.target_role
+
+# ==============================
+# redeem student invite
+# ==============================
+def redeem_student_invite_and_enroll(
+    db: Session,
+    *,
+    invite_code: str,
+    email: Optional[str],
+    full_name: str,
+    primary_contact: Optional[str] = None,
+) -> Tuple[Student, Enrollment, InviteCode]:
+    """
+    학생 초대코드 검증 → 사용량 증가 → Student 생성/조회 + Enrollment 멱등 등록
+
+    - target_role == "student" 인 코드만 허용
+    - InviteCode.class_id 가 필수 (어느 반에 등록할지)
+    - student_crud.ensure_enrollment_for_invite 를 사용해
+      (partner_id, email) 기준으로 학생/수강을 멱등 처리
+    반환: (student, enrollment, invite)
+    """
+    inv = get_invite_code(db, invite_code)
+    if not inv:
+        raise InviteNotFound("invite not found")
+
+    # student 전용 코드만 허용
+    if inv.target_role != "student":
+        raise InviteError("invite is not for student")
+
+    check_invite_usable(inv)
+
+    # 사용량 증가 (원자적)
+    inv = increment_invite_use(db, code=invite_code)
+
+    # 학생 초대는 어느 반에 붙일지 알아야 해서 class_id 필수
+    if inv.class_id is None:
+        raise InviteError("student invite must be associated with a class")
+
+    # 학생 + 수강 멱등 등록
+    student, enrollment = student_crud.ensure_enrollment_for_invite(
+        db,
+        partner_id=inv.partner_id,
+        class_id=inv.class_id,
+        invite_code_id=inv.id,
+        email=email,
+        full_name=full_name,
+        primary_contact=primary_contact,
+    )
+
+    return student, enrollment, inv
