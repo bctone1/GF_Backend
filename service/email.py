@@ -11,7 +11,6 @@ class EmailSendError(Exception):
     """이메일 발송 실패 공통 예외"""
     pass
 
-
 # 환경변수 기반 설정
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

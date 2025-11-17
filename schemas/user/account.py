@@ -30,6 +30,7 @@ class UserCreate(ORMBase):
     full_name: Optional[str] = None          # 프로필 초기값에 사용 가능
     status: Optional[str] = None             # 서버 기본값 'active' 사용 가능
     default_role: Optional[str] = None       # 서버 기본값 'member' 사용 가능
+    email_verified_token: Optional[str] = None
 
 class UserUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)

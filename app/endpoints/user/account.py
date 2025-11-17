@@ -1,14 +1,21 @@
-# app/endpoints/user/account.py
 from __future__ import annotations
 
 from typing import Optional
+from datetime import datetime, timedelta, timezone
+from random import randint
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi import Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from core.deps import get_db, get_current_user
-from core.security import hash_password, verify_password, issue_tokens
+from core.security import (
+    hash_password,
+    verify_password,
+    issue_tokens,
+    sign_payload,
+    verify_signed_payload,
+)
 
 from crud.user import account as user_crud
 from models.user.account import AppUser
@@ -27,13 +34,129 @@ from schemas.user.account import (
     UserLoginSessionResponse,
 )
 
+from service.email import send_email, EmailSendError
+
 router = APIRouter()
+
+
+# ==============================
+# 이메일 인증: 요청/응답 스키마 (엔드포인트 전용)
+# ==============================
+class EmailCodeSendRequest(BaseModel):
+    email: str
+
+
+class EmailCodeSendResponse(BaseModel):
+    email: str
+    verification_token: str   # email + code + exp 를 서명한 토큰
+
+
+class EmailCodeVerifyRequest(BaseModel):
+    email: str
+    code: str
+    verification_token: str   # send-code 때 받은 토큰
+
+
+class EmailCodeVerifyResponse(BaseModel):
+    email: str
+    email_verified_token: str  # 최종 회원가입에서 검증할 토큰
+
+
+# ==============================
+# Auth: 이메일 코드 발송 / 인증
+# ==============================
+@router.post("/user/email/send-code", response_model=EmailCodeSendResponse)
+@router.post("/user/email/send-code", response_model=EmailCodeSendResponse)
+def send_email_code(
+    payload: EmailCodeSendRequest,
+):
+    """
+    회원가입 전 이메일 인증코드 발송.
+    - DB 저장 없이, email/code/exp 를 서명한 verification_token 으로만 관리
+    - 실제 메일은 service.email.send_email 사용
+    """
+    email = payload.email.strip()
+
+    # 6자리 숫자 코드 생성
+    code = f"{randint(100000, 999999)}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    data = {
+        "email": email,
+        "code": code,
+        "exp": int(expires_at.timestamp()),
+    }
+    # email + code + exp 를 서명해서 프론트에 전달
+    verification_token = sign_payload(data)
+
+    # 실제 메일 발송
+    subject = "[GrowFit] 이메일 인증 코드"
+    body = (
+        f"GrowFit 회원가입 이메일 인증 코드입니다.\n\n"
+        f"코드: {code}\n"
+        f"유효 시간: 10분\n\n"
+        f"페이지에서 위 코드를 입력해 주세요."
+    )
+
+    try:
+        send_email(
+            to_email=email,
+            subject=subject,
+            body=body,
+            is_html=False,
+        )
+    except EmailSendError as e:
+        # 메일 전송 실패 시 에러 반환
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="failed to send verification email",
+        ) from e
+
+    return EmailCodeSendResponse(email=email, verification_token=verification_token)
+
+
+@router.post("/user/email/verify-code", response_model=EmailCodeVerifyResponse)
+def verify_email_code(
+    payload: EmailCodeVerifyRequest,
+):
+    """
+    이메일 + 코드 + verification_token 을 받아서 검증.
+    성공 시 회원가입에서 사용할 email_verified_token 발급.
+    """
+    # 서명/위변조/만료 검증
+    try:
+        data = verify_signed_payload(payload.verification_token)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid verification token")
+
+    # 1) 이메일 일치
+    if data.get("email") != payload.email:
+        raise HTTPException(status_code=400, detail="email mismatch")
+
+    # 2) 코드 일치
+    if data.get("code") != payload.code:
+        raise HTTPException(status_code=400, detail="invalid code")
+
+    # 3) 만료 확인
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if data.get("exp", 0) < now_ts:
+        raise HTTPException(status_code=400, detail="code expired")
+
+    # 이 시점에서 "이 이메일은 인증됨" 이라는 토큰 발급 (회원가입에서 사용)
+    email_verified_token = sign_payload(
+        {
+            "email": payload.email,
+            "verified": True,
+            "exp": int((datetime.now(timezone.utc) + timedelta(minutes=30)).timestamp()),
+        }
+    )
+
+    return EmailCodeVerifyResponse(email=payload.email, email_verified_token=email_verified_token)
 
 
 # ==============================
 # Auth: signup / login
 # ==============================
-
 @router.post("/user/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def user_signup(
     payload: UserCreate,
@@ -41,13 +164,33 @@ def user_signup(
 ):
     """
     기본 사용자 회원가입.
+    - email 인증 토큰(email_verified_token) 검증
     - email 중복 체크
     - password 해시 후 저장
     - 프로필/설정 생성
     """
+    # 1) 이메일 인증 토큰 확인 (UserCreate 에 email_verified_token 필드 추가 필요)
+    if not getattr(payload, "email_verified_token", None):
+        raise HTTPException(status_code=400, detail="email verification required")
+
+    try:
+        vdata = verify_signed_payload(payload.email_verified_token)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid email_verified_token")
+
+    # 이메일/플래그/만료 확인
+    if vdata.get("email") != payload.email or not vdata.get("verified"):
+        raise HTTPException(status_code=400, detail="email not verified")
+
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    if vdata.get("exp", 0) < now_ts:
+        raise HTTPException(status_code=400, detail="verification token expired")
+
+    # 2) email 중복 체크
     if user_crud.get_by_email(db, payload.email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
 
+    # 3) 패스워드 해시
     password_hash = hash_password(payload.password)
 
     user_in = {
@@ -107,9 +250,7 @@ def user_login(
     user_crud.create_login_session(db, user_id=app_user.user_id, data=session_data)
 
     # 토큰 발급 (dev-access-<user_id> 등)
-    # 투두: issue_tokens 구현/경로에 맞게 조정
     tokens = issue_tokens(app_user.user_id)
-    # issue_tokens 가 AuthTokens 형태를 그대로 돌려주지 않는다면 매핑 필요
     return AuthTokens(
         access_token=tokens.access_token,
         refresh_token=tokens.refresh_token,
@@ -120,7 +261,6 @@ def user_login(
 # ==============================
 # Me: 기본 계정 정보
 # ==============================
-
 @router.get("/my", response_model=UserResponse)
 def get_my_account(
     me: AppUser = Depends(get_current_user),
@@ -161,7 +301,6 @@ def update_my_account(
 # ==============================
 # Me: 프로필
 # ==============================
-
 @router.get("/my/profile", response_model=UserProfileResponse)
 def get_my_profile(
     db: Session = Depends(get_db),
@@ -169,7 +308,6 @@ def get_my_profile(
 ):
     profile = user_crud.get_profile(db, me.user_id)
     if not profile:
-        # 프로필이 아직 없으면 404 반환
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="profile not found")
     return UserProfileResponse.model_validate(profile)
 
@@ -188,7 +326,6 @@ def update_my_profile(
 # ==============================
 # Me: 보안 설정
 # ==============================
-
 @router.get("/my/security", response_model=UserSecuritySettingResponse)
 def get_my_security(
     db: Session = Depends(get_db),
@@ -214,7 +351,6 @@ def update_my_security(
 # ==============================
 # Me: 프라이버시 설정
 # ==============================
-
 @router.get("/my/privacy", response_model=UserPrivacySettingResponse)
 def get_my_privacy(
     db: Session = Depends(get_db),
@@ -238,9 +374,8 @@ def update_my_privacy(
 
 
 # ==============================
-# Me: 로그인 세션 목록 (선택)
+# Me: 로그인 세션 목록
 # ==============================
-
 @router.get("/my/sessions", response_model=list[UserLoginSessionResponse])
 def list_my_login_sessions(
     db: Session = Depends(get_db),

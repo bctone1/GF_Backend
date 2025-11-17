@@ -16,6 +16,8 @@ from schemas.partner.course import (
 from crud.partner import course as crud_course
 from service.partner import invite as invite_service
 
+
+
 router = APIRouter()
 
 
@@ -313,9 +315,7 @@ def delete_invite_code(
     return None
 
 
-# ==============================
 # redeem instructor invite
-# ==============================
 @router.post("/redeem-invite", status_code=status.HTTP_200_OK)
 def redeem_invite_and_attach_instructor(
     invite_code: str,
@@ -336,10 +336,7 @@ def redeem_invite_and_attach_instructor(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ==============================
-# POST /invites/send
-#  - 초대코드 생성 + 이메일 발송
-# ==============================
+# POST /invites/send : 초대코드 생성 + 이메일 발송
 @router.post(
     "/invites/send",
     response_model=InviteSendResponse,
@@ -378,10 +375,8 @@ def create_and_send_invite(
     )
 
 
-# ==============================
-# POST /invites/{id}/send
-#  - 기존 invite 재발송
-# ==============================
+
+# POST /invites/{id}/send : 기존 invite 재발송 :RESEND
 @router.post(
     "/invites/{invite_id}/send",
     response_model=InviteSendResponse,
@@ -417,11 +412,7 @@ def resend_invite(
         email_sent=result.email_sent,
     )
 
-
-# ==============================
-# POST /invites/assign
-#  - 가입 여부 확인 + 초대코드 생성 + 발송
-# ==============================
+# POST /invites/assign : 가입 여부 확인 + 초대코드 생성 + 발송
 @router.post(
     "/invites/assign",
     response_model=InviteSendResponse,
