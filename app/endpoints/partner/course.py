@@ -1,16 +1,20 @@
 # app/endpoints/partner/course.py
-# app/endpoints/partner/course.py
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from __future__ import annotations
+
+from typing import Optional
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import Optional, List, Tuple
 
 from core.deps import get_db, get_current_partner_admin
 from schemas.partner.course import (
     CourseCreate, CourseUpdate, CourseResponse, CoursePage,
     ClassCreate, ClassUpdate, ClassResponse, ClassPage,
     InviteCodeCreate, InviteCodeUpdate, InviteCodeResponse, InviteCodePage,
+    InviteSendRequest, InviteAssignRequest, InviteResendRequest, InviteSendResponse,  # ← 추가
 )
 from crud.partner import course as crud_course
+from service.partner import invite as invite_service
 
 router = APIRouter()
 
@@ -24,8 +28,8 @@ def list_courses(
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
     _=Depends(get_current_partner_admin),
 ):
     rows, total = crud_course.list_courses(
@@ -36,7 +40,17 @@ def list_courses(
         limit=limit,
         offset=offset,
     )
-    return {"total": total, "items": rows}
+
+    # limit/offset → page/size 계산
+    page = offset // limit + 1 if limit > 0 else 1
+    size = limit
+
+    return {
+        "total": total,
+        "items": rows,
+        "page": page,
+        "size": size,
+    }
 
 
 @router.post("", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
@@ -124,7 +138,9 @@ def list_classes(
     rows, total = crud_course.list_classes(
         db, course_id=course_id, status=status, limit=limit, offset=offset
     )
-    return {"total": total, "items": rows}
+    page = offset // limit + 1
+    size = limit
+    return {"total": total, "items": rows, "page": page, "size": size}
 
 
 @router.post("/{course_id}/classes", response_model=ClassResponse, status_code=status.HTTP_201_CREATED)
@@ -209,7 +225,7 @@ def delete_class(
 
 
 # ==============================
-# Invite Codes
+# Invite Codes CRUD
 # ==============================
 @router.get("/{course_id}/classes/{class_id}/invites", response_model=InviteCodePage)
 def list_invite_codes(
@@ -232,7 +248,9 @@ def list_invite_codes(
         limit=limit,
         offset=offset,
     )
-    return {"total": total, "items": rows}
+    page = offset // limit + 1
+    size = limit
+    return {"total": total, "items": rows, "page": page, "size": size}
 
 
 @router.post("/{course_id}/classes/{class_id}/invites", response_model=InviteCodeResponse)
@@ -316,3 +334,130 @@ def redeem_invite_and_attach_instructor(
         return {"partner_id": partner_id, "class_id": class_id, "role": role}
     except crud_course.InviteError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ==============================
+# POST /invites/send
+#  - 초대코드 생성 + 이메일 발송
+# ==============================
+@router.post(
+    "/invites/send",
+    response_model=InviteSendResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="partner_create_and_send_invite",
+)
+def create_and_send_invite(
+    partner_id: int,
+    payload: InviteSendRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_partner_admin),
+):
+    """
+    파트너가 특정 이메일로 초대코드를 생성해서 즉시 발송
+    """
+    try:
+        result = invite_service.create_and_send_invite(
+            db,
+            partner_id=partner_id,
+            email=payload.email,
+            class_id=payload.class_id,
+            target_role=payload.target_role,
+            expires_at=payload.expires_at,
+            max_uses=payload.max_uses,
+        )
+    except invite_service.InviteServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return InviteSendResponse(
+        invite_id=result.invite.id,
+        code=result.invite.code,
+        invite_url=result.invite_url,
+        email=result.email,
+        is_existing_user=result.is_existing_user,
+        email_sent=result.email_sent,
+    )
+
+
+# ==============================
+# POST /invites/{id}/send
+#  - 기존 invite 재발송
+# ==============================
+@router.post(
+    "/invites/{invite_id}/send",
+    response_model=InviteSendResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="partner_resend_invite",
+)
+def resend_invite(
+    partner_id: int,
+    invite_id: int,
+    payload: InviteResendRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_partner_admin),
+):
+    """
+    이미 생성된 초대코드를 다른(또는 같은) 이메일로 재발송
+    """
+    try:
+        result = invite_service.resend_invite(
+            db,
+            partner_id=partner_id,
+            invite_id=invite_id,
+            email=payload.email,
+        )
+    except invite_service.InviteServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return InviteSendResponse(
+        invite_id=result.invite.id,
+        code=result.invite.code,
+        invite_url=result.invite_url,
+        email=result.email,
+        is_existing_user=result.is_existing_user,
+        email_sent=result.email_sent,
+    )
+
+
+# ==============================
+# POST /invites/assign
+#  - 가입 여부 확인 + 초대코드 생성 + 발송
+# ==============================
+@router.post(
+    "/invites/assign",
+    response_model=InviteSendResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="partner_assign_invite_by_email",
+)
+def assign_invite_by_email(
+    partner_id: int,
+    payload: InviteAssignRequest,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_partner_admin),
+):
+    """
+    이메일 기준으로:
+    - 이미 가입된 user 인지 확인
+    - 초대코드 생성
+    - 템플릿은 service에서 신규/기가입 분기
+    """
+    try:
+        result = invite_service.assign_invite_by_email(
+            db,
+            partner_id=partner_id,
+            email=payload.email,
+            class_id=payload.class_id,
+            target_role=payload.target_role,
+            expires_at=payload.expires_at,
+            max_uses=payload.max_uses,
+        )
+    except invite_service.InviteServiceError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return InviteSendResponse(
+        invite_id=result.invite.id,
+        code=result.invite.code,
+        invite_url=result.invite_url,
+        email=result.email,
+        is_existing_user=result.is_existing_user,
+        email_sent=result.email_sent,
+    )

@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, List
-from pydantic import ConfigDict
-from decimal import Decimal
+from typing import Optional
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 from schemas.base import ORMBase, Page
 from schemas.enums import CourseStatus, ClassStatus
@@ -22,12 +21,21 @@ class CourseBase(ORMBase):
     description: Optional[str] = None
 
 
-class CourseCreate(CourseBase):
-    partner_id: int
+class CourseCreate(ORMBase):
+    """
+    partner_id는 path(`/partner/{partner_id}/course`)에서 받으므로 body에는 포함 X
+    """
+    title: str
+    course_key: str
+    status: Optional[CourseStatus] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    description: Optional[str] = None
 
 
 class CourseUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
+
     title: Optional[str] = None
     course_key: Optional[str] = None
     status: Optional[CourseStatus] = None
@@ -61,12 +69,25 @@ class ClassBase(ORMBase):
     invite_only: Optional[bool] = None
 
 
-class ClassCreate(ClassBase):
-    course_id: int
+class ClassCreate(ORMBase):
+    """
+    course_id는 path(`/courses/{course_id}/classes`)에서 받으므로 body에는 포함 X
+    """
+    name: str
+    section_code: Optional[str] = None
+    status: Optional[ClassStatus] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
+    capacity: Optional[int] = None
+    timezone: Optional[str] = None
+    location: Optional[str] = None
+    online_url: Optional[str] = None
+    invite_only: Optional[bool] = None
 
 
 class ClassUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
+
     name: Optional[str] = None
     section_code: Optional[str] = None
     status: Optional[ClassStatus] = None
@@ -121,33 +142,71 @@ class InviteCodeBase(ORMBase):
     target_role: str  # instructor | student
     expires_at: Optional[datetime] = None
     max_uses: Optional[int] = None
-    used_count: Optional[int] = None
-    status: Optional[str] = None
+    status: Optional[str] = None  # active | expired | disabled
 
 
-class InviteCodeCreate(InviteCodeBase):
-    partner_id: int
-    class_id: Optional[int] = None
-    created_by: Optional[int] = None
+class InviteCodeCreate(ORMBase):
+    """
+    partner_id, class_id, created_by 는 path/컨텍스트에서 결정
+    클라이언트가 직접 세팅하지 않음
+    """
+    code: str
+    target_role: str = "student"  # instructor | student
+    expires_at: Optional[datetime] = None
+    max_uses: Optional[int] = None
+    status: Optional[str] = None  # 없으면 DB default('active') 사용
 
 
 class InviteCodeUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
+
     target_role: Optional[str] = None
     expires_at: Optional[datetime] = None
     max_uses: Optional[int] = None
-    status: Optional[str] = None
-    is_active: Optional[bool] = None
+    status: Optional[str] = None  # active | expired | disabled
 
 
 class InviteCodeResponse(InviteCodeBase):
     id: int
     partner_id: int
     class_id: Optional[int] = None
+    used_count: int
     created_by: Optional[int] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ==============================
+# Invite DTOs (endpoint 전용)
+# ==============================
+class InviteSendRequest(BaseModel):
+    email: EmailStr
+    class_id: Optional[int] = None
+    target_role: str = "student"  # "student" | "instructor"
+    expires_at: Optional[datetime] = None
+    max_uses: Optional[int] = None
+
+
+class InviteAssignRequest(BaseModel):
+    email: EmailStr
+    class_id: Optional[int] = None
+    target_role: str = "student"  # "student" | "instructor"
+    expires_at: Optional[datetime] = None
+    max_uses: Optional[int] = None
+
+
+class InviteResendRequest(BaseModel):
+    email: EmailStr
+
+
+class InviteSendResponse(BaseModel):
+    invite_id: int
+    code: str
+    invite_url: str
+    email: EmailStr
+    is_existing_user: bool
+    email_sent: bool
 
 
 # ==============================

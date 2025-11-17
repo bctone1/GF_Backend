@@ -8,9 +8,10 @@ from sqlalchemy import select, update, delete, func, and_, or_, literal, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from models.partner.course import Course, Class, ClassInstructor, InviteCode
 from models.partner.partner_core import PartnerUser  # partner_user 업서트용
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 
 # ==============================
@@ -238,7 +239,13 @@ def list_class_instructors(db: Session, class_id: int) -> List[ClassInstructor]:
     return db.execute(stmt).scalars().all()
 
 
-def add_class_instructor(db: Session, *, class_id: int, partner_user_id: int, role: str = "assistant") -> ClassInstructor:
+def add_class_instructor(
+    db: Session,
+    *,
+    class_id: int,
+    partner_user_id: int,
+    role: str = "assistant",
+) -> ClassInstructor:
     obj = ClassInstructor(class_id=class_id, partner_user_id=partner_user_id, role=role)
     db.add(obj)
     try:
@@ -258,7 +265,12 @@ def add_class_instructor(db: Session, *, class_id: int, partner_user_id: int, ro
     return obj
 
 
-def update_class_instructor_role(db: Session, *, class_instructor_id: int, role: str) -> Optional[ClassInstructor]:
+def update_class_instructor_role(
+    db: Session,
+    *,
+    class_instructor_id: int,
+    role: str,
+) -> Optional[ClassInstructor]:
     obj = db.get(ClassInstructor, class_instructor_id)
     if not obj:
         return None
@@ -268,7 +280,12 @@ def update_class_instructor_role(db: Session, *, class_instructor_id: int, role:
     return obj
 
 
-def remove_class_instructor(db: Session, *, class_id: int, partner_user_id: int) -> bool:
+def remove_class_instructor(
+    db: Session,
+    *,
+    class_id: int,
+    partner_user_id: int,
+) -> bool:
     res = db.execute(
         delete(ClassInstructor).where(
             ClassInstructor.class_id == class_id,
@@ -282,6 +299,30 @@ def remove_class_instructor(db: Session, *, class_id: int, partner_user_id: int)
 # ==============================
 # InviteCode
 # ==============================
+class InviteError(Exception):
+    pass
+
+class InviteNotFound(InviteError):
+    pass
+
+class InviteExpired(InviteError):
+    pass
+
+class InviteDisabled(InviteError):
+    pass
+
+class InviteExhausted(InviteError):
+    pass
+
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+# ---------- 기본 CRUD ----------
+def get_invite_by_id(db: Session, invite_id: int) -> Optional[InviteCode]:
+    return db.get(InviteCode, invite_id)
+
+
 def get_invite_code(db: Session, code: str) -> Optional[InviteCode]:
     stmt = select(InviteCode).where(InviteCode.code == code)
     return db.execute(stmt).scalars().first()
@@ -293,7 +334,7 @@ def list_invite_codes(
     *,
     class_id: Optional[int] = None,
     status: Optional[str] = None,
-    target_role: Optional[str] = None,
+    target_role: Optional[str] = None,  # "instructor"|"student"
     search: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -308,8 +349,14 @@ def list_invite_codes(
     if search:
         conds.append(InviteCode.code.ilike(f"%{search}%"))
 
-    base = select(InviteCode).where(and_(*conds)).order_by(desc(InviteCode.created_at))
-    total = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
+    base = (
+        select(InviteCode)
+        .where(and_(*conds))
+        .order_by(desc(InviteCode.created_at))
+    )
+    total = db.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar() or 0
     rows = db.execute(base.limit(limit).offset(offset)).scalars().all()
     return rows, total
 
@@ -382,33 +429,7 @@ def delete_invite_code(db: Session, *, code: str) -> bool:
     return res.rowcount > 0
 
 
-# ==============================
-# InviteCode Redemption Helpers
-# ==============================
-class InviteError(Exception):
-    pass
-
-
-class InviteNotFound(InviteError):
-    pass
-
-
-class InviteExpired(InviteError):
-    pass
-
-
-class InviteDisabled(InviteError):
-    pass
-
-
-class InviteExhausted(InviteError):
-    pass
-
-
-def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
+# ---------- 유효성 검사 & 사용 처리 ----------
 def check_invite_usable(inv: InviteCode, *, now: Optional[datetime] = None) -> None:
     now = now or _now_utc()
     if inv.status == "disabled":
@@ -419,13 +440,17 @@ def check_invite_usable(inv: InviteCode, *, now: Optional[datetime] = None) -> N
         raise InviteExhausted("invite exhausted")
 
 
-def increment_invite_use(db: Session, *, code: str, now: Optional[datetime] = None) -> InviteCode:
+def increment_invite_use(
+    db: Session,
+    *,
+    code: str,
+    now: Optional[datetime] = None,
+) -> InviteCode:
     """
     used_count를 원자적으로 +1. 만료/용량 초과는 갱신 실패로 처리.
     """
     now = now or _now_utc()
 
-    # 조건부 업데이트: 유효한 경우에만 +1
     stmt = (
         update(InviteCode)
         .where(
@@ -439,12 +464,10 @@ def increment_invite_use(db: Session, *, code: str, now: Optional[datetime] = No
     )
     row = db.execute(stmt).first()
     if not row:
-        # 실패 원인 식별을 위해 현재 상태 조회
         inv = get_invite_code(db, code)
         if not inv:
             raise InviteNotFound("invite not found")
-        check_invite_usable(inv, now=now)  # 여기서 적절한 예외 발생
-        # 상태는 active지만 동시경쟁 등으로 실패한 경우
+        check_invite_usable(inv, now=now)
         raise InviteError("concurrent update failed")
     db.commit()
     return row[0]
@@ -472,7 +495,6 @@ def upsert_partner_user_role(
         is_active=is_active,
         updated_at=func.now(),
     )
-    # on conflict: set role, is_active, updated_at
     do_update = ins.on_conflict_do_update(
         index_elements=[PartnerUser.partner_id, PartnerUser.user_id],
         set_=dict(role=role, is_active=is_active, updated_at=func.now()),
@@ -496,19 +518,20 @@ def redeem_invite_and_attach_instructor(
     반환: (partner_id, class_id, target_role)
     서비스 계층에서 토큰 재발급/세션 리프레시 처리.
     """
-    # invite_codes 테이블에서 해당 code를 조회
     inv = get_invite_code(db, invite_code)
     if not inv:
         raise InviteNotFound("invite not found")
 
-    # 초대 코드 유효성 검증(조건불만족하면 예외 던짐)
     check_invite_usable(inv)
 
-    # 초대 코드 사용량 증가시킴
     inv = increment_invite_use(db, code=invite_code)
 
-    # 초대코드가 강사용이면(instructor) partner_users 업서트
     if inv.target_role == "instructor":
-        upsert_partner_user_role(db, partner_id=inv.partner_id, user_id=user_id, role="instructor")
+        upsert_partner_user_role(
+            db,
+            partner_id=inv.partner_id,
+            user_id=user_id,
+            role="instructor",
+        )
 
     return inv.partner_id, inv.class_id, inv.target_role
