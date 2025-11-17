@@ -66,7 +66,6 @@ class EmailCodeVerifyResponse(BaseModel):
 # Auth: 이메일 코드 발송 / 인증
 # ==============================
 @router.post("/user/email/send-code", response_model=EmailCodeSendResponse)
-@router.post("/user/email/send-code", response_model=EmailCodeSendResponse)
 def send_email_code(
     payload: EmailCodeSendRequest,
 ):
