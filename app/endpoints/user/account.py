@@ -92,7 +92,7 @@ def send_email_code(
     subject = "[GrowFit] 이메일 인증 코드"
     body = (
         f"GrowFit 회원가입 이메일 인증 코드입니다.\n\n"
-        f"코드: {code}\n"
+        f"코드: {code}\n\n"
         f"유효 시간: 10분\n\n"
         f"페이지에서 위 코드를 입력해 주세요."
     )
