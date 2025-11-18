@@ -12,7 +12,6 @@ from models.partner.session import AiSession, SessionMessage
 # ==============================
 # AiSession CRUD
 # ==============================
-
 def get_session(db: Session, session_id: int) -> Optional[AiSession]:
     """
     단일 세션 조회.
@@ -232,3 +231,32 @@ def delete_message(
 ) -> None:
     db.delete(message)
     db.commit()
+
+
+# ==============================
+# SessionMessage CRUD
+# ==============================
+def get_message(db: Session, message_id: int) -> Optional[SessionMessage]:
+    return db.get(SessionMessage, message_id)
+
+
+def get_last_message_by_role(
+    db: Session,
+    *,
+    session_id: int,
+    role: str,
+) -> Optional[SessionMessage]:
+    """
+    특정 세션에서 role 에 해당하는 마지막 메시지 하나만 가져오는 헬퍼.
+    - 보통 role="user" 로 호출해서 마지막 사용자 메시지를 찾는 용도
+    """
+    stmt: Select[SessionMessage] = (
+        select(SessionMessage)
+        .where(
+            SessionMessage.session_id == session_id,
+            SessionMessage.role == role,
+        )
+        .order_by(SessionMessage.created_at.desc())
+        .limit(1)
+    )
+    return db.execute(stmt).scalars().first()
