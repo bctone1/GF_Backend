@@ -86,37 +86,37 @@ def create_document(
 
 
 @router.get(
-    "/document/{document_id}",
+    "/document/{knowledge_id}",
     response_model=DocumentResponse,
     operation_id="get_document_detail",
 )
 def get_document_detail(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
     return DocumentResponse.model_validate(doc)
 
 
 @router.patch(
-    "/document/{document_id}",
+    "/document/{knowledge_id}",
     response_model=DocumentResponse,
     operation_id="update_document",
 )
 def update_document(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     data: DocumentUpdate = ...,
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
-    updated = document_crud.update(db, document_id=document_id, data=data)
+    updated = document_crud.update(db, knowledge_id=knowledge_id, data=data)
     db.commit()
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
@@ -124,20 +124,20 @@ def update_document(
 
 
 @router.delete(
-    "/document/{document_id}",
+    "/document/{knowledge_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_document",
 )
 def delete_document(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
-    document_crud.delete(db, document_id=document_id)
+    document_crud.delete(db, knowledge_id=knowledge_id)
     db.commit()
     return None
 
@@ -171,16 +171,16 @@ def list_all_document_tags(
 
 
 @router.get(
-    "/document/{document_id}/tags",
+    "/document/{knowledge_id}/tags",
     response_model=List[DocumentTagResponse],
     operation_id="list_document_tags",
 )
 def list_document_tags(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
@@ -192,7 +192,7 @@ def list_document_tags(
             DocumentTagAssignment,
             DocumentTagAssignment.tag_id == DocumentTag.tag_id,
         )
-        .where(DocumentTagAssignment.document_id == document_id)
+        .where(DocumentTagAssignment.knowledge_id == knowledge_id)
         .order_by(DocumentTag.name.asc())
     )
     tags = list(db.scalars(stmt).all())
@@ -200,40 +200,40 @@ def list_document_tags(
 
 
 @router.post(
-    "/document/{document_id}/tags",
+    "/document/{knowledge_id}/tags",
     response_model=DocumentTagResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="add_document_tag",
 )
 def add_document_tag(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     body: DocumentTagCreate = ...,
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
     tag = document_tag_crud.ensure(db, name=body.name)
-    assignment_in = DocumentTagAssignmentCreate(document_id=document_id, tag_id=tag.tag_id)
+    assignment_in = DocumentTagAssignmentCreate(knowledge_id=knowledge_id, tag_id=tag.tag_id)
     document_tag_assignment_crud.assign(db, assignment_in)
     db.commit()
     return DocumentTagResponse.model_validate(tag)
 
 
 @router.delete(
-    "/document/{document_id}/tags/{tag_id}",
+    "/document/{knowledge_id}/tags/{tag_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="remove_document_tag",
 )
 def remove_document_tag(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     tag_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
@@ -241,7 +241,7 @@ def remove_document_tag(
 
     # assignment_id를 직접 넘기지 않으므로 (doc, tag)로 조회 후 삭제
     stmt = select(DocumentTagAssignment).where(
-        DocumentTagAssignment.document_id == document_id,
+        DocumentTagAssignment.knowledge_id == knowledge_id,
         DocumentTagAssignment.tag_id == tag_id,
     )
     assignment = db.scalars(stmt).first()
@@ -259,20 +259,20 @@ def remove_document_tag(
 # Document Usage (사용량 조회 - READ ONLY)
 # =========================================================
 @router.get(
-    "/document/{document_id}/usage",
+    "/document/{knowledge_id}/usage",
     response_model=List[DocumentUsageResponse],
     operation_id="list_document_usage",
 )
 def list_document_usage(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
-    usages = document_usage_crud.list_by_document(db, document_id=document_id)
+    usages = document_usage_crud.list_by_document(db, knowledge_id=knowledge_id)
     return [DocumentUsageResponse.model_validate(u) for u in usages]
 
 
@@ -280,41 +280,41 @@ def list_document_usage(
 # Document Pages / Chunks (조회 전용)
 # =========================================================
 @router.get(
-    "/document/{document_id}/pages",
+    "/document/{knowledge_id}/pages",
     response_model=List[DocumentPageResponse],
     operation_id="list_document_pages",
 )
 def list_document_pages(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
-    pages = document_page_crud.list_by_document(db, document_id=document_id)
+    pages = document_page_crud.list_by_document(db, knowledge_id=knowledge_id)
     return [DocumentPageResponse.model_validate(p) for p in pages]
 
 
 @router.get(
-    "/document/{document_id}/chunks",
+    "/document/{knowledge_id}/chunks",
     response_model=List[DocumentChunkResponse],
     operation_id="list_document_chunks",
 )
 def list_document_chunks(
-    document_id: int = Path(..., ge=1),
+    knowledge_id: int = Path(..., ge=1),
     page_id: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    doc = document_crud.get(db, document_id=document_id)
+    doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
 
     chunks = document_chunk_crud.list_by_document_page(
         db,
-        document_id=document_id,
+        knowledge_id=knowledge_id,
         page_id=page_id,
     )
     return [DocumentChunkResponse.model_validate(c) for c in chunks]

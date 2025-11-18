@@ -67,21 +67,21 @@ def _build_sources(
     벡터 검색으로 컨텍스트 청크를 가져와 QASource 리스트로 변환.
 
     - 현재 프로젝트 기준:
-      knowledge_id == document_id 로 해석해서 crud.user.document.search_chunks_by_vector 사용
+      knowledge_id == knowledge_id 로 해석해서 crud.user.document.search_chunks_by_vector 사용
     """
 
     chunks = document_crud.search_chunks_by_vector(
         db,
         query_vector=vector,
-        knowledge_id=knowledge_id,  # 내부에서 document_id 로 매핑
+        knowledge_id=knowledge_id,  # 내부에서 knowledge_id 로 매핑
         top_k=top_k,
     )
 
     sources: list[QASource] = []
 
     for chunk in chunks:
-        # document_id / page_id / chunk_index 등의 필드명은 모델 정의에 맞춰 사용
-        document_id = getattr(chunk, "document_id", None)
+        # knowledge_id / page_id / chunk_index 등의 필드명은 모델 정의에 맞춰 사용
+        knowledge_id = getattr(chunk, "knowledge_id", None)
         page_id = getattr(chunk, "page_id", None)
         chunk_index = getattr(chunk, "chunk_index", None)
 
@@ -95,7 +95,7 @@ def _build_sources(
         sources.append(
             QASource(
                 chunk_id=chunk.id,
-                knowledge_id=document_id,  # QASource 필드명은 그대로 두고 document_id를 넣어줌
+                knowledge_id=knowledge_id,  # QASource 필드명은 그대로 두고 knowledge_id를 넣어줌
                 page_id=page_id,
                 chunk_index=chunk_index,
                 text=text,

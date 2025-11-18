@@ -33,7 +33,7 @@ class DocumentUpdate(ORMBase):
 
 class DocumentResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
-    document_id: int
+    knowledge_id: int
     owner_id: int
     name: str
     file_format: str
@@ -50,7 +50,7 @@ class DocumentResponse(ORMBase):
 # =========================================================
 class DocumentProcessingJobCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-    document_id: int
+    knowledge_id: int
     stage: str
     status: Optional[str] = None          # server default 'queued'
     message: Optional[str] = None
@@ -70,7 +70,7 @@ class DocumentProcessingJobUpdate(ORMBase):
 class DocumentProcessingJobResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     job_id: int
-    document_id: int
+    knowledge_id: int
     stage: str
     status: str
     message: Optional[str] = None
@@ -102,7 +102,7 @@ class DocumentTagResponse(ORMBase):
 # =========================================================
 class DocumentTagAssignmentCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-    document_id: int
+    knowledge_id: int
     tag_id: int
 
 
@@ -115,7 +115,7 @@ class DocumentTagAssignmentUpdate(ORMBase):
 class DocumentTagAssignmentResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     assignment_id: int
-    document_id: int
+    knowledge_id: int
     tag_id: int
 
 
@@ -124,7 +124,7 @@ class DocumentTagAssignmentResponse(ORMBase):
 # =========================================================
 class DocumentUsageCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-    document_id: int
+    knowledge_id: int
     user_id: Optional[int] = None
     usage_type: str
     usage_count: Optional[int] = None      # server default 0
@@ -141,7 +141,7 @@ class DocumentUsageUpdate(ORMBase):
 class DocumentUsageResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     usage_id: int
-    document_id: int
+    knowledge_id: int
     user_id: Optional[int] = None
     usage_type: str
     usage_count: int
@@ -153,7 +153,7 @@ class DocumentUsageResponse(ORMBase):
 # =========================================================
 class DocumentPageCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-    document_id: int
+    knowledge_id: int
     page_no: Optional[int] = None         # 1부터, NULL 허용
     image_url: Optional[str] = None
     created_at: Optional[datetime] = None  # 보통 서버에서 채움
@@ -169,7 +169,7 @@ class DocumentPageUpdate(ORMBase):
 class DocumentPageResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     page_id: int
-    document_id: int
+    knowledge_id: int
     page_no: Optional[int] = None
     image_url: Optional[str] = None
     created_at: datetime
@@ -180,7 +180,7 @@ class DocumentPageResponse(ORMBase):
 # =========================================================
 class DocumentChunkCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-    document_id: int
+    knowledge_id: int
     page_id: Optional[int] = None
     chunk_index: int
     chunk_text: str
@@ -199,7 +199,7 @@ class DocumentChunkUpdate(ORMBase):
 class DocumentChunkResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     chunk_id: int
-    document_id: int
+    knowledge_id: int
     page_id: Optional[int] = None
     chunk_index: int
     chunk_text: str

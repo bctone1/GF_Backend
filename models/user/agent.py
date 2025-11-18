@@ -25,9 +25,9 @@ class AIAgent(Base):
         ForeignKey("user.projects.project_id", ondelete="SET NULL"),
         nullable=True,
     )
-    document_id = Column(
+    knowledge_id = Column(
         BigInteger,
-        ForeignKey("user.documents.document_id", ondelete="SET NULL"),
+        ForeignKey("user.documents.knowledge_id", ondelete="SET NULL"),
         nullable=True,
     )
 
@@ -47,7 +47,7 @@ class AIAgent(Base):
     __table_args__ = (
         Index("idx_ai_agents_owner_status", "owner_id", "status"),
         Index("idx_ai_agents_project", "project_id"),
-        Index("idx_ai_agents_document", "document_id"),
+        Index("idx_ai_agents_document", "knowledge_id"),
         {"schema": "user"},
     )
 

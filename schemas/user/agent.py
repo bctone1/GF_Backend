@@ -14,7 +14,7 @@ class AIAgentCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     owner_id: int
     project_id: Optional[int] = None
-    document_id: Optional[int] = None
+    knowledge_id: Optional[int] = None
     name: str
     role_description: Optional[str] = None
     status: Optional[str] = None          # server default 'draft'
@@ -25,7 +25,7 @@ class AIAgentCreate(ORMBase):
 class AIAgentUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     project_id: Optional[int] = None
-    document_id: Optional[int] = None
+    knowledge_id: Optional[int] = None
     name: Optional[str] = None
     role_description: Optional[str] = None
     status: Optional[str] = None
@@ -38,7 +38,7 @@ class AIAgentResponse(ORMBase):
     agent_id: int
     owner_id: int
     project_id: Optional[int] = None
-    document_id: Optional[int] = None
+    knowledge_id: Optional[int] = None
     name: str
     role_description: Optional[str] = None
     status: str

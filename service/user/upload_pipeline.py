@@ -143,7 +143,7 @@ class UploadPipeline:
     # 6) 페이지 저장 (user.document_pages)
     def store_pages(
         self,
-        document_id: int,
+        knowledge_id: int,
         num_pages: int,
         image_urls: Optional[List[str]] = None,
     ):
@@ -156,7 +156,7 @@ class UploadPipeline:
             )
             pages.append(
                 DocumentPageCreate(
-                    document_id=document_id,
+                    knowledge_id=knowledge_id,
                     page_no=i,
                     image_url=img,
                 )
@@ -192,7 +192,7 @@ class UploadPipeline:
     # 9) 청크 + 벡터 저장 (user.document_chunks)
     def store_chunks(
         self,
-        document_id: int,
+        knowledge_id: int,
         chunks: List[str],
         vectors: List[List[float]],
     ):
@@ -201,7 +201,7 @@ class UploadPipeline:
         items: List[tuple[DocumentChunkCreate, List[float]]] = []
         for idx, (txt, vec) in enumerate(zip(chunks, vectors), start=1):
             schema = DocumentChunkCreate(
-                document_id=document_id,
+                knowledge_id=knowledge_id,
                 page_id=None,
                 chunk_index=idx,
                 chunk_text=txt,
@@ -212,13 +212,13 @@ class UploadPipeline:
 
         # Document.chunk_count 갱신
         update_in = DocumentUpdate(chunk_count=len(chunks))
-        doc_crud.document_crud.update(self.db, document_id=document_id, data=update_in)
+        doc_crud.document_crud.update(self.db, knowledge_id=knowledge_id, data=update_in)
 
     # 10) Document 상태 변경
-    def _set_status(self, document_id: int, status: str):
+    def _set_status(self, knowledge_id: int, status: str):
         try:
             update_in = DocumentUpdate(status=status)
-            doc_crud.document_crud.update(self.db, document_id=document_id, data=update_in)
+            doc_crud.document_crud.update(self.db, knowledge_id=knowledge_id, data=update_in)
         except Exception:
             # 상태 변경 실패는 치명적이지 않으므로 무시
             pass
@@ -236,12 +236,12 @@ class UploadPipeline:
             preview = self._build_preview(text)
             doc = self.create_metadata(file, preview)
 
-            self.store_pages(doc.document_id, num_pages)
+            self.store_pages(doc.knowledge_id, num_pages)
 
             chunks = self.chunk_text(text)
             chunks, vectors = self.embed_chunks(chunks)
             if vectors:
-                self.store_chunks(doc.document_id, chunks, vectors)
+                self.store_chunks(doc.knowledge_id, chunks, vectors)
 
                 # ==== 비용 집계: 임베딩 ====
                 try:
@@ -283,7 +283,7 @@ class UploadPipeline:
                     log.exception("api-cost embedding record failed: %s", e)
 
             # 성공: status = active
-            self._set_status(doc.document_id, "active")
+            self._set_status(doc.knowledge_id, "active")
             self.db.commit()
 
             # 최신 값으로 refresh
@@ -295,7 +295,7 @@ class UploadPipeline:
             # 실패: status = error
             if self.document:
                 try:
-                    self._set_status(self.document.document_id, "error")
+                    self._set_status(self.document.knowledge_id, "error")
                     self.db.commit()
                 except Exception:
                     pass

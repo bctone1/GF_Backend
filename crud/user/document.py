@@ -52,8 +52,8 @@ class DocumentCRUD:
         db.refresh(obj)
         return obj
 
-    def get(self, db: Session, document_id: int) -> Optional[Document]:
-        stmt = select(Document).where(Document.document_id == document_id)
+    def get(self, db: Session, knowledge_id: int) -> Optional[Document]:
+        stmt = select(Document).where(Document.knowledge_id == knowledge_id)
         return db.scalar(stmt)
 
     def get_by_owner(
@@ -94,7 +94,7 @@ class DocumentCRUD:
     def update(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
         data: DocumentUpdate,
     ) -> Optional[Document]:
         values = {
@@ -103,19 +103,19 @@ class DocumentCRUD:
             if v is not None
         }
         if not values:
-            return self.get(db, document_id)
+            return self.get(db, knowledge_id)
 
         stmt = (
             update(Document)
-            .where(Document.document_id == document_id)
+            .where(Document.knowledge_id == knowledge_id)
             .values(**values)
         )
         db.execute(stmt)
         db.flush()
-        return self.get(db, document_id)
+        return self.get(db, knowledge_id)
 
-    def delete(self, db: Session, document_id: int) -> None:
-        stmt = delete(Document).where(Document.document_id == document_id)
+    def delete(self, db: Session, knowledge_id: int) -> None:
+        stmt = delete(Document).where(Document.knowledge_id == knowledge_id)
         db.execute(stmt)
         db.flush()
 
@@ -129,7 +129,7 @@ document_crud = DocumentCRUD()
 class DocumentProcessingJobCRUD:
     def create(self, db: Session, data: DocumentProcessingJobCreate) -> DocumentProcessingJob:
         obj = DocumentProcessingJob(
-            document_id=data.document_id,
+            knowledge_id=data.knowledge_id,
             stage=data.stage,
             status=data.status or "queued",
             message=data.message,
@@ -144,11 +144,11 @@ class DocumentProcessingJobCRUD:
     def list_by_document(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
     ) -> Sequence[DocumentProcessingJob]:
         stmt = (
             select(DocumentProcessingJob)
-            .where(DocumentProcessingJob.document_id == document_id)
+            .where(DocumentProcessingJob.knowledge_id == knowledge_id)
             .order_by(DocumentProcessingJob.started_at.asc().nullsfirst())
         )
         return db.scalars(stmt).all()
@@ -252,10 +252,10 @@ class DocumentTagAssignmentCRUD:
         data: DocumentTagAssignmentCreate,
     ) -> DocumentTagAssignment:
         """
-        (document_id, tag_id) 조합이 이미 있으면 기존 row 반환.
+        (knowledge_id, tag_id) 조합이 이미 있으면 기존 row 반환.
         """
         stmt = select(DocumentTagAssignment).where(
-            DocumentTagAssignment.document_id == data.document_id,
+            DocumentTagAssignment.knowledge_id == data.knowledge_id,
             DocumentTagAssignment.tag_id == data.tag_id,
         )
         existing = db.scalar(stmt)
@@ -263,7 +263,7 @@ class DocumentTagAssignmentCRUD:
             return existing
 
         obj = DocumentTagAssignment(
-            document_id=data.document_id,
+            knowledge_id=data.knowledge_id,
             tag_id=data.tag_id,
         )
         db.add(obj)
@@ -274,10 +274,10 @@ class DocumentTagAssignmentCRUD:
     def list_by_document(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
     ) -> Sequence[DocumentTagAssignment]:
         stmt = select(DocumentTagAssignment).where(
-            DocumentTagAssignment.document_id == document_id
+            DocumentTagAssignment.knowledge_id == knowledge_id
         )
         return db.scalars(stmt).all()
 
@@ -308,11 +308,11 @@ class DocumentUsageCRUD:
         increment: int = 1,
     ) -> DocumentUsage:
         """
-        (document_id, user_id, usage_type) 단위로 사용량 증가.
+        (knowledge_id, user_id, usage_type) 단위로 사용량 증가.
         commit 은 바깥에서 한 번만
         """
         stmt = select(DocumentUsage).where(
-            DocumentUsage.document_id == data.document_id,
+            DocumentUsage.knowledge_id == data.knowledge_id,
             DocumentUsage.user_id == data.user_id,
             DocumentUsage.usage_type == data.usage_type,
         )
@@ -322,7 +322,7 @@ class DocumentUsageCRUD:
 
         if usage is None:
             usage = DocumentUsage(
-                document_id=data.document_id,
+                knowledge_id=data.knowledge_id,
                 user_id=data.user_id,
                 usage_type=data.usage_type,
                 usage_count=data.usage_count or increment,
@@ -340,10 +340,10 @@ class DocumentUsageCRUD:
     def list_by_document(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
     ) -> Sequence[DocumentUsage]:
         stmt = select(DocumentUsage).where(
-            DocumentUsage.document_id == document_id
+            DocumentUsage.knowledge_id == knowledge_id
         )
         return db.scalars(stmt).all()
 
@@ -381,7 +381,7 @@ document_usage_crud = DocumentUsageCRUD()
 class DocumentPageCRUD:
     def create(self, db: Session, data: DocumentPageCreate) -> DocumentPage:
         obj = DocumentPage(
-            document_id=data.document_id,
+            knowledge_id=data.knowledge_id,
             page_no=data.page_no,
             image_url=data.image_url,
             # created_at 은 DB default 사용
@@ -399,7 +399,7 @@ class DocumentPageCRUD:
         objs: list[DocumentPage] = []
         for p in pages:
             obj = DocumentPage(
-                document_id=p.document_id,
+                knowledge_id=p.knowledge_id,
                 page_no=p.page_no,
                 image_url=p.image_url,
             )
@@ -413,11 +413,11 @@ class DocumentPageCRUD:
     def list_by_document(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
     ) -> Sequence[DocumentPage]:
         stmt = (
             select(DocumentPage)
-            .where(DocumentPage.document_id == document_id)
+            .where(DocumentPage.knowledge_id == knowledge_id)
             .order_by(DocumentPage.page_no.asc().nullsfirst())
         )
         return db.scalars(stmt).all()
@@ -448,7 +448,7 @@ class DocumentChunkCRUD:
         ----------------------------------------------------------------
         """
         obj = DocumentChunk(
-            document_id=data.document_id,
+            knowledge_id=data.knowledge_id,
             page_id=data.page_id,
             chunk_index=data.chunk_index,
             chunk_text=data.chunk_text,
@@ -473,7 +473,7 @@ class DocumentChunkCRUD:
         # items = []
         # for idx, (text, page_id) in enumerate(parsed_chunks, start=1):
         #     schema_obj = DocumentChunkCreate(
-        #         document_id=document_id,
+        #         knowledge_id=knowledge_id,
         #         page_id=page_id,
         #         chunk_index=idx,
         #         chunk_text=text,
@@ -486,7 +486,7 @@ class DocumentChunkCRUD:
         objs: list[DocumentChunk] = []
         for data, vector in items:
             obj = DocumentChunk(
-                document_id=data.document_id,
+                knowledge_id=data.knowledge_id,
                 page_id=data.page_id,
                 chunk_index=data.chunk_index,
                 chunk_text=data.chunk_text,
@@ -502,11 +502,11 @@ class DocumentChunkCRUD:
     def list_by_document(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
     ) -> Sequence[DocumentChunk]:
         stmt = (
             select(DocumentChunk)
-            .where(DocumentChunk.document_id == document_id)
+            .where(DocumentChunk.knowledge_id == knowledge_id)
             .order_by(DocumentChunk.chunk_index.asc())
         )
         return db.scalars(stmt).all()
@@ -514,11 +514,11 @@ class DocumentChunkCRUD:
     def list_by_document_page(
         self,
         db: Session,
-        document_id: int,
+        knowledge_id: int,
         page_id: Optional[int] = None,
     ) -> Sequence[DocumentChunk]:
         stmt = select(DocumentChunk).where(
-            DocumentChunk.document_id == document_id
+            DocumentChunk.knowledge_id == knowledge_id
         )
         if page_id is not None:
             stmt = stmt.where(DocumentChunk.page_id == page_id)
@@ -530,16 +530,16 @@ class DocumentChunkCRUD:
         db: Session,
         *,
         query_vector: Sequence[float],
-        document_id: Optional[int] = None,
+        knowledge_id: Optional[int] = None,
         top_k: int = 8,
     ) -> List[DocumentChunk]:
         """
         pgvector 코사인 거리 기반 상위 N개 청크 검색
-        document_id가 있으면 해당 문서 내에서만 검색
+        knowledge_id가 있으면 해당 문서 내에서만 검색
         """
         stmt = select(DocumentChunk)
-        if document_id is not None:
-            stmt = stmt.where(DocumentChunk.document_id == document_id)
+        if knowledge_id is not None:
+            stmt = stmt.where(DocumentChunk.knowledge_id == knowledge_id)
 
         stmt = (
             stmt.order_by(
@@ -562,12 +562,12 @@ def search_chunks_by_vector(
 ) -> List[DocumentChunk]:
     """
     qa_chain 등에서 쓰기 위한 헬퍼
-    knowledge_id == document_id 로 해석해서 전달
+    knowledge_id == knowledge_id 로 해석해서 전달
     """
     return document_chunk_crud.search_by_vector(
         db=db,
         query_vector=query_vector,
-        document_id=knowledge_id,
+        knowledge_id=knowledge_id,
         top_k=top_k,
     )
 

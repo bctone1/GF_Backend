@@ -75,7 +75,7 @@ class DocumentIngestService:
         self.db = db
         self.owner_id = owner_id
         self.file_path: Optional[str] = None
-        self.document_id: Optional[int] = None
+        self.knowledge_id: Optional[int] = None
 
     # -----------------------
     # 1) 파일 저장
@@ -134,15 +134,15 @@ class DocumentIngestService:
                 chunk_count=0,
             ),
         )
-        self.document_id = doc.document_id
-        return doc.document_id
+        self.knowledge_id = doc.knowledge_id
+        return doc.knowledge_id
 
     # -----------------------
     # 4) 페이지 저장
     # -----------------------
     def store_pages(
         self,
-        document_id: int,
+        knowledge_id: int,
         num_pages: int,
         image_urls: Optional[List[str]] = None,
     ) -> None:
@@ -159,7 +159,7 @@ class DocumentIngestService:
             )
             pages.append(
                 DocumentPageCreate(
-                    document_id=document_id,
+                    knowledge_id=knowledge_id,
                     page_no=i,
                     image_url=image_url,
                 )
@@ -196,7 +196,7 @@ class DocumentIngestService:
     # -----------------------
     def store_chunks(
         self,
-        document_id: int,
+        knowledge_id: int,
         chunks: List[str],
         vectors: List[List[float]],
     ) -> None:
@@ -213,7 +213,7 @@ class DocumentIngestService:
         for idx, (text, vec) in enumerate(zip(chunks, vectors), start=1):
             chunk_models.append(
                 DocumentChunk(
-                    document_id=document_id,
+                    knowledge_id=knowledge_id,
                     page_id=None,          # page 매핑 필요 시 추후 확장
                     chunk_index=idx,
                     chunk_text=text,
@@ -228,7 +228,7 @@ class DocumentIngestService:
     # -----------------------
     def _set_document_status(
         self,
-        document_id: int,
+        knowledge_id: int,
         status: str,
         chunk_count: Optional[int] = None,
     ) -> None:
@@ -237,7 +237,7 @@ class DocumentIngestService:
             data["chunk_count"] = chunk_count
         document_crud.update(
             self.db,
-            document_id=document_id,
+            knowledge_id=knowledge_id,
             data=DocumentUpdate(**data),
         )
 
@@ -280,11 +280,11 @@ class DocumentIngestService:
     # -----------------------
     # 9) DocumentProcessingJob 헬퍼
     # -----------------------
-    def _create_job(self, document_id: int, stage: str) -> int:
+    def _create_job(self, knowledge_id: int, stage: str) -> int:
         job = document_job_crud.create(
             self.db,
             DocumentProcessingJobCreate(
-                document_id=document_id,
+                knowledge_id=knowledge_id,
                 stage=stage,
                 status="queued",
             ),
@@ -368,16 +368,16 @@ class DocumentIngestService:
                 chunk_count=len(chunks),
             )
 
-            document = document_crud.get(self.db, document_id=doc_id)
+            document = document_crud.get(self.db, knowledge_id=doc_id)
             return document
 
         except Exception as e:
             log.exception("Document ingest failed: %s", e)
             # 실패 시 상태 error 처리
-            if self.document_id:
+            if self.knowledge_id:
                 try:
                     self._set_document_status(
-                        self.document_id,
+                        self.knowledge_id,
                         status="error",
                     )
                 except Exception:

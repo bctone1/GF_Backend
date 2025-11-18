@@ -14,7 +14,7 @@ from models.base import Base
 class Document(Base):
     __tablename__ = "documents"
 
-    document_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    knowledge_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     owner_id = Column(
         BigInteger,
@@ -63,9 +63,9 @@ class DocumentProcessingJob(Base):
 
     job_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    document_id = Column(
+    knowledge_id = Column(
         BigInteger,
-        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -83,7 +83,7 @@ class DocumentProcessingJob(Base):
             "completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at",
             name="chk_document_jobs_time",
         ),
-        Index("idx_document_jobs_doc_time", "document_id", "started_at"),
+        Index("idx_document_jobs_doc_time", "knowledge_id", "started_at"),
         Index("idx_document_jobs_status", "status"),
         {"schema": "user"},
     )
@@ -108,9 +108,9 @@ class DocumentTagAssignment(Base):
 
     assignment_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    document_id = Column(
+    knowledge_id = Column(
         BigInteger,
-        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
         nullable=False,
     )
     tag_id = Column(
@@ -122,8 +122,8 @@ class DocumentTagAssignment(Base):
     document = relationship("Document", back_populates="tags", passive_deletes=True)
 
     __table_args__ = (
-        UniqueConstraint("document_id", "tag_id", name="uq_document_tag_assignments_doc_tag"),
-        Index("idx_document_tag_assignments_doc", "document_id"),
+        UniqueConstraint("knowledge_id", "tag_id", name="uq_document_tag_assignments_doc_tag"),
+        Index("idx_document_tag_assignments_doc", "knowledge_id"),
         Index("idx_document_tag_assignments_tag", "tag_id"),
         {"schema": "user"},
     )
@@ -135,9 +135,9 @@ class DocumentUsage(Base):
 
     usage_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    document_id = Column(
+    knowledge_id = Column(
         BigInteger,
-        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
         nullable=False,
     )
     user_id = Column(
@@ -154,7 +154,7 @@ class DocumentUsage(Base):
 
     __table_args__ = (
         CheckConstraint("usage_count >= 0", name="chk_document_usage_count_nonneg"),
-        Index("idx_document_usage_doc_time", "document_id", "last_used_at"),
+        Index("idx_document_usage_doc_time", "knowledge_id", "last_used_at"),
         Index("idx_document_usage_user_time", "user_id", "last_used_at"),
         {"schema": "user"},
     )
@@ -166,9 +166,9 @@ class DocumentPage(Base):
 
     page_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    document_id = Column(
+    knowledge_id = Column(
         BigInteger,
-        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -180,9 +180,9 @@ class DocumentPage(Base):
     chunks = relationship("DocumentChunk", back_populates="page", passive_deletes=True)
 
     __table_args__ = (
-        UniqueConstraint("document_id", "page_no", name="uq_document_pages_doc_page"),
+        UniqueConstraint("knowledge_id", "page_no", name="uq_document_pages_doc_page"),
         CheckConstraint("page_no IS NULL OR page_no >= 1", name="chk_document_pages_page_no_ge_1"),
-        Index("idx_document_pages_doc_page", "document_id", "page_no"),
+        Index("idx_document_pages_doc_page", "knowledge_id", "page_no"),
         {"schema": "user"},
     )
 
@@ -193,9 +193,9 @@ class DocumentChunk(Base):
 
     chunk_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    document_id = Column(
+    knowledge_id = Column(
         BigInteger,
-        ForeignKey("user.documents.document_id", ondelete="CASCADE"),
+        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
         nullable=False,
     )
     page_id = Column(
@@ -215,9 +215,9 @@ class DocumentChunk(Base):
 
     __table_args__ = (
         CheckConstraint("chunk_index >= 1", name="chk_document_chunks_index_ge_1"),
-        UniqueConstraint("document_id", "chunk_index", name="uq_document_chunks_doc_idx"),
-        Index("idx_document_chunks_doc_index", "document_id", "chunk_index"),
-        Index("idx_document_chunks_doc_page", "document_id", "page_id"),
+        UniqueConstraint("knowledge_id", "chunk_index", name="uq_document_chunks_doc_idx"),
+        Index("idx_document_chunks_doc_index", "knowledge_id", "chunk_index"),
+        Index("idx_document_chunks_doc_page", "knowledge_id", "page_id"),
         Index(
             "idx_document_chunks_vec_ivfflat",
             "vector_memory",
