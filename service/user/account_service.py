@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from crud.user import account as user_crud
-from service.auth import hash_password, verify_password, issue_tokens
+from core.security import hash_password, verify_password, issue_tokens
 from schemas.user.account import (
     UserCreate,
     UserResponse,
@@ -17,41 +17,52 @@ from schemas.user.account import (
 
 
 def signup(db: Session, payload: UserCreate) -> UserResponse:
-    data = payload.model_dump()
-    raw_pw = data.pop("password", None)
-    if not raw_pw:
+    """
+    기본 사용자 회원가입 서비스 레이어
+    - 이메일 중복 체크
+    - 비밀번호 해시
+    - 프로필 분리(full_name)
+    - user + profile + 기본 settings 생성
+    """
+    # 이메일 중복 체크
+    if user_crud.get_by_email(db, payload.email):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="email already exists",
+        )
+
+    # 비밀번호 필수
+    if not payload.password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="password required",
         )
 
     # 비밀번호 해시
-    data["password_hash"] = hash_password(raw_pw)
+    password_hash = hash_password(payload.password)
 
     # 프로필(full_name) 분리
-    full_name = data.pop("full_name", None)
-    profile_in = {"full_name": full_name} if full_name else None
+    profile_in = {}
+    if getattr(payload, "full_name", None):
+        profile_in["full_name"] = payload.full_name
 
-    # 이메일 중복 체크 (옵션이지만 명시적으로 처리)
-    if user_crud.get_by_email(db, data["email"]):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="email already exists",
-        )
+    # 클라이언트에서 status/default_role 임의 지정 못 하게 서버에서 고정
+    user_in = {
+        "email": payload.email,
+        "password_hash": password_hash,
+        "status": "active",
+        "default_role": "member",
+    }
 
     # user + profile + 기본 settings 생성
     user = user_crud.create_with_profile(
         db,
-        user_in=data,
-        profile_in=profile_in,
+        user_in=user_in,
+        profile_in=profile_in or None,
         ensure_settings=True,
     )
 
-    return UserResponse(
-        user_id=user.user_id,
-        email=user.email,
-        default_role=user.default_role,
-    )
+    return UserResponse.model_validate(user)
 
 
 def login(
@@ -59,6 +70,15 @@ def login(
     payload: LoginInput,
     meta: Dict[str, str],
 ) -> AuthTokens:
+    """
+    로그인 서비스 레이어
+    - get_by_email + verify_password
+    - 상태 체크(active/invited)
+    - 기존 세션 종료
+    - 새 로그인 세션 생성
+    - 마지막 로그인 시간 업데이트
+    - 토큰 발급
+    """
     user = user_crud.get_by_email(db, email=payload.email)
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
@@ -66,7 +86,13 @@ def login(
             detail="invalid credentials",
         )
 
-    # single_current=True 와 같은 효과:
+    # 상태 체크
+    if user.status not in ("active", "invited"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="user is not active",
+        )
+
     # 1) 기존 current 세션 모두 종료
     user_crud.close_all_sessions_for_user(db, user_id=user.user_id)
 
@@ -86,4 +112,9 @@ def login(
     user_crud.set_last_login(db, user_id=user.user_id)
 
     # 4) 토큰 발급
-    return issue_tokens(user_id=user.user_id)
+    tokens = issue_tokens(user_id=user.user_id)
+    return AuthTokens(
+        access_token=tokens.access_token,
+        refresh_token=tokens.refresh_token,
+        token_type=getattr(tokens, "token_type", "bearer"),
+    )

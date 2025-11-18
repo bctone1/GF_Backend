@@ -12,8 +12,6 @@ from pydantic import BaseModel
 from core.deps import get_db, get_current_user
 from core.security import (
     hash_password,
-    verify_password,
-    issue_tokens,
     sign_payload,
     verify_signed_payload,
 )
@@ -21,47 +19,18 @@ from core.security import (
 from crud.user import account as user_crud
 from models.user.account import AppUser
 from schemas.user.account import (
-    LoginInput,
-    AuthTokens,
-    UserCreate,
-    UserUpdate,
-    UserResponse,
-    UserProfileUpdate,
-    UserProfileResponse,
-    UserSecuritySettingUpdate,
-    UserSecuritySettingResponse,
-    UserPrivacySettingUpdate,
-    UserPrivacySettingResponse,
-    UserLoginSessionResponse,
+    LoginInput, AuthTokens, UserCreate, UserUpdate,
+    UserResponse, UserProfileUpdate, UserProfileResponse, UserSecuritySettingUpdate,
+    UserSecuritySettingResponse, UserPrivacySettingUpdate,
+    UserPrivacySettingResponse,  UserLoginSessionResponse,
+    EmailCodeSendRequest, EmailCodeSendResponse,
+    EmailCodeVerifyRequest, EmailCodeVerifyResponse,
 )
 
+from service.user import account_service
 from service.email import send_email, EmailSendError
 
 router = APIRouter()
-
-
-# ==============================
-# 이메일 인증: 요청/응답 스키마 (엔드포인트 전용)
-# ==============================
-class EmailCodeSendRequest(BaseModel):
-    email: str
-
-
-class EmailCodeSendResponse(BaseModel):
-    email: str
-    verification_token: str   # email + code + exp 를 서명한 토큰
-
-
-class EmailCodeVerifyRequest(BaseModel):
-    email: str
-    code: str
-    verification_token: str   # send-code 때 받은 토큰
-
-
-class EmailCodeVerifyResponse(BaseModel):
-    email: str
-    email_verified_token: str  # 최종 회원가입에서 검증할 토큰
-
 
 # ==============================
 # Auth: 이메일 코드 발송 / 인증
@@ -165,11 +134,9 @@ def user_signup(
     """
     기본 사용자 회원가입.
     - email 인증 토큰(email_verified_token) 검증
-    - email 중복 체크
-    - password 해시 후 저장
-    - 프로필/설정 생성
+    - 실제 생성은 service.user.account_service.signup 에 위임
     """
-    # 1) 이메일 인증 토큰 확인 (UserCreate 에 email_verified_token 필드 추가 필요)
+    # 1) 이메일 인증 토큰 확인
     if not getattr(payload, "email_verified_token", None):
         raise HTTPException(status_code=400, detail="email verification required")
 
@@ -186,31 +153,8 @@ def user_signup(
     if vdata.get("exp", 0) < now_ts:
         raise HTTPException(status_code=400, detail="verification token expired")
 
-    # 2) email 중복 체크
-    if user_crud.get_by_email(db, payload.email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="email already exists")
-
-    # 3) 패스워드 해시
-    password_hash = hash_password(payload.password)
-
-    user_in = {
-        "email": payload.email,
-        "password_hash": password_hash,
-        "status": payload.status or "active",
-        "default_role": payload.default_role or "member",
-    }
-
-    profile_in = {}
-    if payload.full_name:
-        profile_in["full_name"] = payload.full_name
-
-    app_user = user_crud.create_with_profile(
-        db,
-        user_in=user_in,
-        profile_in=profile_in or None,
-        ensure_settings=True,
-    )
-    return UserResponse.model_validate(app_user)
+    # 2) 실제 회원 생성은 서비스 레이어에 위임
+    return account_service.signup(db, payload)
 
 
 @router.post("/user/login", response_model=AuthTokens)
@@ -221,41 +165,16 @@ def user_login(
 ):
     """
     이메일/비밀번호 기반 로그인.
-    - 비밀번호 검증
-    - last_login_at 업데이트
-    - 로그인 세션 기록
-    - 토큰 발급
+    - 실제 로직은 service.user.account_service.login 에 위임
     """
-    app_user = user_crud.get_by_email(db, payload.email)
-    if not app_user or not verify_password(payload.password, app_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
-
-    # 상태 체크 (필요 시)
-    if app_user.status not in ("active", "invited"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="user is not active")
-
-    # 마지막 로그인 갱신
-    user_crud.set_last_login(db, user_id=app_user.user_id)
-
-    # 로그인 세션 기록
     client = request.client
-    ip = client.host if client else None
-    ua = request.headers.get("user-agent")
-    session_data = {
+    meta = {
         "device_name": None,
-        "ip_address": ip,
+        "ip_address": client.host if client else None,
         "location": None,
-        "user_agent": ua,
+        "user_agent": request.headers.get("user-agent"),
     }
-    user_crud.create_login_session(db, user_id=app_user.user_id, data=session_data)
-
-    # 토큰 발급 (dev-access-<user_id> 등)
-    tokens = issue_tokens(app_user.user_id)
-    return AuthTokens(
-        access_token=tokens.access_token,
-        refresh_token=tokens.refresh_token,
-        token_type=tokens.token_type if hasattr(tokens, "token_type") else "bearer",
-    )
+    return account_service.login(db, payload, meta)
 
 
 # ==============================

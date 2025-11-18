@@ -168,22 +168,6 @@ def set_last_login(
     db.commit()
 
 
-# -----------------------------------------------------------------------------
-# NOTE (service/user/account_service.py 예시)
-#
-# def signup(db, payload: UserCreate) -> UserResponse:
-#     1) 이메일 중복 체크(get_by_email)
-#     2) 비밀번호 해시 생성
-#     3) create_with_profile(...) 호출
-#
-# def login(db, payload: LoginInput, meta: dict[str, str]) -> AuthTokens:
-#     1) get_by_email + verify_password
-#     2) close_all_sessions_for_user
-#     3) create_login_session
-#     4) set_last_login
-#     5) issue_tokens
-# -----------------------------------------------------------------------------
-
 
 # =============================================================================
 # UserProfile (user.user_profiles)

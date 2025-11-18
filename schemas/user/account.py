@@ -2,8 +2,31 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional, List
-from pydantic import EmailStr, ConfigDict
+from pydantic import EmailStr, ConfigDict, BaseModel
 from schemas.base import ORMBase
+
+# ==============================
+# 이메일 인증: 요청/응답 스키마 (엔드포인트 전용)
+# ==============================
+class EmailCodeSendRequest(BaseModel):
+    email: str
+
+
+class EmailCodeSendResponse(BaseModel):
+    email: str
+    verification_token: str   # email + code + exp 를 서명한 토큰
+
+
+class EmailCodeVerifyRequest(BaseModel):
+    email: str
+    code: str
+    verification_token: str   # send-code 때 받은 토큰
+
+
+class EmailCodeVerifyResponse(BaseModel):
+    email: str
+    email_verified_token: str  # 최종 회원가입에서 검증할 토큰
+
 
 # =========================
 # Auth I/O
