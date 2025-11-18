@@ -237,8 +237,11 @@ def update_my_profile(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    data = payload.model_dump(exclude_unset=True)
-    profile = user_crud.upsert_profile(db, user_id=me.user_id, data=data)
+    profile = account_service.update_my_profile(
+        db=db,
+        me_id=me.user_id,
+        payload=payload,
+    )
     return UserProfileResponse.model_validate(profile)
 
 

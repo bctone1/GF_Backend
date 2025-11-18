@@ -210,15 +210,6 @@ def delete_profile(
     db.commit()
 
 
-# -----------------------------------------------------------------------------
-# NOTE (service/user/account_service.py 예시)
-#
-# def update_my_profile(db, me_id: int, payload: UserProfileUpdate) -> UserProfile:
-#     data = payload.model_dump(exclude_unset=True)
-#     return upsert_profile(db, user_id=me_id, data=data)
-# -----------------------------------------------------------------------------
-
-
 # =============================================================================
 # UserSecuritySetting (user.user_security_settings)
 # =============================================================================

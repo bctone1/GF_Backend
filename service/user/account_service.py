@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 
 from crud.user import account as user_crud
 from core.security import hash_password, verify_password, issue_tokens
+from models.user.account import UserProfile
 from schemas.user.account import (
     UserCreate,
     UserResponse,
     LoginInput,
     AuthTokens,
+    UserProfileUpdate,
 )
 
 
@@ -118,3 +120,16 @@ def login(
         refresh_token=tokens.refresh_token,
         token_type=getattr(tokens, "token_type", "bearer"),
     )
+
+
+def update_my_profile(
+    db: Session,
+    me_id: int,
+    payload: UserProfileUpdate,
+) -> UserProfile:
+    """
+    내 프로필 업데이트 서비스 레이어
+    - payload 에서 unset 은 제외하고 upsert_profile 호출
+    """
+    data = payload.model_dump(exclude_unset=True)
+    return user_crud.upsert_profile(db, user_id=me_id, data=data)
