@@ -248,15 +248,6 @@ def delete_security_setting(
     db.commit()
 
 
-# -----------------------------------------------------------------------------
-# NOTE (service/user/security_service.py 예시)
-#
-# def enable_2fa(db, user_id: int, method: str, backup_codes: list[str]) -> UserSecuritySetting:
-#     data = {"two_factor_enabled": True, "two_factor_method": method, "backup_codes": backup_codes}
-#     return upsert_security_setting(db, user_id=user_id, data=data)
-# -----------------------------------------------------------------------------
-
-
 # =============================================================================
 # UserLoginSession (user.user_login_sessions)
 # =============================================================================
@@ -374,18 +365,6 @@ def close_all_sessions_for_user(
     db.commit()
 
 
-# -----------------------------------------------------------------------------
-# NOTE (service/user/account_service.py 예시)
-#
-# def issue_login_session(db, user_id: int, meta: dict[str, str]) -> UserLoginSession:
-#     data = {
-#         "user_agent": meta.get("user_agent"),
-#         "ip_address": meta.get("ip_address"),
-#         "device_name": meta.get("device_name"),
-#         "location": meta.get("location"),
-#     }
-#     return create_login_session(db, user_id=user_id, data=data)
-# -----------------------------------------------------------------------------
 
 
 # =============================================================================
@@ -425,11 +404,3 @@ def delete_privacy_setting(
     db.delete(obj)
     db.commit()
 
-
-# -----------------------------------------------------------------------------
-# NOTE (service/user/privacy_service.py 예시)
-#
-# def update_my_privacy(db, me_id: int, payload: UserPrivacySettingUpdate) -> UserPrivacySetting:
-#     data = payload.model_dump(exclude_unset=True)
-#     return upsert_privacy_setting(db, user_id=me_id, data=data)
-# -----------------------------------------------------------------------------
