@@ -45,8 +45,7 @@ except Exception:
 # 프리뷰 LLM 사용 여부(기본 비활성)
 _USE_LLM_PREVIEW = getattr(config, "USE_LLM_PREVIEW", False)
 if _USE_LLM_PREVIEW:
-    # NOTE  실제 프로젝트 경로에 맞게 구현/수정
-    from service.prompt import pdf_preview_prompt  # type: ignore
+    from langchain_service.prompt.prompt import pdf_preview_prompt  # type: ignore
 
 
 def _tok_len(s: str) -> int:
