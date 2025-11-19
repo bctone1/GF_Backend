@@ -12,6 +12,15 @@ FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 *
 * 프론트 샘플 화면 리소스 포함
   예: 파트너 대시보드(Partner Admin), 조직/사용자 관리, 사용자 관리 페이지 초기화 로그, 시스템 모니터링 인시던트 기록, AI 실습·문서 연계, 유틸리티 함수 모듈.
 
+Known issue:
+- Python 3.14 + langchain_core 에서
+  "Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater."
+  경고 발생
+- 현재는 무시하고 사용
+- 만약 pydantic 모델 검증/직렬화에서 이상한 버그 나오면
+  → Python 3.11/3.12 로 venv 갈아타는 플랜 B
+
+
 ## 권한 티어와 데이터 스코프
 
 * **supervisor**: 플랫폼 전역 운영. 조직/사용자 총괄, 과금·리포트, 시스템 설정·모니터링. 관련 화면: 플랫폼 설정(API/보안), 시스템 모니터링, 분석 리포트 예약/내보내기.
