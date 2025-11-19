@@ -15,7 +15,8 @@ from schemas.supervisor.api_usage import (
 )
 from core import config
 import logging
-log = logging.getLogger("api_usage")
+
+log = logging.getLogger("api_cost")
 
 class ApiUsageCRUD:
     """
@@ -153,6 +154,7 @@ class ApiUsageCRUD:
 api_usage_crud = ApiUsageCRUD()
 
 
+
 # ============================================================
 # 편의 함수: add_event (UploadPipeline 등에서 사용)
 # ============================================================
@@ -174,38 +176,41 @@ def add_event(
     """
     UploadPipeline 등에서 쓰는 간단 로깅 헬퍼.
 
-    - 기존 호출 시그니처를 그대로 받되
-      supervisor.api_usage 모델에 맞춰 필드를 매핑해서 저장
-    - organization_id 가 None 이면 config.DEFAULT_ORGANIZATION_ID 를 사용
-    - 최종적으로 org_id 를 알 수 없으면 조용히 넘어감 (None 반환)
+    - ENABLE_API_USAGE_LOG 가 False 이면 아무 것도 안 함
+    - organization_id 가 None 이면 config.DEFAULT_ORGANIZATION_ID 사용 시도
+    - org_id 를 끝까지 못 정하면 조용히 스킵 (None 반환)
     """
     if not getattr(config, "ENABLE_API_USAGE_LOG", False):
         return None
 
-    # NOTE 추후에 SQL 토큰값 집계 설정 후에 다시 시도
-    # # 조직 ID 결정 (없으면 기본값 시도)
-    # org_id = organization_id or getattr(config, "DEFAULT_ORGANIZATION_ID", None)
-    # if org_id is None:
-    #     # 아직 조직 컨텍스트를 안 붙였으면 기록 스킵
-    #     return None
-    #
-    # # 토큰 합산 (chat + embedding 등)
-    # total_tokens = int((llm_tokens or 0) + (embedding_tokens or 0))
-    #
-    # # 단순 매핑: product → provider, model → endpoint
-    # provider = product              # 예: "embedding", "chat", "stt"
-    # endpoint = model                # 예: "text-embedding-3-small", "gpt-4o-mini"
-    #
-    # payload = ApiUsageCreate(
-    #     organization_id=org_id,
-    #     user_id=user_id,
-    #     provider=provider,
-    #     endpoint=endpoint,
-    #     tokens=total_tokens,
-    #     cost=Decimal(str(cost_usd)),
-    #     status=status,
-    #     response_time_ms=response_time_ms,
-    #     # requested_at 은 DB default (NOW()) 사용
-    # )
-    #
-    # return api_usage_crud.create(db, payload)
+    # 1) 조직 ID 결정
+    org_id = organization_id or getattr(config, "DEFAULT_ORGANIZATION_ID", None)
+    if org_id is None:
+        log.info("api-cost: skip logging because organization_id is None")
+        return None
+
+    # 2) 토큰 합산 (chat + embedding)
+    total_tokens = int((llm_tokens or 0) + (embedding_tokens or 0))
+
+    # 3) product / model → provider / endpoint 로 매핑
+    provider = product              # 예: "embedding", "chat", "stt"
+    endpoint = model                # 예: "text-embedding-3-small", "gpt-4o-mini"
+
+    # 4) payload 생성
+    payload = ApiUsageCreate(
+        organization_id=org_id,
+        user_id=user_id,
+        provider=provider,
+        endpoint=endpoint,
+        tokens=total_tokens,
+        cost=Decimal(str(cost_usd)),
+        status=status,
+        response_time_ms=response_time_ms,
+        # requested_at 은 DB default (NOW()) 사용
+        # 만약 ts_utc 를 강제로 쓰고 싶으면
+        # ApiUsageCreate 에 requested_at 필드 추가해서 여기서 넣으면 됨
+    )
+
+    # 5) 실제 INSERT
+    obj = api_usage_crud.create(db, payload)
+    return obj

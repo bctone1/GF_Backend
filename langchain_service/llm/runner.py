@@ -31,7 +31,7 @@ except Exception:
     except Exception:
         get_openai_callback = None
 
-log = logging.getLogger("api_usage")
+log = logging.getLogger("api_cost")
 
 MAX_CTX_CHARS = 12000  # qa_chain 기본값과 동일
 

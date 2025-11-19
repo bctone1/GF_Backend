@@ -206,7 +206,7 @@ class DocumentChunk(Base):
 
     chunk_index = Column(Integer, nullable=False)  # 1부터
     chunk_text = Column(Text, nullable=False)
-    vector_memory = Column(Vector(1536), nullable=False)  # 기존 이름 그대로 사용
+    vector_memory = Column(Vector(1536), nullable=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

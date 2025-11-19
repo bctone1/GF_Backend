@@ -36,7 +36,8 @@ from schemas.user.document import (
     DocumentProcessingJobUpdate,
     DocumentPageCreate,
 )
-from crud.supervisor import api_cost
+
+from crud.supervisor import api_usage
 
 
 log = logging.getLogger("api_cost")
@@ -259,7 +260,7 @@ class DocumentIngestService:
                 usage["embedding_tokens"],
                 usd,
             )
-            api_cost.add_event(
+            api_usage.add_event(
                 self.db,
                 ts_utc=datetime.now(timezone.utc),
                 product="embedding",
