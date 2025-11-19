@@ -1,8 +1,11 @@
+# schemas/supervisor/core.py
 from __future__ import annotations
-from typing import Any, Optional
+
+from typing import Any, Optional, Literal
 from decimal import Decimal
 from datetime import datetime, date
-from pydantic import BaseModel, EmailStr, ConfigDict
+
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 from schemas.base import ORMBase, MoneyBase
 
 
@@ -47,6 +50,61 @@ class SupervisorUserResponse(ORMBase):
 
 
 # =========================
+# Partner Promotion Requests
+# =========================
+PromotionStatus = Literal["pending", "approved", "rejected", "cancelled"]
+
+class PartnerPromotionRequestCreate(ORMBase):
+    """
+    유저가 강사/파트너 승격 신청을 생성할 때 사용하는 입력 스키마
+    - user_id, email, full_name, requested_at, status 등은 서버에서 채움
+    """
+
+    requested_org_name: str
+    target_role: str = "partner_admin"
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class PartnerPromotionRequestUpdate(ORMBase):
+    """
+    supervisor 쪽에서 승인/거절 처리 시 사용하는 스키마
+    """
+
+    status: Optional[PromotionStatus] = None
+    decided_reason: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    partner_id: Optional[int] = None
+    partner_user_id: Optional[int] = None
+    target_role: Optional[str] = None
+    meta: Optional[dict[str, Any]] = None
+
+
+class PartnerPromotionRequestResponse(ORMBase):
+    """
+    목록/단건 조회 응답 스키마
+    models.supervisor.core.PartnerPromotionRequest와 1:1 매핑
+    """
+
+    request_id: int
+    user_id: int
+    email: EmailStr
+    full_name: Optional[str] = None
+
+    requested_org_name: str
+    target_role: str
+
+    status: PromotionStatus
+    requested_at: datetime
+    decided_at: Optional[datetime] = None
+    decided_reason: Optional[str] = None
+
+    partner_id: Optional[int] = None
+    partner_user_id: Optional[int] = None
+
+    meta: dict[str, Any]
+
+
+# =========================
 # user_roles
 # =========================
 class UserRoleCreate(ORMBase):
@@ -71,7 +129,7 @@ class UserRoleResponse(ORMBase):
 # user_role_assignments
 # =========================
 class UserRoleAssignmentCreate(ORMBase):
-    # SupervisorUser.id를 참조
+    # SupervisorUser.user_id 를 참조
     user_id: int
     role_id: int
     assigned_by: Optional[int] = None
@@ -93,7 +151,7 @@ class UserRoleAssignmentResponse(ORMBase):
 # sessions
 # =========================
 class SessionCreate(ORMBase):
-    # SupervisorUser.id를 참조
+    # SupervisorUser.user_id 를 참조
     user_id: int
     organization_id: int
     started_at: datetime
@@ -122,7 +180,7 @@ class SessionResponse(ORMBase):
 
 
 # =========================
-# promotions
+# promotions (기존: supervisor가 바로 partner 생성하는 API용 DTO)
 # =========================
 class PromotionRequest(BaseModel):
     model_config = ConfigDict(from_attributes=False)

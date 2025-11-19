@@ -5,16 +5,24 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel
 
 from core.deps import get_db, require_supervisor_admin
 from crud.supervisor import core as super_crud
 
 from schemas.supervisor.core import (
-    PlanCreate, PlanUpdate, PlanResponse,
-    OrganizationCreate, OrganizationUpdate, OrganizationResponse,
-    SupervisorUserCreate, SupervisorUserResponse,
-    UserRoleCreate, UserRoleResponse, UserRoleAssignmentResponse,
-    PromotionRequest, PromotionResponse,
+    PlanCreate,
+    PlanUpdate,
+    PlanResponse,
+    OrganizationCreate,
+    OrganizationUpdate,
+    OrganizationResponse,
+    SupervisorUserCreate,
+    SupervisorUserResponse,
+    UserRoleCreate,
+    UserRoleResponse,
+    UserRoleAssignmentResponse,
+    PartnerPromotionRequestResponse,
 )
 
 router = APIRouter()
@@ -57,7 +65,11 @@ def create_role(
     db: Session = Depends(get_db),
     _ = Depends(require_supervisor_admin),
 ):
-    role = super_crud.get_or_create_role(db, role_name=data.role_name, permissions=data.permissions_json or {})
+    role = super_crud.get_or_create_role(
+        db,
+        role_name=data.role_name,
+        permissions=data.permissions_json or {},
+    )
     return role
 
 @router.post("/roles/bootstrap", response_model=List[UserRoleResponse])
@@ -72,37 +84,105 @@ def assign_role_to_user(
     user_id: int,
     role_name: str,
     db: Session = Depends(get_db),
-    me = Depends(require_supervisor_admin),
+    me=Depends(require_supervisor_admin),
 ):
-    ura = super_crud.assign_role(db, user_id=user_id, role_name=role_name, assigned_by=getattr(me, "user_id", None))
+    ura = super_crud.assign_role(
+        db,
+        user_id=user_id,
+        role_name=role_name,
+        assigned_by=getattr(me, "user_id", None),
+    )
     return ura
 
 # ==============================
-# Promotion: user.users -> Partner
+# Partner Promotion Requests (승격 요청 승인/거절)
 # ==============================
-@router.post("/promotions/partner", response_model=PromotionResponse, status_code=status.HTTP_201_CREATED)
-def promote_user_to_partner(
-    data: PromotionRequest,
+class PromotionDecision(BaseModel):
+    decided_reason: Optional[str] = None
+    target_role: Optional[str] = None  # 승인 시에만 사용, 거절 시에는 무시
+
+
+@router.get(
+    "/promotions/partner-requests",
+    response_model=List[PartnerPromotionRequestResponse],
+)
+def list_partner_promotion_requests(
+    status_: Optional[str] = Query(None, alias="status"),
     db: Session = Depends(get_db),
-    me = Depends(require_supervisor_admin),
+    _ = Depends(require_supervisor_admin),
 ):
+    """
+    승격 요청 목록 조회
+    - status 쿼리로 pending/approved/rejected/cancelled 필터
+    """
+    rows = super_crud.list_promotion_requests(db, status=status_)
+    return rows
+
+
+@router.get(
+    "/promotions/partner-requests/{request_id}",
+    response_model=PartnerPromotionRequestResponse,
+)
+def get_partner_promotion_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    _ = Depends(require_supervisor_admin),
+):
+    req = super_crud.get_promotion_request(db, request_id=request_id)
+    if not req:
+        raise HTTPException(status_code=404, detail="promotion request not found")
+    return req
+
+
+@router.post(
+    "/promotions/partner-requests/{request_id}/approve",
+    response_model=PartnerPromotionRequestResponse,
+)
+def approve_partner_promotion_request(
+    request_id: int,
+    body: PromotionDecision,
+    db: Session = Depends(get_db),
+    _ = Depends(require_supervisor_admin),
+):
+    """
+    승격 요청 승인
+    - partner/partner_user 생성(또는 재사용)
+    - 요청 status = approved 로 변경
+    """
     try:
-        partner, puser = super_crud.promote_user_to_partner(
+        req, _, _ = super_crud.approve_promotion_request(
             db,
-            email=data.email,
-            partner_name=data.partner_name,
-            partner_code=data.partner_code,
-            created_by=getattr(me, "user_id", None),
-            partner_user_role=data.partner_user_role or "partner_admin",
+            request_id=request_id,
+            decided_reason=body.decided_reason,
+            target_role=body.target_role,
         )
-        return PromotionResponse(
-            partner_id=partner.id,
-            partner_code=partner.code,
-            partner_name=partner.name,
-            partner_user_id=puser.id,
-            user_id=puser.user_id,
-            role=puser.role,
+        return req
+    except super_crud.PromotionNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except super_crud.PromotionConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post(
+    "/promotions/partner-requests/{request_id}/reject",
+    response_model=PartnerPromotionRequestResponse,
+)
+def reject_partner_promotion_request(
+    request_id: int,
+    body: PromotionDecision,
+    db: Session = Depends(get_db),
+    _ = Depends(require_supervisor_admin),
+):
+    """
+    승격 요청 거절, pending 상태만 거절 가능
+    """
+    try:
+        req = super_crud.reject_promotion_request(
+            db,
+            request_id=request_id,
+            decided_reason=body.decided_reason,
         )
+        return req
     except super_crud.PromotionNotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
     except super_crud.PromotionConflict as e:
@@ -124,7 +204,7 @@ def list_organizations(
 def create_organization(
     data: OrganizationCreate,
     db: Session = Depends(get_db),
-    me = Depends(require_supervisor_admin),
+    me=Depends(require_supervisor_admin),
 ):
     return super_crud.create_org(
         db,
@@ -155,7 +235,11 @@ def update_organization(
     db: Session = Depends(get_db),
     _ = Depends(require_supervisor_admin),
 ):
-    updated = super_crud.update_org(db, org_id, **data.model_dump(exclude_unset=True))
+    updated = super_crud.update_org(
+        db,
+        org_id,
+        **data.model_dump(exclude_unset=True),
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="organization not found")
     return updated
@@ -220,7 +304,11 @@ def update_plan(
     db: Session = Depends(get_db),
     _ = Depends(require_supervisor_admin),
 ):
-    updated = super_crud.update_plan(db, plan_id, **data.model_dump(exclude_unset=True))
+    updated = super_crud.update_plan(
+        db,
+        plan_id,
+        **data.model_dump(exclude_unset=True),
+    )
     if not updated:
         raise HTTPException(status_code=404, detail="plan not found")
     return updated
