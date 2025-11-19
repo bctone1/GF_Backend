@@ -36,6 +36,11 @@ def create_supervisor_user(
     db: Session = Depends(get_db),
     _ = Depends(require_supervisor_admin),
 ):
+    """
+    Create a new supervisor user
+    role : supervisor_admin
+    status : active
+    """
     return super_crud.create_supervisor_user(
         db,
         org_id=data.organization_id,

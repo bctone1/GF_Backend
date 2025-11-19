@@ -21,7 +21,7 @@ from app.endpoints.partner.analytics import router as partner_analytics
 from app.endpoints.user.account import router as account
 from app.endpoints.user.document import router as user_document
 from app.endpoints.user.practice import router as practice
-
+from app.endpoints.user.promotion import router as user_promotion
 
 def register_routers(app: FastAPI) -> None:
     # ==============================
@@ -50,3 +50,4 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(account,           prefix="/user/account",                   tags=["user/account"])
     app.include_router(user_document,     prefix="/user",                           tags=["user/document"])
     app.include_router(practice,          prefix="/user/practice",                  tags=["user/practice"])
+    app.include_router(user_promotion,    prefix="/user",                           tags=["user/promotion"])

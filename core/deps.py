@@ -22,7 +22,7 @@ from models.supervisor.core import (
 )
 
 _bearer = HTTPBearer(auto_error=False)
-bearer = HTTPBearer()
+
 
 def _build_dsn() -> str:
     driver = "postgresql+psycopg2" if (DB or "").lower().startswith("postgres") else (DB or "postgresql+psycopg2")
@@ -34,8 +34,10 @@ def _build_dsn() -> str:
     name = DB_NAME or "growfit"
     return f"{driver}://{auth}{host}:{port}/{name}"
 
+
 ENGINE = create_engine(_build_dsn(), pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=ENGINE, autocommit=False, autoflush=False, future=True)
+
 
 # ==============================
 # DB 세션
@@ -46,6 +48,7 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
 
 # ==============================
 # 인증 스텁 (JWT 교체 예정)
@@ -70,14 +73,17 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
     return user
 
+
 def get_current_session_id(request: Request) -> Optional[int]:
     sid = request.headers.get("X-Session-Id")
     return int(sid) if sid and sid.isdigit() else None
+
 
 # ==============================
 # 파트너 권한 검사
 # ==============================
 ADMIN_ROLES = ("partner_admin", "partner_manager")
+
 
 def get_current_partner_admin(
     partner_id: int,
@@ -102,6 +108,7 @@ def get_current_partner_admin(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return pu
 
+
 def get_current_partner_member(
     partner_id: int,
     db: Session = Depends(get_db),
@@ -124,6 +131,7 @@ def get_current_partner_member(
     if not pu:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return pu
+
 
 # ==============================
 # Supervisor 인증/권한
@@ -156,7 +164,7 @@ def get_current_supervisor(
         if not uid_str.isdigit():
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
-        app_user = db.get(AppUser, int(uid_str))  # ✅ AppUser로 조회
+        app_user = db.get(AppUser, int(uid_str))
         if not app_user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
@@ -177,7 +185,9 @@ def get_current_supervisor(
         sup = SupUser(
             organization_id=org.organization_id,
             email=app_user.email,
-            name=getattr(app_user, "full_name", None) or getattr(app_user, "name", None) or app_user.email,
+            name=getattr(app_user, "full_name", None)
+            or getattr(app_user, "name", None)
+            or app_user.email,
             role="supervisor_admin",
             status="active",
         )
@@ -199,7 +209,17 @@ def get_current_supervisor(
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
-def require_supervisor_admin(credentials=Depends(bearer)):
-    if credentials.credentials != "dev-supervisor":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token")
-    return True
+
+def require_supervisor_admin(
+    sup: SupUser = Depends(get_current_supervisor),
+) -> SupUser:
+    """
+    supervisor_admin 권한 필수
+    - get_current_supervisor 로 SupUser를 가져온 뒤 role 검사
+    - 엔드포인트에서 `_ = Depends(require_supervisor_admin)` 이나
+      `me = Depends(require_supervisor_admin)` 둘 다 가능
+    """
+    role = (sup.role or "").lower()
+    if role != "supervisor_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    return sup
