@@ -71,7 +71,7 @@ class PartnerPromotionRequest(Base):
         nullable=False,
     )
     # 편의상 이메일 / 이름도 같이 스냅샷으로 저장
-    email = Column(CITEXT, nullable=False)
+    email = Column(CITEXT, nullable=True)
     full_name = Column(Text, nullable=True)
 
     # 소속 기관명(org) - 폼에서 입력한 기관 이름 자체

@@ -1,13 +1,15 @@
 # app/endpoints/user/account.py
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime, timedelta, timezone
 from random import randint
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, ConfigDict
 
 from core.deps import get_db, get_current_user
 from core.security import (
@@ -29,6 +31,7 @@ from schemas.user.account import (
 
 from service.user import account_service
 from service.email import send_email, EmailSendError
+from models.supervisor.core import PartnerPromotionRequest
 
 router = APIRouter()
 
@@ -315,3 +318,77 @@ def list_my_login_sessions(
         size=50,
     )
     return [UserLoginSessionResponse.model_validate(r) for r in rows]
+
+
+# =========================================
+# Partner / Instructor 승격 요청 생성
+# =========================================
+class PartnerPromotionRequestCreate(BaseModel):
+    """
+    유저가 보내는 승격 요청 폼
+    - 로그인된 유저 정보는 토큰에서 가져오고
+    - 여기서는 기관명 + 원하는 역할 + 추가 메타 정도만 받게
+    """
+    requested_org_name: str
+    target_role: str = "partner_admin"          # instructor 등으로도 확장 가능
+    meta: Optional[dict[str, Any]] = None      # 전화번호, 교육 분야 등 추가 정보
+
+
+class PartnerPromotionRequestResponse(BaseModel):
+    request_id: int
+    status: str
+    requested_org_name: str
+    target_role: str
+    requested_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.post(
+    "/partner-promotion-requests",
+    response_model=PartnerPromotionRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_partner_promotion_request(
+    payload: PartnerPromotionRequestCreate,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    # 1) 이미 pending 상태의 요청이 있는지 체크
+    existing = (
+        db.execute(
+            select(PartnerPromotionRequest).where(
+                PartnerPromotionRequest.user_id == me.user_id,
+                PartnerPromotionRequest.status == "pending",
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="already_pending_promotion_request",
+        )
+
+    # 2) 새 요청 레코드 생성
+    obj = PartnerPromotionRequest(
+        user_id=me.user_id,
+        requested_org_name=payload.requested_org_name,
+        target_role=payload.target_role,
+        meta=payload.meta or {},
+    )
+
+    db.add(obj)
+    try:
+        db.commit()
+    except IntegrityError:
+        # unique(pending) 제약에 걸린 경우 등
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="promotion_request_conflict",
+        )
+
+    db.refresh(obj)
+    return obj
