@@ -131,29 +131,29 @@ def user_signup(
     payload: UserCreate,
     db: Session = Depends(get_db),
 ):
-    """
-    기본 사용자 회원가입.
-    - email 인증 토큰(email_verified_token) 검증
-    - 실제 생성은 service.user.account_service.signup 에 위임
-    """
-    # 1) 이메일 인증 토큰 확인
-    if not getattr(payload, "email_verified_token", None):
-        raise HTTPException(status_code=400, detail="email verification required")
-
-    try:
-        vdata = verify_signed_payload(payload.email_verified_token)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid email_verified_token")
-
-    # 이메일/플래그/만료 확인
-    if vdata.get("email") != payload.email or not vdata.get("verified"):
-        raise HTTPException(status_code=400, detail="email not verified")
-
-    now_ts = int(datetime.now(timezone.utc).timestamp())
-    if vdata.get("exp", 0) < now_ts:
-        raise HTTPException(status_code=400, detail="verification token expired")
-
-    # 2) 실제 회원 생성은 서비스 레이어에 위임
+    # """
+    # 기본 사용자 회원가입.
+    # - email 인증 토큰(email_verified_token) 검증
+    # - 실제 생성은 service.user.account_service.signup 에 위임
+    # """
+    # # 1) 이메일 인증 토큰 확인
+    # if not getattr(payload, "email_verified_token", None):
+    #     raise HTTPException(status_code=400, detail="email verification required")
+    #
+    # try:
+    #     vdata = verify_signed_payload(payload.email_verified_token)
+    # except Exception:
+    #     raise HTTPException(status_code=400, detail="invalid email_verified_token")
+    #
+    # # 이메일/플래그/만료 확인
+    # if vdata.get("email") != payload.email or not vdata.get("verified"):
+    #     raise HTTPException(status_code=400, detail="email not verified")
+    #
+    # now_ts = int(datetime.now(timezone.utc).timestamp())
+    # if vdata.get("exp", 0) < now_ts:
+    #     raise HTTPException(status_code=400, detail="verification token expired")
+    #
+    # # 2) 실제 회원 생성은 서비스 레이어에 위임
     return account_service.signup(db, payload)
 
 
