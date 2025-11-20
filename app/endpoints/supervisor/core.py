@@ -153,9 +153,10 @@ def approve_partner_promotion_request(
     승격 요청 승인
     - partner/partner_user 생성(또는 재사용)
     - 요청 status = approved 로 변경
+    - target_role = partner admin
     """
     try:
-        req, _, _ = super_crud.approve_promotion_request(
+        req = super_crud.approve_promotion_request(
             db,
             request_id=request_id,
             decided_reason=body.decided_reason,
@@ -172,6 +173,7 @@ def approve_partner_promotion_request(
     "/promotions/partner-requests/{request_id}/reject",
     response_model=PartnerPromotionRequestResponse,
 )
+
 def reject_partner_promotion_request(
     request_id: int,
     body: PromotionDecision,

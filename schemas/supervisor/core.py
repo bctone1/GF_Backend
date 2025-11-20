@@ -87,11 +87,9 @@ class PartnerPromotionRequestResponse(ORMBase):
 
     request_id: int
     user_id: int
-    email: EmailStr
-    full_name: Optional[str] = None
-
+    phone_number: str
     requested_org_name: str
-    target_role: str
+    target_role: str = "partner_admin"
 
     status: PromotionStatus
     requested_at: datetime
@@ -101,7 +99,7 @@ class PartnerPromotionRequestResponse(ORMBase):
     partner_id: Optional[int] = None
     partner_user_id: Optional[int] = None
 
-    meta: dict[str, Any]
+    meta: dict[str, Any] | None = None
 
 
 # =========================

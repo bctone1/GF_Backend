@@ -1,7 +1,7 @@
 # schemas/user/account.py
 from __future__ import annotations
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import EmailStr, ConfigDict, BaseModel
 from schemas.base import ORMBase
 
@@ -189,3 +189,21 @@ class UserPrivacySettingResponse(ORMBase):
     allow_data_collection: bool
     allow_personalized_ai: bool
     updated_at: datetime
+
+# ------------------------
+class PartnerPromotionRequestCreate(BaseModel):
+    phone_number: str
+    requested_org_name: str
+    target_role: str = "partner_admin"
+    meta: dict[str, Any] | None = None
+
+
+class PartnerPromotionRequestResponse(BaseModel):
+    request_id: int
+    status: str
+    phone_number: str
+    requested_org_name: str
+    target_role: str
+    requested_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

@@ -70,12 +70,12 @@ class PartnerPromotionRequest(Base):
         ForeignKey("user.users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    # 편의상 이메일 / 이름도 같이 스냅샷으로 저장
-    email = Column(CITEXT, nullable=True)
-    full_name = Column(Text, nullable=True)
 
     # 소속 기관명(org) - 폼에서 입력한 기관 이름 자체
     requested_org_name = Column(String(255), nullable=False)
+
+    # 연락용 전화번호 (폼에서 필수 입력)
+    phone_number = Column(String(32), nullable=False)
 
     # 승인 시 부여할 파트너 역할 (예: partner_admin, instructor)
     target_role = Column(String(64), nullable=False, server_default=text("'partner_admin'"))
@@ -99,7 +99,7 @@ class PartnerPromotionRequest(Base):
         nullable=True,
     )
 
-    # 추가 정보 (전화번호, 교육 분야, 유입경로 등)
+    # 추가 정보 (교육 분야, 유입경로 등)
     meta = Column(
         JSONB,
         nullable=False,

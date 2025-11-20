@@ -26,7 +26,7 @@ from schemas.user.account import (
     UserSecuritySettingResponse, UserPrivacySettingUpdate,
     UserPrivacySettingResponse,  UserLoginSessionResponse,
     EmailCodeSendRequest, EmailCodeSendResponse,
-    EmailCodeVerifyRequest, EmailCodeVerifyResponse,
+    EmailCodeVerifyRequest, EmailCodeVerifyResponse, PartnerPromotionRequestCreate, PartnerPromotionRequestResponse
 )
 
 from service.user import account_service
@@ -323,15 +323,15 @@ def list_my_login_sessions(
 # =========================================
 # Partner / Instructor 승격 요청 생성
 # =========================================
-class PartnerPromotionRequestCreate(BaseModel):
-    """
-    유저가 보내는 승격 요청 폼
-    - 로그인된 유저 정보는 토큰에서 가져오고
-    - 여기서는 기관명 + 원하는 역할 + 추가 메타 정도만 받게
-    """
-    requested_org_name: str
-    target_role: str = "partner_admin"          # instructor 등으로도 확장 가능
-    meta: Optional[dict[str, Any]] = None      # 전화번호, 교육 분야 등 추가 정보
+# class PartnerPromotionRequestCreate(BaseModel):
+#     """
+#     유저가 보내는 승격 요청 폼
+#     - 로그인된 유저 정보는 토큰에서 가져오고
+#     - 여기서는 기관명 + 원하는 역할 + 추가 메타 정도만 받게
+#     """
+#     requested_org_name: str
+#     target_role: str = "partner_admin"          # instructor 등으로도 확장 가능
+#     meta: Optional[dict[str, Any]] = None      # 전화번호, 교육 분야 등 추가 정보
 
 
 class PartnerPromotionRequestResponse(BaseModel):
@@ -342,7 +342,6 @@ class PartnerPromotionRequestResponse(BaseModel):
     requested_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
-
 
 @router.post(
     "/partner-promotion-requests",
@@ -375,6 +374,7 @@ def create_partner_promotion_request(
     obj = PartnerPromotionRequest(
         user_id=me.user_id,
         requested_org_name=payload.requested_org_name,
+        phone_number=payload.phone_number,
         target_role=payload.target_role,
         meta=payload.meta or {},
     )
@@ -383,7 +383,6 @@ def create_partner_promotion_request(
     try:
         db.commit()
     except IntegrityError:
-        # unique(pending) 제약에 걸린 경우 등
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
