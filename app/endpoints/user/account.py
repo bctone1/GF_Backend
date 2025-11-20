@@ -323,26 +323,6 @@ def list_my_login_sessions(
 # =========================================
 # Partner / Instructor 승격 요청 생성
 # =========================================
-# class PartnerPromotionRequestCreate(BaseModel):
-#     """
-#     유저가 보내는 승격 요청 폼
-#     - 로그인된 유저 정보는 토큰에서 가져오고
-#     - 여기서는 기관명 + 원하는 역할 + 추가 메타 정도만 받게
-#     """
-#     requested_org_name: str
-#     target_role: str = "partner_admin"          # instructor 등으로도 확장 가능
-#     meta: Optional[dict[str, Any]] = None      # 전화번호, 교육 분야 등 추가 정보
-
-
-class PartnerPromotionRequestResponse(BaseModel):
-    request_id: int
-    status: str
-    requested_org_name: str
-    target_role: str
-    requested_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
 @router.post(
     "/partner-promotion-requests",
     response_model=PartnerPromotionRequestResponse,
@@ -351,9 +331,9 @@ class PartnerPromotionRequestResponse(BaseModel):
 def create_partner_promotion_request(
     payload: PartnerPromotionRequestCreate,
     db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
+    me: AppUser = Depends(get_current_user),  # 여기서 user_id만 가져옴
 ):
-    # 1) 이미 pending 상태의 요청이 있는지 체크
+    # 1) 이미 pending 상태의 요청이 있는지 체크 (user_id 기준)
     existing = (
         db.execute(
             select(PartnerPromotionRequest).where(
@@ -372,11 +352,12 @@ def create_partner_promotion_request(
 
     # 2) 새 요청 레코드 생성
     obj = PartnerPromotionRequest(
-        user_id=me.user_id,
-        requested_org_name=payload.requested_org_name,
-        phone_number=payload.phone_number,
+        user_id=me.user_id,           # 누가 신청했는지는 로그인 유저 기준
+        name=payload.name,            # 폼에서 입력한 이름
+        email=payload.email,          # 폼에서 입력한 이메일
+        org_name=payload.org_name,
+        edu_category=payload.edu_category,
         target_role=payload.target_role,
-        meta=payload.meta or {},
     )
 
     db.add(obj)

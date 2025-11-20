@@ -27,8 +27,8 @@ router = APIRouter()
 # Partner Promotion Requests (승격 요청 승인/거절)
 # ==============================
 class PromotionDecision(BaseModel):
-    decided_reason: Optional[str] = None
-    target_role: Optional[str] = None  # 승인 시에만 사용, 거절 시에는 무시
+    # 승인 시에만 사용, 거절 시에는 무시(현재는 저장 안 함)
+    target_role: Optional[str] = None
 
 
 @router.get(
@@ -75,13 +75,11 @@ def approve_partner_promotion_request(
     승격 요청 승인
     - partner/partner_user 생성(또는 재사용)
     - 요청 status = approved 로 변경
-    - target_role = partner admin
     """
     try:
         req = super_crud.approve_promotion_request(
             db,
             request_id=request_id,
-            decided_reason=body.decided_reason,
             target_role=body.target_role,
         )
         return req
@@ -95,10 +93,8 @@ def approve_partner_promotion_request(
     "/promotions/partner-requests/{request_id}/reject",
     response_model=PartnerPromotionRequestResponse,
 )
-
 def reject_partner_promotion_request(
     request_id: int,
-    body: PromotionDecision,
     db: Session = Depends(get_db),
     # _ = Depends(require_supervisor_admin),
 ):
@@ -109,14 +105,12 @@ def reject_partner_promotion_request(
         req = super_crud.reject_promotion_request(
             db,
             request_id=request_id,
-            decided_reason=body.decided_reason,
         )
         return req
     except super_crud.PromotionNotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
     except super_crud.PromotionConflict as e:
         raise HTTPException(status_code=409, detail=str(e))
-
 
 
 # ==============================

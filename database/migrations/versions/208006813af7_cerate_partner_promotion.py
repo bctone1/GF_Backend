@@ -26,7 +26,7 @@ def upgrade() -> None:
     sa.Column('user_id', sa.BigInteger(), nullable=False),
     sa.Column('email', postgresql.CITEXT(), nullable=False),
     sa.Column('full_name', sa.Text(), nullable=True),
-    sa.Column('requested_org_name', sa.String(length=255), nullable=False),
+    sa.Column('org_name', sa.String(length=255), nullable=False),
     sa.Column('target_role', sa.String(length=64), server_default=sa.text("'partner_admin'"), nullable=False),
     sa.Column('status', sa.String(length=32), server_default=sa.text("'pending'"), nullable=False),
     sa.Column('requested_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),

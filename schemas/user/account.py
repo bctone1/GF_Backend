@@ -192,17 +192,26 @@ class UserPrivacySettingResponse(ORMBase):
 
 # ------------------------
 class PartnerPromotionRequestCreate(BaseModel):
-    phone_number: str
-    requested_org_name: str
+    # 폼에서 직접 입력하는 값
+    name: str
+    email: str
+    org_name: str
+    edu_category: Optional[str] = None
+
+    # 기본 파트너 역할
     target_role: str = "partner_admin"
-    meta: dict[str, Any] | None = None
 
 
 class PartnerPromotionRequestResponse(BaseModel):
     request_id: int
     status: str
-    phone_number: str
-    requested_org_name: str
+
+    # 폼에서 입력한 값
+    name: str
+    email: str
+    org_name: str
+    edu_category: Optional[str] = None
+
     target_role: str
     requested_at: datetime
 

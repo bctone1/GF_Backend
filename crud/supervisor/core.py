@@ -144,7 +144,7 @@ def _promote_user_to_partner_internal(
     partner_user_role: str = "partner_admin",
 ) -> Tuple[Partner, PartnerUser]:
     """
-    실제 partners / partner_users 를 만드는 하위 유틸.
+    실제 partners / partner_users 를 만드는 하위 유틸
 
     - 기존 promote_user_to_partner 로직을 내부용으로 옮긴 것
     - 승격 요청(PartnerPromotionRequest) 승인에서만 호출하는 걸 권장
@@ -239,12 +239,12 @@ def list_promotion_requests(
         stmt = stmt.where(PartnerPromotionRequest.status == status)
     return db.execute(stmt).scalars().all()
 
+
 def approve_promotion_request(
     db: Session,
     request_id: int,
     decided_by: Optional[int] = None,
     target_role: str | None = None,
-    decided_reason: Optional[str] = None,
 ) -> PartnerPromotionRequest:
     """
     파트너/강사 승격 요청 승인 처리
@@ -268,20 +268,16 @@ def approve_promotion_request(
     # 3) 파트너/파트너유저 생성 또는 재사용
     partner, partner_user = _promote_user_to_partner_internal(
         db=db,
-        email=user.email,
-        partner_name=req.requested_org_name,
-        created_by=decided_by,                      # None이면 그냥 None으로 저장
+        email=user.email,             # 요청 스키마의 email 말고 실제 AppUser 기준
+        partner_name=req.org_name,    # 요청폼에서 받은 기관명
+        created_by=decided_by,
         partner_user_role=target_role or req.target_role,
-        # phone_number / extra_meta 추가했으면 여기서 같이 넘기면 됨
-        # phone_number=req.phone_number,
-        # extra_meta=req.meta,
     )
 
     # 4) 요청 상태 업데이트
     now = _utcnow()
     req.status = "approved"
     req.decided_at = now
-    req.decided_reason = decided_reason
     req.partner_id = partner.id
     req.partner_user_id = partner_user.id
 
@@ -292,12 +288,10 @@ def approve_promotion_request(
     return req
 
 
-
 def reject_promotion_request(
     db: Session,
     *,
     request_id: int,
-    decided_reason: Optional[str] = None,
 ) -> PartnerPromotionRequest:
     """
     승격 요청 거절
@@ -312,7 +306,6 @@ def reject_promotion_request(
 
     req.status = "rejected"
     req.decided_at = _utcnow()
-    req.decided_reason = decided_reason
 
     db.add(req)
     db.commit()

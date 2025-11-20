@@ -54,10 +54,10 @@ class SupervisorUser(Base):
 # =========================
 class PartnerPromotionRequest(Base):
     """
-    user가 '파트너/강사로 승격 요청'을 올린 큐
-    - user 쪽에서 생성 (요청)
-    - supervisor가 교육파트너 관리 화면에서 승인/거절
-    - 승인될 때 기존 promote_user_to_partner 로직 호출
+    user가 '파트너/강사로 승격 요청'을 올린 queue
+      - user 쪽에서 생성 (요청)
+      - supervisor가 교육파트너 관리 화면에서 승인/거절
+      - 승인될 때 기존 promote_user_to_partner 로직 호출
     """
 
     __tablename__ = "partner_promotion_requests"
@@ -71,11 +71,17 @@ class PartnerPromotionRequest(Base):
         nullable=False,
     )
 
-    # 소속 기관명(org) - 폼에서 입력한 기관 이름 자체
-    requested_org_name = Column(String(255), nullable=False)
+    # 요청폼에서 입력한 신청자 이름
+    name = Column(String(255), nullable=False)
 
-    # 연락용 전화번호 (폼에서 필수 입력)
-    phone_number = Column(String(32), nullable=False)
+    # 요청폼에서 입력한 이메일
+    email = Column(String(255), nullable=False)
+
+    # 소속 기관명(org) - 폼에서 입력한 기관 이름 자체
+    org_name = Column(String(255), nullable=False)
+
+    # 교육 분야 (예: '프로그래밍', '머신러닝', '디자인' 등, 문자열 메타데이터)
+    edu_category = Column(String(64), nullable=True)
 
     # 승인 시 부여할 파트너 역할 (예: partner_admin, instructor)
     target_role = Column(String(64), nullable=False, server_default=text("'partner_admin'"))
@@ -85,7 +91,6 @@ class PartnerPromotionRequest(Base):
 
     requested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     decided_at = Column(DateTime(timezone=True))
-    decided_reason = Column(Text)  # 승인/거절 사유
 
     # 승인 후 실제로 생성/연결된 partner / partner_user
     partner_id = Column(
@@ -97,13 +102,6 @@ class PartnerPromotionRequest(Base):
         BigInteger,
         ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
         nullable=True,
-    )
-
-    # 추가 정보 (교육 분야, 유입경로 등)
-    meta = Column(
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
     )
 
     __table_args__ = (
@@ -121,6 +119,7 @@ class PartnerPromotionRequest(Base):
         ),
         {"schema": "supervisor"},
     )
+
 
 # =========================
 # user_roles

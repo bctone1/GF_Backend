@@ -48,7 +48,6 @@ class SupervisorUserResponse(ORMBase):
     created_at: datetime
     updated_at: datetime
 
-
 # =========================
 # Partner Promotion Requests
 # =========================
@@ -57,12 +56,16 @@ PromotionStatus = Literal["pending", "approved", "rejected", "cancelled"]
 class PartnerPromotionRequestCreate(ORMBase):
     """
     유저가 강사/파트너 승격 신청을 생성할 때 사용하는 입력 스키마
-    - user_id, email, full_name, requested_at, status 등은 서버에서 채움
+    - user_id, requested_at, status 등은 서버에서 채움
     """
 
-    requested_org_name: str
+    # 요청폼에서 입력
+    name: str
+    email: str
+    org_name: str
+    edu_category: Optional[str] = None
+    # 기본 파트너 역할
     target_role: str = "partner_admin"
-    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class PartnerPromotionRequestUpdate(ORMBase):
@@ -71,12 +74,16 @@ class PartnerPromotionRequestUpdate(ORMBase):
     """
 
     status: Optional[PromotionStatus] = None
-    decided_reason: Optional[str] = None
     decided_at: Optional[datetime] = None
     partner_id: Optional[int] = None
     partner_user_id: Optional[int] = None
     target_role: Optional[str] = None
-    meta: Optional[dict[str, Any]] = None
+
+    # 필요 시 신청 정보도 수정 가능하도록 옵션 필드로 둠
+    name: Optional[str] = None
+    email: Optional[str] = None
+    org_name: Optional[str] = None
+    edu_category: Optional[str] = None
 
 
 class PartnerPromotionRequestResponse(ORMBase):
@@ -87,19 +94,21 @@ class PartnerPromotionRequestResponse(ORMBase):
 
     request_id: int
     user_id: int
-    phone_number: str
-    requested_org_name: str
+
+    # 요청폼에서 입력된 값
+    name: str
+    email: str
+    org_name: str
+    edu_category: Optional[str] = None
     target_role: str = "partner_admin"
 
     status: PromotionStatus
     requested_at: datetime
     decided_at: Optional[datetime] = None
-    decided_reason: Optional[str] = None
 
+    # 승인 후 실제 연결된 partner / partner_user
     partner_id: Optional[int] = None
     partner_user_id: Optional[int] = None
-
-    meta: dict[str, Any] | None = None
 
 
 # =========================
