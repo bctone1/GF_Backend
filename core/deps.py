@@ -132,11 +132,12 @@ def get_current_partner_member(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return pu
 
-
 # ==============================
 # Supervisor 인증/권한
 # - Authorization: Bearer sup-access-{supervisor_user_id}
-# - 개발 모드 브리지:  Bearer dev-access-{user_id} → 같은 이메일 SupervisorUser 매칭/자동생성
+#   (플랫폼에는 supervisor_admin 1명만 존재한다고 가정)
+# - 개발 모드 브리지:  Bearer dev-access-{user_id}
+#   → supervisor.users 가 비어 있을 때에만 최초 1명 자동 생성
 # - 개발 편의 헤더:    X-Debug-Email: <supervisor-email>
 # ==============================
 def get_current_supervisor(
@@ -146,20 +147,26 @@ def get_current_supervisor(
 ) -> SupUser:
     token = creds.credentials if creds else None
 
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+
     # 1) sup-access-* 직접 인증
     sup_prefix = "sup-access-"
-    if token and token.startswith(sup_prefix):
+    if token.startswith(sup_prefix):
         sid_str = token[len(sup_prefix):]
         if not sid_str.isdigit():
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+
         sup = db.get(SupUser, int(sid_str))
-        if not sup or (sup.status or "").lower() != "active":
+        if not sup:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+        if (sup.status or "").lower() != "active":
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="inactive supervisor")
         return sup
 
-    # 2) dev-access-* 브리지 (AppUser → SupervisorUser)
+    # 2) dev-access-* 브리지 (AppUser → 단일 SupervisorUser)
     dev_prefix = "dev-access-"
-    if token and token.startswith(dev_prefix):
+    if token.startswith(dev_prefix):
         uid_str = token[len(dev_prefix):]
         if not uid_str.isdigit():
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
@@ -168,14 +175,16 @@ def get_current_supervisor(
         if not app_user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
 
-        # 같은 이메일의 SupervisorUser 검색
+        # 활성 SupervisorUser 하나만 사용 (단일 슈퍼바이저 가정)
         sup = db.execute(
-            select(SupUser).where(func.lower(SupUser.email) == func.lower(app_user.email))
+            select(SupUser)
+            .where(SupUser.status == "active")
+            .limit(1)
         ).scalar_one_or_none()
-        if sup and (sup.status or "").lower() == "active":
+        if sup:
             return sup
 
-        # 없으면 조직 하나 확보 후 자동 생성
+        # supervisor.users 가 비어있는 경우에만 최초 1명 생성
         org = db.execute(select(Organization).limit(1)).scalar_one_or_none()
         if not org:
             org = Organization(name="GrowFit Platform", status="active")
@@ -216,8 +225,6 @@ def require_supervisor_admin(
     """
     supervisor_admin 권한 필수
     - get_current_supervisor 로 SupUser를 가져온 뒤 role 검사
-    - 엔드포인트에서 `_ = Depends(require_supervisor_admin)` 이나
-      `me = Depends(require_supervisor_admin)` 둘 다 가능
     """
     role = (sup.role or "").lower()
     if role != "supervisor_admin":

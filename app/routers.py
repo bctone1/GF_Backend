@@ -3,7 +3,7 @@ from fastapi import FastAPI
 
 # supervisor
 from app.endpoints.supervisor.core import router as super_core
-from app.endpoints.supervisor.auth import router as super_auth
+# from app.endpoints.supervisor.auth import router as super_auth
 
 # partner
 from app.endpoints.partner.partner_core import router as partner_core
@@ -21,13 +21,13 @@ from app.endpoints.partner.analytics import router as partner_analytics
 from app.endpoints.user.account import router as account
 from app.endpoints.user.document import router as user_document
 from app.endpoints.user.practice import router as practice
-# from app.endpoints.user.promotion import router as user_promotion
+
 
 def register_routers(app: FastAPI) -> None:
     # ==============================
     # Supervisor
     # ==============================
-    app.include_router(super_auth,        prefix="/supervisor",                     tags=["super/auth"])
+    # app.include_router(super_auth,        prefix="/supervisor",                     tags=["super/auth"])
     app.include_router(super_core,        prefix="/supervisor/core",                tags=["super/core"])
 
     # ==============================
@@ -50,4 +50,3 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(account,           prefix="/user/account",                   tags=["user/account"])
     app.include_router(user_document,     prefix="/user",                           tags=["user/document"])
     app.include_router(practice,          prefix="/user/practice",                  tags=["user/practice"])
-    # app.include_router(user_promotion,    prefix="/user",                           tags=["user/promotion"])
