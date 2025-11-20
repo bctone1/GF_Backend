@@ -11,13 +11,8 @@ from core.deps import get_db, require_supervisor_admin
 from crud.supervisor import core as super_crud
 
 from schemas.supervisor.core import (
-    PlanCreate,
-    PlanUpdate,
-    PlanResponse,
-    OrganizationCreate,
-    OrganizationUpdate,
-    OrganizationResponse,
-    SupervisorUserCreate,
+    PlanCreate, PlanUpdate, PlanResponse, OrganizationCreate,
+    OrganizationUpdate, OrganizationResponse, SupervisorUserCreate,
     SupervisorUserResponse,
     UserRoleCreate,
     UserRoleResponse,
@@ -27,77 +22,6 @@ from schemas.supervisor.core import (
 
 router = APIRouter()
 
-# ==============================
-# Supervisor Users
-# ==============================
-@router.post("/users", response_model=SupervisorUserResponse, status_code=status.HTTP_201_CREATED)
-def create_supervisor_user(
-    data: SupervisorUserCreate,
-    db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),  # 로그인 기능 제거
-):
-    """
-    Create a new supervisor user
-    role : supervisor_admin
-    status : active
-    """
-    return super_crud.create_supervisor_user(
-        db,
-        org_id=data.organization_id,
-        email=data.email,
-        name=data.name,
-        role=data.role or "supervisor_admin",
-        status=data.status or "active",
-    )
-
-@router.get("/users/by-email", response_model=SupervisorUserResponse)
-def get_supervisor_user_by_email(
-    email: str = Query(...),
-    db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),
-):
-    sup = super_crud.get_supervisor_user_by_email(db, email=email)
-    if not sup:
-        raise HTTPException(status_code=404, detail="supervisor user not found")
-    return sup
-
-# ==============================
-# Roles
-# ==============================
-@router.post("/roles", response_model=UserRoleResponse, status_code=status.HTTP_201_CREATED)
-def create_role(
-    data: UserRoleCreate,
-    db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),
-):
-    role = super_crud.get_or_create_role(
-        db,
-        role_name=data.role_name,
-        permissions=data.permissions_json or {},
-    )
-    return role
-
-@router.post("/roles/bootstrap", response_model=List[UserRoleResponse])
-def bootstrap_roles(
-    db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),
-):
-    return list(super_crud.bootstrap_default_roles(db))
-
-@router.post("/users/{user_id}/roles/{role_name}", response_model=UserRoleAssignmentResponse)
-def assign_role_to_user(
-    user_id: int,
-    role_name: str,
-    db: Session = Depends(get_db),
-
-):
-    ura = super_crud.assign_role(
-        db,
-        user_id=user_id,
-        role_name=role_name,
-        assigned_by=getattr("user_id", None),
-    )
-    return ura
 
 # ==============================
 # Partner Promotion Requests (승격 요청 승인/거절)
@@ -114,7 +38,6 @@ class PromotionDecision(BaseModel):
 def list_partner_promotion_requests(
     status_: Optional[str] = Query(None, alias="status"),
     db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),
 ):
     """
     승격 요청 목록 조회
@@ -147,7 +70,6 @@ def approve_partner_promotion_request(
     request_id: int,
     body: PromotionDecision,
     db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),
 ):
     """
     승격 요청 승인
@@ -194,6 +116,80 @@ def reject_partner_promotion_request(
         raise HTTPException(status_code=404, detail=str(e))
     except super_crud.PromotionConflict as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+
+# ==============================
+# Supervisor Users
+# ==============================
+@router.post("/users", response_model=SupervisorUserResponse, status_code=status.HTTP_201_CREATED)
+def create_supervisor_user(
+    data: SupervisorUserCreate,
+    db: Session = Depends(get_db),
+):
+    """
+    Create a new supervisor user
+    role : supervisor_admin
+    status : active
+    """
+    return super_crud.create_supervisor_user(
+        db,
+        org_id=data.organization_id,
+        email=data.email,
+        name=data.name,
+        role=data.role or "supervisor_admin",
+        status=data.status or "active",
+    )
+
+@router.get("/users/by-email", response_model=SupervisorUserResponse)
+def get_supervisor_user_by_email(
+    email: str = Query(...),
+    db: Session = Depends(get_db),
+    # _ = Depends(require_supervisor_admin),
+):
+    sup = super_crud.get_supervisor_user_by_email(db, email=email)
+    if not sup:
+        raise HTTPException(status_code=404, detail="supervisor user not found")
+    return sup
+
+# ==============================
+# Roles
+# ==============================
+@router.post("/roles", response_model=UserRoleResponse, status_code=status.HTTP_201_CREATED)
+def create_role(
+    data: UserRoleCreate,
+    db: Session = Depends(get_db),
+):
+    role = super_crud.get_or_create_role(
+        db,
+        role_name=data.role_name,
+        permissions=data.permissions_json or {},
+    )
+    return role
+
+@router.post("/roles/bootstrap", response_model=List[UserRoleResponse])
+def bootstrap_roles(
+    db: Session = Depends(get_db),
+    # _ = Depends(require_supervisor_admin),
+):
+    return list(super_crud.bootstrap_default_roles(db))
+
+@router.post("/users/{user_id}/roles/{role_name}", response_model=UserRoleAssignmentResponse)
+def assign_role_to_user(
+    user_id: int,
+    role_name: str,
+    db: Session = Depends(get_db),
+
+):
+    ura = super_crud.assign_role(
+        db,
+        user_id=user_id,
+        role_name=role_name,
+        assigned_by=getattr("user_id", None),
+    )
+    return ura
+
+
 
 # # ==============================
 # # Organizations
