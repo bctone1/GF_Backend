@@ -19,7 +19,7 @@ class NotificationPreference(Base):
         nullable=False)
 
     new_student_email    = Column(Boolean, nullable=False, server_default=text("true"))
-    class_deadline_email = Column(Boolean, nullable=False, server_default=text("true"))  # 프로젝트 → 분반 기준
+    class_deadline_email = Column(Boolean, nullable=False, server_default=text("true"))  # course/class 마감 알림 기준
     settlement_email     = Column(Boolean, nullable=False, server_default=text("true"))
     api_cost_alert_email = Column(Boolean, nullable=False, server_default=text("true"))
     system_notice        = Column(Boolean, nullable=False, server_default=text("true"))
