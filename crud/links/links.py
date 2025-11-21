@@ -1,1 +1,0 @@
-# partner_org_link, org_user_link (교차 링크 전용)

@@ -1,4 +1,4 @@
-# schemas/links/links.py
+# schemas/common/links.py
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
@@ -8,11 +8,12 @@ from schemas.base import ORMBase
 
 # ----- enums: 플랫폼 공통 enums를 우선 사용 -----
 try:
-    # 권장: 공통 enum 재사용
-    from schemas.enums import Status  # e.g. active|inactive|suspended|draft
+    # 권장: 공통 enum 재사용 (active|inactive|suspended|draft)
+    from schemas.enums import Status
 except Exception:
     # 임시 폴백(필요 시 삭제)
     from enum import Enum
+
     class Status(str, Enum):
         active = "active"
         inactive = "inactive"
@@ -20,18 +21,17 @@ except Exception:
         draft = "draft"
 
 try:
-    # 선택: 조직 내 사용자 역할이 enums에 있다면 사용
-    from schemas.enums import OrgRole  # e.g. owner|admin|manager|member|student|instructor
+    # 선택: 조직 내 사용자 역할 enum (owner|admin|manager|member)
+    from schemas.enums import OrgRole
 except Exception:
     # 임시 폴백(필요 시 삭제)
     from enum import Enum
+
     class OrgRole(str, Enum):
         owner = "owner"
         admin = "admin"
         manager = "manager"
         member = "member"
-        student = "student"
-        instructor = "instructor"
 
 
 # =========================================================
@@ -41,7 +41,7 @@ except Exception:
 class PartnerOrgLinkCreate(ORMBase):
     """
     교차 링크 생성 스키마.
-    - supervisor.organizations.organization_id ↔ partner.partners.partner_id
+    - supervisor.organizations.organization_id ↔ partner.partners.id
     """
     model_config = ConfigDict(from_attributes=False)
 
@@ -83,12 +83,13 @@ class PartnerOrgLinkResponse(ORMBase):
 class OrgUserLinkCreate(ORMBase):
     """
     조직-사용자 연결. 조직 멤버십/소속/역할을 명시.
+    - 역할은 org 레벨 역할만 허용: owner / admin / manager / member
     """
     model_config = ConfigDict(from_attributes=False)
 
     organization_id: int  # supervisor.organizations PK
     user_id: int          # user.users PK
-    role: OrgRole = OrgRole.member
+    role: OrgRole = OrgRole.manager
     status: Status = Status.active
     notes: Optional[str] = None
 

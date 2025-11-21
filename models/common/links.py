@@ -1,4 +1,4 @@
-# models/links/links.py
+# models/common/links.py
 from sqlalchemy import (
     Column, BigInteger, Boolean, Text, DateTime,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text
@@ -6,8 +6,15 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 from models.base import Base
 
-# ====================== links.partner_org_link ======================
+
+# ====================== common.partner_org_link ======================
 class PartnerOrgLink(Base):
+    """
+    supervisor.organizations  <->  partner.partners 연결용 링크 테이블
+
+    - 한 organization 은 여러 partner 와 연결 가능
+    - is_primary = true 인 링크는 조직당 최대 1개 (대표 파트너)
+    """
     __tablename__ = "partner_org_link"
 
     link_id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -23,6 +30,10 @@ class PartnerOrgLink(Base):
         nullable=False,
     )
 
+    # active: 연결 활성
+    # inactive: 일시 비활성(접근 차단)
+    # suspended: 제재/강제 중단
+    # draft: 아직 확정 전, 셋업 중 상태(옵션)
     status = Column(Text, nullable=False, server_default=text("'active'"))
     is_primary = Column(Boolean, nullable=False, server_default=text("false"))
     notes = Column(Text, nullable=True)
@@ -31,6 +42,7 @@ class PartnerOrgLink(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     __table_args__ = (
+        # 동일 org-partner 중복 방지
         UniqueConstraint("organization_id", "partner_id", name="uq_partner_org"),
         # 조직당 primary 링크 하나만 허용(부분 유니크)
         Index(
@@ -45,12 +57,24 @@ class PartnerOrgLink(Base):
             "status IN ('active','inactive','suspended','draft')",
             name="chk_partner_org_link_status",
         ),
-        {"schema": "links"},  # dict는 반드시 마지막
+        {"schema": "common"},  # dict는 반드시 마지막
     )
 
 
-# ======================== links.org_user_link ========================
+# ======================== common.org_user_link ========================
 class OrgUserLink(Base):
+    """
+    supervisor.organizations  <->  user.users 계정 링크
+
+    여기 role 은 "org 레벨 역할"만 표현:
+      - owner   : 조직 소유자
+      - admin   : 관리 권한
+      - manager : 실무 책임자
+      - member  : 일반 멤버
+
+    학생/강사 역할은 partner.students / partner.partner_users 등
+    partner 레이어에서 관리하므로, 이 테이블 role 에서는 제외.
+    """
     __tablename__ = "org_user_link"
 
     link_id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -62,11 +86,11 @@ class OrgUserLink(Base):
     )
     user_id = Column(
         BigInteger,
-        ForeignKey('user.users.user_id', ondelete="CASCADE"),
+        ForeignKey("user.users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    role = Column(Text, nullable=False, server_default=text("'member'"))
+    role = Column(Text, nullable=False, server_default=text("'manager'"))
     status = Column(Text, nullable=False, server_default=text("'active'"))
     notes = Column(Text, nullable=True)
 
@@ -92,14 +116,14 @@ class OrgUserLink(Base):
             "status IN ('active','inactive','suspended','draft')",
             name="chk_org_user_link_status",
         ),
+        # org 레벨 역할만 허용
         CheckConstraint(
-            "role IN ('owner','admin','manager','member','student','instructor')",
+            "role IN ('owner','admin','manager','member')",
             name="chk_org_user_link_role",
         ),
         CheckConstraint(
             "(left_at IS NULL) OR (left_at >= joined_at)",
             name="chk_org_user_link_left_after_join",
         ),
-        {"schema": "links"},  # dict는 반드시 마지막
+        {"schema": "common"},  # dict는 반드시 마지막
     )
-

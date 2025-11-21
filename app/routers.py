@@ -1,6 +1,9 @@
 # app/routers.py
 from fastapi import FastAPI
 
+# common
+# from app.endpoints.common.links import router as links
+
 # supervisor
 from app.endpoints.supervisor.core import router as super_core
 # from app.endpoints.supervisor.auth import router as super_auth
@@ -24,6 +27,8 @@ from app.endpoints.user.practice import router as practice
 
 
 def register_routers(app: FastAPI) -> None:
+
+    # app.include_router(links, prefix="/links", tags=["links"])
     # ==============================
     # Supervisor
     # ==============================
