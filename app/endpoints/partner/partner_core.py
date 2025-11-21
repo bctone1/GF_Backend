@@ -1,4 +1,3 @@
-# app/endpoints/partner/partner_core.py
 from __future__ import annotations
 from typing import Optional, List
 
@@ -86,7 +85,7 @@ def add_partner_user(
             partner_id=partner_id,
             email=data.email,
             full_name=data.full_name,
-            role=data.role or "partner_admin",
+            role=data.role or "partner",  # 기본값 partner_admin → partner
             phone=data.phone,
             is_active=True if data.is_active is None else data.is_active,
             user_id=data.user_id,  # optional
@@ -142,7 +141,7 @@ def deactivate_partner_user(
 def change_partner_user_role(
     partner_id: int,
     partner_user_id: int,
-    role: str = Query(..., pattern="^(partner_admin|instructor|assistant)$"),
+    role: str = Query(..., pattern="^(partner|assistant)$"),
     db: Session = Depends(get_db),
     _ = Depends(get_current_partner_admin),
 ):

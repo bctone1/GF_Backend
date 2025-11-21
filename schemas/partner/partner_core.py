@@ -1,16 +1,12 @@
-# schemas/partner/partner_core.py
 from __future__ import annotations
-
 from datetime import datetime
 from typing import Optional, Literal
-
 from pydantic import ConfigDict, EmailStr
-
 from schemas.base import ORMBase, Page
 
 # DB 제약과 동일 집합
 PartnerStatus = Literal["active", "inactive", "suspended"]
-PartnerUserRole = Literal["partner_admin", "instructor", "assistant"]
+PartnerUserRole = Literal["partner", "assistant"]
 
 
 # ==============================
@@ -40,6 +36,7 @@ class PartnerResponse(ORMBase):
     created_at: datetime
     updated_at: datetime
 
+
 PartnerPage = Page[PartnerResponse]
 
 
@@ -48,11 +45,11 @@ PartnerPage = Page[PartnerResponse]
 # ==============================
 class PartnerUserCreate(ORMBase):
     partner_id: int
-    user_id: Optional[int] = None                  # supervisor.users.user_id
+    user_id: Optional[int] = None                  # user.users.user_id
     full_name: str
     email: EmailStr
     phone: Optional[str] = None
-    role: Optional[PartnerUserRole] = None         # DB default 'partner_admin'
+    role: Optional[PartnerUserRole] = None         # DB default 'partner'
     is_active: Optional[bool] = None               # DB default true
     last_login_at: Optional[datetime] = None
 

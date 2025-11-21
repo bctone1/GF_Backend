@@ -1,4 +1,3 @@
-# crud/partner/partner_core.py
 from __future__ import annotations
 from typing import Optional, Sequence, Tuple
 import random, string
@@ -160,7 +159,7 @@ def add_partner_user(
     partner_id: int,
     email: str,
     full_name: Optional[str] = None,
-    role: str = "partner_admin",
+    role: str = "partner",  # 기본값 partner_admin → partner 로 변경
     phone: Optional[str] = None,
     is_active: bool = True,
     user_id: Optional[int] = None,  # user.users PK. 주어지지 않으면 email로 조회
@@ -235,7 +234,7 @@ def ensure_partner_and_admin(
     admin_full_name: Optional[str] = None,
 ) -> Tuple[Partner, PartnerUser]:
     """
-    파트너 없으면 생성, 있으면 사용. 관리자 없으면 생성.
+    파트너 없으면 생성, 있으면 사용. 관리자(대표 강사) 없으면 생성.
     """
     partner = None
     if partner_code:
@@ -254,7 +253,7 @@ def ensure_partner_and_admin(
             partner_id=partner.id,
             email=admin_email,
             full_name=admin_full_name or admin_email,
-            role="partner_admin",
+            role="partner",  # partner_admin → partner
             is_active=True,
         )
     return partner, puser

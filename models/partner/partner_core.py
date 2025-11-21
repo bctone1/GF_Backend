@@ -1,4 +1,3 @@
-# models/partner/partner_core.py
 from sqlalchemy import (
     Column, BigInteger, Text, Boolean, DateTime,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text
@@ -19,7 +18,6 @@ class Partner(Base):
     status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|suspended
     timezone = Column(Text, nullable=False, server_default=text("'UTC'"))
 
-    # 추가: 생성자(슈퍼바이저 사용자)
     created_by = Column(
         BigInteger,
         ForeignKey("supervisor.supervisors.user_id", ondelete="SET NULL"),
@@ -30,6 +28,13 @@ class Partner(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     users = relationship("PartnerUser", back_populates="partner", passive_deletes=True)
+
+    # 강사가 연 모든 클래스 역참조 가능하도록
+    classes = relationship(
+        "Class",
+        back_populates="partner",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("code", name="uq_partners_code"),
@@ -52,7 +57,7 @@ class PartnerUser(Base):
         ForeignKey("partner.partners.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # user.users.user_id 참조
+
     user_id = Column(
         BigInteger,
         ForeignKey("user.users.user_id", ondelete="SET NULL"),
@@ -60,9 +65,15 @@ class PartnerUser(Base):
     )
 
     full_name = Column(Text, nullable=False)
-    email = Column(CITEXT, nullable=False)  # 대소문자 무시
+    email = Column(CITEXT, nullable=False)
     phone = Column(Text, nullable=True)
-    role = Column(Text, nullable=False, server_default=text("'partner_admin'"))  # partner_admin|instructor|assistant
+
+    role = Column(
+        Text,
+        nullable=False,
+        server_default=text("'partner'"),  # partner | assistant
+    )
+
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -73,7 +84,7 @@ class PartnerUser(Base):
     __table_args__ = (
         UniqueConstraint("partner_id", "user_id", name="uq_partner_users_partner_user"),
         UniqueConstraint("partner_id", "email", name="uq_partner_users_partner_email"),
-        CheckConstraint("role IN ('partner_admin','instructor','assistant')", name="chk_partner_users_role"),
+        CheckConstraint("role IN ('partner','assistant')", name="chk_partner_users_role"),
         Index("idx_partner_users_partner_email", "partner_id", "email"),
         Index("idx_partner_users_active", "is_active"),
         Index("idx_partner_users_role", "role"),
