@@ -1,5 +1,6 @@
+#### 파트너 이름 변경 시작 commit
 # models/partner/analytics.py
-# READ-ONLY 집계. ETL/스케줄러만 적재.
+
 from sqlalchemy import (
     Column, BigInteger, Text, Date, Numeric, ForeignKey,
     UniqueConstraint, CheckConstraint, Index, text

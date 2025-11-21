@@ -262,7 +262,7 @@ def create_invite_code(
     class_id: int,
     payload: InviteCodeCreate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    current_admin=Depends(get_current_partner_admin),
 ):
     try:
         obj = crud_course.create_invite_code(
@@ -274,7 +274,7 @@ def create_invite_code(
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
             status=payload.status or "active",
-            created_by=payload.created_by,
+            created_by=getattr(current_admin,"id",None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
