@@ -79,44 +79,83 @@ def get_current_session_id(request: Request) -> Optional[int]:
     return int(sid) if sid and sid.isdigit() else None
 
 
+# # ==============================
+# # 파트너 권한 검사
+# # ==============================
+# ADMIN_ROLES = ("partner_admin", "partner_manager")
+#
+#
+# def get_current_partner_admin(
+#     partner_id: int,
+#     db: Session = Depends(get_db),
+#     current_user: AppUser = Depends(get_current_user),  # ✅ 타입
+# ) -> PartnerUser:
+#     uid = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
+#     if uid is None:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+#
+#     stmt = (
+#         select(PartnerUser)
+#         .where(
+#             PartnerUser.partner_id == partner_id,
+#             PartnerUser.user_id == uid,
+#             PartnerUser.is_active.is_(True),
+#         )
+#         .limit(1)
+#     )
+#     pu = db.execute(stmt).scalars().first()
+#     if not pu or pu.role not in ADMIN_ROLES:
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+#     return pu
+#
+#
+# def get_current_partner_member(
+#     partner_id: int,
+#     db: Session = Depends(get_db),
+#     current_user: AppUser = Depends(get_current_user),
+# ) -> PartnerUser:
+#     uid = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
+#     if uid is None:
+#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+#
+#     stmt = (
+#         select(PartnerUser)
+#         .where(
+#             PartnerUser.partner_id == partner_id,
+#             PartnerUser.user_id == uid,
+#             PartnerUser.is_active.is_(True),
+#         )
+#         .limit(1)
+#     )
+#     pu = db.execute(stmt).scalars().first()
+#     if not pu:
+#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+#     return pu
+
+
 # ==============================
 # 파트너 권한 검사
 # ==============================
-ADMIN_ROLES = ("partner_admin", "partner_manager")
-
-
-def get_current_partner_admin(
-    partner_id: int,
-    db: Session = Depends(get_db),
-    current_user: AppUser = Depends(get_current_user),  # ✅ 타입
-) -> PartnerUser:
+def _get_current_user_id(current_user: AppUser) -> int:
     uid = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
     if uid is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-
-    stmt = (
-        select(PartnerUser)
-        .where(
-            PartnerUser.partner_id == partner_id,
-            PartnerUser.user_id == uid,
-            PartnerUser.is_active.is_(True),
-        )
-        .limit(1)
-    )
-    pu = db.execute(stmt).scalars().first()
-    if not pu or pu.role not in ADMIN_ROLES:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-    return pu
+    return int(uid)
 
 
-def get_current_partner_member(
+def get_current_partner_user(
     partner_id: int,
     db: Session = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ) -> PartnerUser:
-    uid = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
-    if uid is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+    """
+    - 권한 계층: supervisor / org / partner / student / user
+    - 여기서는 단순히:
+        1) 현재 로그인한 AppUser의 user_id를 구하고
+        2) 해당 partner_id에 소속된 활성 PartnerUser 인지만 검사
+    - 별도의 partner_admin, partner_manager 같은 서브 롤 개념은 사용하지 않음.
+    """
+    uid = _get_current_user_id(current_user)
 
     stmt = (
         select(PartnerUser)
@@ -129,8 +168,12 @@ def get_current_partner_member(
     )
     pu = db.execute(stmt).scalars().first()
     if not pu:
+        # 이 파트너에 소속된 강사가 아님
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
     return pu
+
+
+
 
 # ==============================
 # Supervisor 인증/권한
