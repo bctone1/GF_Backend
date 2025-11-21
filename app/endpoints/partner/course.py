@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from typing import Optional
-from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
@@ -16,17 +15,15 @@ from schemas.partner.course import (
 from crud.partner import course as crud_course
 from service.partner import invite as invite_service
 
-
-
 router = APIRouter()
 
 
 # ==============================
-# Course CRUD
+# Course CRUD (org 기준)
 # ==============================
 @router.get("", response_model=CoursePage)
 def list_courses(
-    partner_id: int,
+    org_id: int,
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
     search: Optional[str] = Query(None),
@@ -36,14 +33,13 @@ def list_courses(
 ):
     rows, total = crud_course.list_courses(
         db,
-        partner_id=partner_id,
+        org_id=org_id,
         status=status,
         search=search,
         limit=limit,
         offset=offset,
     )
 
-    # limit/offset → page/size 계산
     page = offset // limit + 1 if limit > 0 else 1
     size = limit
 
@@ -57,14 +53,14 @@ def list_courses(
 
 @router.post("", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
 def create_course(
-    partner_id: int,
+    org_id: int,
     payload: CourseCreate,
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_admin),
 ):
     obj = crud_course.create_course(
         db,
-        partner_id=partner_id,
+        org_id=org_id,
         title=payload.title,
         course_key=payload.course_key,
         status=payload.status,
@@ -77,25 +73,29 @@ def create_course(
 
 @router.get("/{course_id}", response_model=CourseResponse)
 def get_course(
-    partner_id: int,
+    org_id: int,
     course_id: int,
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_admin),
 ):
     obj = crud_course.get_course(db, course_id)
-    if not obj or obj.partner_id != partner_id:
+    if not obj or obj.org_id != org_id:
         raise HTTPException(status_code=404, detail="Course not found")
     return obj
 
 
 @router.patch("/{course_id}", response_model=CourseResponse)
 def update_course(
-    partner_id: int,
+    org_id: int,
     course_id: int,
     payload: CourseUpdate,
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_admin),
 ):
+    obj = crud_course.get_course(db, course_id)
+    if not obj or obj.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Course not found")
+
     obj = crud_course.update_course(
         db,
         course_id=course_id,
@@ -106,18 +106,20 @@ def update_course(
         end_date=payload.end_date,
         description=payload.description,
     )
-    if not obj or obj.partner_id != partner_id:
-        raise HTTPException(status_code=404, detail="Course not found")
     return obj
 
 
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_course(
-    partner_id: int,
+    org_id: int,
     course_id: int,
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_admin),
 ):
+    obj = crud_course.get_course(db, course_id)
+    if not obj or obj.org_id != org_id:
+        raise HTTPException(status_code=404, detail="Course not found")
+
     ok = crud_course.delete_course(db, course_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -125,7 +127,7 @@ def delete_course(
 
 
 # ==============================
-# Class CRUD
+# Class CRUD (1 class : 1 partner)
 # ==============================
 @router.get("/{course_id}/classes", response_model=ClassPage)
 def list_classes(
@@ -138,9 +140,13 @@ def list_classes(
     _=Depends(get_current_partner_admin),
 ):
     rows, total = crud_course.list_classes(
-        db, course_id=course_id, status=status, limit=limit, offset=offset
+        db,
+        course_id=course_id,
+        status=status,
+        limit=limit,
+        offset=offset,
     )
-    page = offset // limit + 1
+    page = offset // limit + 1 if limit > 0 else 1
     size = limit
     return {"total": total, "items": rows, "page": page, "size": size}
 
@@ -155,6 +161,7 @@ def create_class(
 ):
     obj = crud_course.create_class(
         db,
+        partner_id=partner_id,
         course_id=course_id,
         name=payload.name,
         section_code=payload.section_code,
@@ -179,7 +186,7 @@ def get_class(
     _=Depends(get_current_partner_admin),
 ):
     obj = crud_course.get_class(db, class_id)
-    if not obj:
+    if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
     return obj
 
@@ -193,6 +200,10 @@ def update_class(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_admin),
 ):
+    obj = crud_course.get_class(db, class_id)
+    if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     obj = crud_course.update_class(
         db,
         class_id=class_id,
@@ -207,8 +218,6 @@ def update_class(
         online_url=payload.online_url,
         invite_only=payload.invite_only,
     )
-    if not obj:
-        raise HTTPException(status_code=404, detail="Class not found")
     return obj
 
 
@@ -220,6 +229,10 @@ def delete_class(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_admin),
 ):
+    obj = crud_course.get_class(db, class_id)
+    if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     ok = crud_course.delete_class(db, class_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Class not found")
@@ -241,6 +254,9 @@ def list_invite_codes(
     offset: int = Query(0),
     _=Depends(get_current_partner_admin),
 ):
+    """
+    target_role: 'partner' | 'student'
+    """
     rows, total = crud_course.list_invite_codes(
         db,
         partner_id=partner_id,
@@ -250,7 +266,7 @@ def list_invite_codes(
         limit=limit,
         offset=offset,
     )
-    page = offset // limit + 1
+    page = offset // limit + 1 if limit > 0 else 1
     size = limit
     return {"total": total, "items": rows, "page": page, "size": size}
 
@@ -264,6 +280,9 @@ def create_invite_code(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_partner_admin),
 ):
+    """
+    target_role: 'partner' | 'student'
+    """
     try:
         obj = crud_course.create_invite_code(
             db,
@@ -274,7 +293,7 @@ def create_invite_code(
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
             status=payload.status or "active",
-            created_by=getattr(current_admin,"id",None),
+            created_by=getattr(current_admin, "id", None),
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -315,7 +334,9 @@ def delete_invite_code(
     return None
 
 
-# redeem instructor invite
+# ==============================
+# redeem partner invite (강사 초대)
+# ==============================
 @router.post("/redeem-invite", status_code=status.HTTP_200_OK)
 def redeem_invite_and_attach_instructor(
     invite_code: str,
@@ -323,7 +344,8 @@ def redeem_invite_and_attach_instructor(
     db: Session = Depends(get_db),
 ):
     """
-    초대코드 입력 → 유효성 검증 → instructor 등록
+    초대코드 입력 → 유효성 검증 → partner(강사) 롤 연결
+    - InviteCode.target_role == 'partner' 인 코드만 허용
     """
     try:
         partner_id, class_id, role = crud_course.redeem_invite_and_attach_instructor(
@@ -336,7 +358,9 @@ def redeem_invite_and_attach_instructor(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# POST /invites/send : 초대코드 생성 + 이메일 발송
+# ==============================
+# Invite 이메일 관련
+# ==============================
 @router.post(
     "/invites/send",
     response_model=InviteSendResponse,
@@ -358,7 +382,7 @@ def create_and_send_invite(
             partner_id=partner_id,
             email=payload.email,
             class_id=payload.class_id,
-            target_role=payload.target_role,
+            target_role=payload.target_role,  # 'partner' | 'student'
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
         )
@@ -375,8 +399,6 @@ def create_and_send_invite(
     )
 
 
-
-# POST /invites/{id}/send : 기존 invite 재발송 :RESEND
 @router.post(
     "/invites/{invite_id}/send",
     response_model=InviteSendResponse,
@@ -412,7 +434,7 @@ def resend_invite(
         email_sent=result.email_sent,
     )
 
-# POST /invites/assign : 가입 여부 확인 + 초대코드 생성 + 발송
+
 @router.post(
     "/invites/assign",
     response_model=InviteSendResponse,
@@ -437,7 +459,7 @@ def assign_invite_by_email(
             partner_id=partner_id,
             email=payload.email,
             class_id=payload.class_id,
-            target_role=payload.target_role,
+            target_role=payload.target_role,  # 'partner' | 'student'
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
         )
@@ -453,28 +475,6 @@ def assign_invite_by_email(
         email_sent=result.email_sent,
     )
 
-# ==============================
-# redeem instructor invite
-# ==============================
-@router.post("/redeem-invite", status_code=status.HTTP_200_OK)
-def redeem_invite_and_attach_instructor(
-    invite_code: str,
-    user_id: int,
-    db: Session = Depends(get_db),
-):
-    """
-    초대코드 입력 → 유효성 검증 → instructor 등록
-    """
-    try:
-        partner_id, class_id, role = crud_course.redeem_invite_and_attach_instructor(
-            db,
-            invite_code=invite_code,
-            user_id=user_id,
-        )
-        return {"partner_id": partner_id, "class_id": class_id, "role": role}
-    except crud_course.InviteError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
 
 # ==============================
 # redeem student invite
@@ -489,7 +489,7 @@ def redeem_student_invite_and_enroll(
 ):
     """
     학생 초대코드 입력 → 유효성 검증 → Student 생성/조회 + 수강 등록 멱등 처리
-    - target_role == 'student' 인 초대코드만 허용
+    - InviteCode.target_role == 'student' 인 초대코드만 허용
     - InviteCode.class_id 필수
     """
     try:

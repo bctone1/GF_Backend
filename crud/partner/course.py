@@ -1,19 +1,19 @@
 # crud/partner/course.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import List, Optional, Tuple
 
-from sqlalchemy import select, update, delete, func, and_, or_, literal, desc
+from sqlalchemy import select, update, delete, func, and_, or_, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from models.partner.course import Course, Class, ClassInstructor, InviteCode
+from models.partner.course import Course, Class, InviteCode
 from models.partner.partner_core import PartnerUser  # partner_user 업서트용
 from models.partner.student import Student, Enrollment
 from crud.partner import student as student_crud
+
 
 # ==============================
 # Course
@@ -22,14 +22,17 @@ def get_course(db: Session, course_id: int) -> Optional[Course]:
     return db.get(Course, course_id)
 
 
-def get_course_by_course_key(db: Session, partner_id: int, course_key: str) -> Optional[Course]:
-    stmt = select(Course).where(Course.partner_id == partner_id, Course.course_key == course_key)
+def get_course_by_course_key(db: Session, org_id: int, course_key: str) -> Optional[Course]:
+    stmt = select(Course).where(
+        Course.org_id == org_id,
+        Course.course_key == course_key,
+    )
     return db.execute(stmt).scalars().first()
 
 
 def list_courses(
     db: Session,
-    partner_id: int,
+    org_id: int,
     *,
     status: Optional[str] = None,
     search: Optional[str] = None,
@@ -37,7 +40,7 @@ def list_courses(
     offset: int = 0,
     order_desc: bool = True,
 ) -> Tuple[List[Course], int]:
-    conds = [Course.partner_id == partner_id]
+    conds = [Course.org_id == org_id]
     if status:
         conds.append(Course.status == status)
     if search:
@@ -45,7 +48,9 @@ def list_courses(
         conds.append(or_(Course.title.ilike(like), Course.course_key.ilike(like)))
 
     base = select(Course).where(and_(*conds))
-    total = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
+    total = db.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar() or 0
 
     if order_desc:
         base = base.order_by(desc(Course.created_at))
@@ -59,16 +64,16 @@ def list_courses(
 def create_course(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     title: str,
     course_key: str,
     status: Optional[str] = None,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     description: Optional[str] = None,
 ) -> Course:
     obj = Course(
-        partner_id=partner_id,
+        org_id=org_id,
         title=title,
         course_key=course_key,
         status=status or "draft",
@@ -89,13 +94,14 @@ def update_course(
     title: Optional[str] = None,
     course_key: Optional[str] = None,
     status: Optional[str] = None,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
     description: Optional[str] = None,
 ) -> Optional[Course]:
     obj = db.get(Course, course_id)
     if not obj:
         return None
+
     if title is not None:
         obj.title = title
     if course_key is not None:
@@ -108,6 +114,7 @@ def update_course(
         obj.end_date = end_date
     if description is not None:
         obj.description = description
+
     db.commit()
     db.refresh(obj)
     return obj
@@ -136,6 +143,10 @@ def list_classes(
     offset: int = 0,
     order_desc: bool = True,
 ) -> Tuple[List[Class], int]:
+    """
+    특정 course 에 속한 class 목록.
+    (course 에 속하지 않는 class 는 별도 쿼리 필요)
+    """
     conds = [Class.course_id == course_id]
     if status:
         conds.append(Class.status == status)
@@ -143,7 +154,10 @@ def list_classes(
         conds.append(Class.section_code == section_code)
 
     base = select(Class).where(and_(*conds))
-    total = db.execute(select(func.count()).select_from(base.subquery())).scalar() or 0
+    total = db.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar() or 0
+
     base = base.order_by(desc(Class.created_at) if order_desc else Class.created_at)
     rows = db.execute(base.limit(limit).offset(offset)).scalars().all()
     return rows, total
@@ -152,7 +166,8 @@ def list_classes(
 def create_class(
     db: Session,
     *,
-    course_id: int,
+    partner_id: int,
+    course_id: Optional[int] = None,
     name: str,
     section_code: Optional[str] = None,
     status: Optional[str] = None,
@@ -164,7 +179,12 @@ def create_class(
     online_url: Optional[str] = None,
     invite_only: Optional[bool] = None,
 ) -> Class:
+    """
+    - partner_id: 이 class 를 여는 강사(Partner) ID (필수)
+    - course_id: course 에 소속되면 지정, 아니면 None
+    """
     obj = Class(
+        partner_id=partner_id,
         course_id=course_id,
         name=name,
         section_code=section_code,
@@ -201,6 +221,7 @@ def update_class(
     obj = db.get(Class, class_id)
     if not obj:
         return None
+
     if name is not None:
         obj.name = name
     if section_code is not None:
@@ -221,6 +242,7 @@ def update_class(
         obj.online_url = online_url
     if invite_only is not None:
         obj.invite_only = invite_only
+
     db.commit()
     db.refresh(obj)
     return obj
@@ -233,87 +255,27 @@ def delete_class(db: Session, class_id: int) -> bool:
 
 
 # ==============================
-# ClassInstructor
-# ==============================
-def list_class_instructors(db: Session, class_id: int) -> List[ClassInstructor]:
-    stmt = select(ClassInstructor).where(ClassInstructor.class_id == class_id).order_by(ClassInstructor.id)
-    return db.execute(stmt).scalars().all()
-
-
-def add_class_instructor(
-    db: Session,
-    *,
-    class_id: int,
-    partner_user_id: int,
-    role: str = "assistant",
-) -> ClassInstructor:
-    obj = ClassInstructor(class_id=class_id, partner_user_id=partner_user_id, role=role)
-    db.add(obj)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        # 이미 존재하면 그대로 반환
-        stmt = select(ClassInstructor).where(
-            ClassInstructor.class_id == class_id,
-            ClassInstructor.partner_user_id == partner_user_id,
-        )
-        exist = db.execute(stmt).scalars().first()
-        if exist:
-            return exist
-        raise
-    db.refresh(obj)
-    return obj
-
-
-def update_class_instructor_role(
-    db: Session,
-    *,
-    class_instructor_id: int,
-    role: str,
-) -> Optional[ClassInstructor]:
-    obj = db.get(ClassInstructor, class_instructor_id)
-    if not obj:
-        return None
-    obj.role = role
-    db.commit()
-    db.refresh(obj)
-    return obj
-
-
-def remove_class_instructor(
-    db: Session,
-    *,
-    class_id: int,
-    partner_user_id: int,
-) -> bool:
-    res = db.execute(
-        delete(ClassInstructor).where(
-            ClassInstructor.class_id == class_id,
-            ClassInstructor.partner_user_id == partner_user_id,
-        )
-    )
-    db.commit()
-    return res.rowcount > 0
-
-
-# ==============================
 # InviteCode
 # ==============================
 class InviteError(Exception):
     pass
 
+
 class InviteNotFound(InviteError):
     pass
+
 
 class InviteExpired(InviteError):
     pass
 
+
 class InviteDisabled(InviteError):
     pass
 
+
 class InviteExhausted(InviteError):
     pass
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
@@ -335,7 +297,7 @@ def list_invite_codes(
     *,
     class_id: Optional[int] = None,
     status: Optional[str] = None,
-    target_role: Optional[str] = None,  # "instructor"|"student"
+    target_role: Optional[str] = None,  # "partner" | "student"
     search: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
@@ -367,7 +329,7 @@ def create_invite_code(
     *,
     partner_id: int,
     code: str,
-    target_role: str = "student",  # "instructor"|"student"
+    target_role: str = "student",  # "partner" | "student"
     class_id: Optional[int] = None,
     expires_at: Optional[datetime] = None,
     max_uses: Optional[int] = None,
@@ -379,8 +341,7 @@ def create_invite_code(
         clazz = db.get(Class, class_id)
         if not clazz:
             raise ValueError("class not found")
-        course = db.get(Course, clazz.course_id)
-        if not course or course.partner_id != partner_id:
+        if clazz.partner_id != partner_id:
             raise ValueError("partner_id mismatch with class")
 
     obj = InviteCode(
@@ -482,12 +443,12 @@ def upsert_partner_user_role(
     *,
     partner_id: int,
     user_id: int,
-    role: str = "instructor",
+    role: str = "partner",
     is_active: bool = True,
 ) -> PartnerUser:
     """
     (partner_id, user_id) 멱등 업서트. role은 갱신.
-    partner.partner_users의 유니크 제약(예상: partner_id, user_id)을 전제로 함.
+    partner.partner_users 유니크 제약( partner_id + user_id ) 전제.
     """
     ins = pg_insert(PartnerUser).values(
         partner_id=partner_id,
@@ -498,7 +459,11 @@ def upsert_partner_user_role(
     )
     do_update = ins.on_conflict_do_update(
         index_elements=[PartnerUser.partner_id, PartnerUser.user_id],
-        set_=dict(role=role, is_active=is_active, updated_at=func.now()),
+        set_={
+            "role": role,
+            "is_active": is_active,
+            "updated_at": func.now(),
+        },
     ).returning(PartnerUser)
     row = db.execute(do_update).first()
     db.commit()
@@ -506,7 +471,7 @@ def upsert_partner_user_role(
 
 
 # ==============================
-# redeem instructor invite
+# redeem partner invite (강사 초대)
 # ==============================
 def redeem_invite_and_attach_instructor(
     db: Session,
@@ -523,24 +488,25 @@ def redeem_invite_and_attach_instructor(
     if not inv:
         raise InviteNotFound("invite not found")
 
-    # instructor 전용 코드만 허용
-    if inv.target_role != "instructor":
-        raise InviteError("invite is not for instructor")
+    # partner(강사) 전용 코드만 허용
+    if inv.target_role != "partner":
+        raise InviteError("invite is not for partner")
 
     check_invite_usable(inv)
 
     # 사용량 증가 (원자적)
     inv = increment_invite_use(db, code=invite_code)
 
-    # 파트너-유저 instructor 롤 부여/업서트
+    # 파트너-유저 partner 롤 부여/업서트
     upsert_partner_user_role(
         db,
         partner_id=inv.partner_id,
         user_id=user_id,
-        role="instructor",
+        role="partner",
     )
 
     return inv.partner_id, inv.class_id, inv.target_role
+
 
 # ==============================
 # redeem student invite
