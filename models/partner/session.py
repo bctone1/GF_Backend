@@ -81,8 +81,12 @@ class SessionMessage(Base):
         nullable=False,
     )
 
-    sender_type = Column(Text, nullable=False)             # 'student' | 'staff' | 'system'
-    sender_id = Column(BigInteger, nullable=True)          # 참조 없음(옵션)
+    # sender_type: 세션 참여 주체
+    # - 'student' : 학생
+    # - 'partner' : 파트너(강사/조교 등)
+    # - 'system'  : 시스템/자동 메시지
+    sender_type = Column(Text, nullable=False)  # 'student' | 'partner' | 'system'
+    sender_id = Column(BigInteger, nullable=True)  # 참조 없음(옵션)
 
     message_type = Column(Text, nullable=False, server_default=text("'text'"))  # text|image|audio|file|tool
     content = Column(Text, nullable=False)
@@ -90,7 +94,7 @@ class SessionMessage(Base):
     tokens = Column(Integer, nullable=True)
     latency_ms = Column(Integer, nullable=True)
 
-    meta = Column(JSONB, nullable=True)                    # 추가 메타(툴콜, 파일정보 등)
+    meta = Column(JSONB, nullable=True)  # 추가 메타(툴콜, 파일정보 등)
 
     # pgvector(1536)
     content_vector = Column(Vector(1536), nullable=True)
@@ -100,10 +104,22 @@ class SessionMessage(Base):
     session = relationship("AiSession", back_populates="messages", passive_deletes=True)
 
     __table_args__ = (
-        CheckConstraint("sender_type IN ('student','staff','system')", name="chk_session_messages_sender"),
-        CheckConstraint("message_type IN ('text','image','audio','file','tool')", name="chk_session_messages_type"),
-        CheckConstraint("tokens IS NULL OR tokens >= 0", name="chk_session_messages_tokens_nonneg"),
-        CheckConstraint("latency_ms IS NULL OR latency_ms >= 0", name="chk_session_messages_latency_nonneg"),
+        CheckConstraint(
+            "sender_type IN ('student','partner','system')",
+            name="chk_session_messages_sender",
+        ),
+        CheckConstraint(
+            "message_type IN ('text','image','audio','file','tool')",
+            name="chk_session_messages_type",
+        ),
+        CheckConstraint(
+            "tokens IS NULL OR tokens >= 0",
+            name="chk_session_messages_tokens_nonneg",
+        ),
+        CheckConstraint(
+            "latency_ms IS NULL OR latency_ms >= 0",
+            name="chk_session_messages_latency_nonneg",
+        ),
         Index("idx_session_messages_session_time", "session_id", "created_at"),
         Index("idx_session_messages_type_time", "message_type", "created_at"),
         Index("idx_session_messages_sender", "sender_type", "sender_id"),

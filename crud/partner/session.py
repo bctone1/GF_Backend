@@ -1,4 +1,3 @@
-# crud/partner/session.py
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -136,7 +135,6 @@ def delete_session(
 # ==============================
 # SessionMessage CRUD
 # ==============================
-
 def get_message(db: Session, message_id: int) -> Optional[SessionMessage]:
     return db.get(SessionMessage, message_id)
 
@@ -233,28 +231,21 @@ def delete_message(
     db.commit()
 
 
-# ==============================
-# SessionMessage CRUD
-# ==============================
-def get_message(db: Session, message_id: int) -> Optional[SessionMessage]:
-    return db.get(SessionMessage, message_id)
-
-
-def get_last_message_by_role(
+def get_last_message_by_sender_type(
     db: Session,
     *,
     session_id: int,
-    role: str,
+    sender_type: str,
 ) -> Optional[SessionMessage]:
     """
-    특정 세션에서 role 에 해당하는 마지막 메시지 하나만 가져오는 헬퍼.
-    - 보통 role="user" 로 호출해서 마지막 사용자 메시지를 찾는 용도
+    특정 세션에서 sender_type(예: 'student', 'partner', 'system') 에 해당하는
+    마지막 메시지 하나만 가져오는 헬퍼.
     """
     stmt: Select[SessionMessage] = (
         select(SessionMessage)
         .where(
             SessionMessage.session_id == session_id,
-            SessionMessage.role == role,
+            SessionMessage.sender_type == sender_type,
         )
         .order_by(SessionMessage.created_at.desc())
         .limit(1)

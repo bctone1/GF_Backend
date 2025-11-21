@@ -1,4 +1,3 @@
-# schemas/partner/session.py
 from __future__ import annotations
 
 from datetime import datetime
@@ -12,7 +11,7 @@ from schemas.enums import (
     SessionMode,        # 'single' | 'parallel'
     SessionStatus,      # 'active' | 'completed' | 'canceled' | 'error'
     SessionMessageType, # 'text' | 'image' | 'audio' | 'file' | 'tool'
-    SenderType,         # 'student' | 'staff' | 'system'
+    SenderType,         # 'student' | 'partner' | 'system'
 )
 
 
@@ -73,7 +72,7 @@ AiSessionPage = Page[AiSessionResponse]
 # ==============================
 class SessionMessageCreate(ORMBase):
     session_id: int
-    sender_type: SenderType
+    sender_type: SenderType          # 'student' | 'partner' | 'system'
     sender_id: Optional[int] = None
     message_type: SessionMessageType = "text"  # DB default 'text'
     content: str
