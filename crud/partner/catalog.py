@@ -13,6 +13,15 @@ from models.partner.catalog import (
     OrgLlmSetting,
 )
 
+from schemas.partner.catalog import (
+    ProviderCredentialCreate,
+    ProviderCredentialUpdate,
+    ModelCatalogCreate,
+    ModelCatalogUpdate,
+    OrgLlmSettingCreate,
+    OrgLlmSettingUpdate,
+)
+
 
 # ==============================
 # 공통: 페이지네이션 유틸
@@ -70,20 +79,17 @@ class ProviderCredentialCRUD:
         self,
         db: Session,
         *,
-        partner_id: int,
-        provider: str,
-        api_key_encrypted: str,
-        credential_label: Optional[str] = None,
-        is_active: Optional[bool] = None,
+        data: ProviderCredentialCreate,
     ) -> ProviderCredential:
         obj = self.model(
-            partner_id=partner_id,
-            provider=provider,
-            credential_label=credential_label,
-            api_key_encrypted=api_key_encrypted,
+            partner_id=data.partner_id,
+            provider=data.provider,
+            credential_label=data.credential_label,
+            api_key_encrypted=data.api_key_encrypted,
         )
-        if is_active is not None:
-            obj.is_active = is_active
+        if data.is_active is not None:
+            obj.is_active = data.is_active
+
         db.add(obj)
         try:
             db.commit()
@@ -99,17 +105,15 @@ class ProviderCredentialCRUD:
         db: Session,
         *,
         id: int,
-        credential_label: Optional[str] = None,
-        api_key_encrypted: Optional[str] = None,
-        is_active: Optional[bool] = None,
+        data: ProviderCredentialUpdate,
     ) -> Optional[ProviderCredential]:
-        values = {}
-        if credential_label is not None:
-            values["credential_label"] = credential_label
-        if api_key_encrypted is not None:
-            values["api_key_encrypted"] = api_key_encrypted
-        if is_active is not None:
-            values["is_active"] = is_active
+        values: dict = {}
+        if data.credential_label is not None:
+            values["credential_label"] = data.credential_label
+        if data.api_key_encrypted is not None:
+            values["api_key_encrypted"] = data.api_key_encrypted
+        if data.is_active is not None:
+            values["is_active"] = data.is_active
         if not values:
             return self.get(db, id)
 
@@ -186,25 +190,21 @@ class ModelCatalogCRUD:
         self,
         db: Session,
         *,
-        provider: str,
-        model_name: str,
-        modality: Optional[str] = None,
-        supports_parallel: Optional[bool] = None,
-        default_pricing: Optional[dict] = None,
-        is_active: Optional[bool] = None,
+        data: ModelCatalogCreate,
     ) -> ModelCatalog:
         obj = self.model(
-            provider=provider,
-            model_name=model_name,
+            provider=data.provider,
+            model_name=data.model_name,
         )
-        if modality is not None:
-            obj.modality = modality
-        if supports_parallel is not None:
-            obj.supports_parallel = supports_parallel
-        if default_pricing is not None:
-            obj.default_pricing = default_pricing
-        if is_active is not None:
-            obj.is_active = is_active
+        if data.modality is not None:
+            obj.modality = data.modality
+        if data.supports_parallel is not None:
+            obj.supports_parallel = data.supports_parallel
+        if data.default_pricing is not None:
+            obj.default_pricing = data.default_pricing
+        if data.is_active is not None:
+            obj.is_active = data.is_active
+
         db.add(obj)
         try:
             db.commit()
@@ -220,26 +220,21 @@ class ModelCatalogCRUD:
         db: Session,
         *,
         id: int,
-        provider: Optional[str] = None,
-        model_name: Optional[str] = None,
-        modality: Optional[str] = None,
-        supports_parallel: Optional[bool] = None,
-        default_pricing: Optional[dict] = None,
-        is_active: Optional[bool] = None,
+        data: ModelCatalogUpdate,
     ) -> Optional[ModelCatalog]:
-        values = {}
-        if provider is not None:
-            values["provider"] = provider
-        if model_name is not None:
-            values["model_name"] = model_name
-        if modality is not None:
-            values["modality"] = modality
-        if supports_parallel is not None:
-            values["supports_parallel"] = supports_parallel
-        if default_pricing is not None:
-            values["default_pricing"] = default_pricing
-        if is_active is not None:
-            values["is_active"] = is_active
+        values: dict = {}
+        if data.provider is not None:
+            values["provider"] = data.provider
+        if data.model_name is not None:
+            values["model_name"] = data.model_name
+        if data.modality is not None:
+            values["modality"] = data.modality
+        if data.supports_parallel is not None:
+            values["supports_parallel"] = data.supports_parallel
+        if data.default_pricing is not None:
+            values["default_pricing"] = data.default_pricing
+        if data.is_active is not None:
+            values["is_active"] = data.is_active
         if not values:
             return self.get(db, id)
 
@@ -300,26 +295,20 @@ class OrgLlmSettingCRUD:
         self,
         db: Session,
         *,
-        partner_id: int,
-        default_chat_model: str,
-        enable_parallel_mode: Optional[bool] = None,
-        daily_message_limit: Optional[int] = None,
-        token_alert_threshold: Optional[int] = None,
-        provider_credential_id: Optional[int] = None,
-        updated_by: Optional[int] = None,
+        data: OrgLlmSettingCreate,
     ) -> OrgLlmSetting:
         obj = self.model(
-            partner_id=partner_id,
-            default_chat_model=default_chat_model,
-            provider_credential_id=provider_credential_id,
-            updated_by=updated_by,
+            partner_id=data.partner_id,
+            default_chat_model=data.default_chat_model,
+            provider_credential_id=data.provider_credential_id,
+            updated_by=data.updated_by,
         )
-        if enable_parallel_mode is not None:
-            obj.enable_parallel_mode = enable_parallel_mode
-        if daily_message_limit is not None:
-            obj.daily_message_limit = daily_message_limit
-        if token_alert_threshold is not None:
-            obj.token_alert_threshold = token_alert_threshold
+        if data.enable_parallel_mode is not None:
+            obj.enable_parallel_mode = data.enable_parallel_mode
+        if data.daily_message_limit is not None:
+            obj.daily_message_limit = data.daily_message_limit
+        if data.token_alert_threshold is not None:
+            obj.token_alert_threshold = data.token_alert_threshold
 
         db.add(obj)
         try:
@@ -336,40 +325,37 @@ class OrgLlmSettingCRUD:
         db: Session,
         *,
         partner_id: int,
-        default_chat_model: Optional[str] = None,
-        enable_parallel_mode: Optional[bool] = None,
-        daily_message_limit: Optional[int] = None,
-        token_alert_threshold: Optional[int] = None,
-        provider_credential_id: Optional[int] = None,
-        updated_by: Optional[int] = None,
+        data: OrgLlmSettingUpdate,
     ) -> OrgLlmSetting:
         cur = self.get_by_partner(db, partner_id=partner_id)
         if cur is None:
-            return self.create(
-                db,
+            # 기본값이 없으면 gpt-4o-mini 로 세팅
+            default_chat_model = data.default_chat_model or "gpt-4o-mini"
+            create_data = OrgLlmSettingCreate(
                 partner_id=partner_id,
-                default_chat_model=default_chat_model or "gpt-4o-mini",
-                enable_parallel_mode=enable_parallel_mode,
-                daily_message_limit=daily_message_limit,
-                token_alert_threshold=token_alert_threshold,
-                provider_credential_id=provider_credential_id,
-                updated_by=updated_by,
+                default_chat_model=default_chat_model,
+                enable_parallel_mode=data.enable_parallel_mode,
+                daily_message_limit=data.daily_message_limit,
+                token_alert_threshold=data.token_alert_threshold,
+                provider_credential_id=data.provider_credential_id,
+                updated_by=data.updated_by,
             )
+            return self.create(db, data=create_data)
 
         # update path
-        values = {}
-        if default_chat_model is not None:
-            values["default_chat_model"] = default_chat_model
-        if enable_parallel_mode is not None:
-            values["enable_parallel_mode"] = enable_parallel_mode
-        if daily_message_limit is not None:
-            values["daily_message_limit"] = daily_message_limit
-        if token_alert_threshold is not None:
-            values["token_alert_threshold"] = token_alert_threshold
-        if provider_credential_id is not None:
-            values["provider_credential_id"] = provider_credential_id
-        if updated_by is not None:
-            values["updated_by"] = updated_by
+        values: dict = {}
+        if data.default_chat_model is not None:
+            values["default_chat_model"] = data.default_chat_model
+        if data.enable_parallel_mode is not None:
+            values["enable_parallel_mode"] = data.enable_parallel_mode
+        if data.daily_message_limit is not None:
+            values["daily_message_limit"] = data.daily_message_limit
+        if data.token_alert_threshold is not None:
+            values["token_alert_threshold"] = data.token_alert_threshold
+        if data.provider_credential_id is not None:
+            values["provider_credential_id"] = data.provider_credential_id
+        if data.updated_by is not None:
+            values["updated_by"] = data.updated_by
         if not values:
             return cur
 
@@ -388,26 +374,21 @@ class OrgLlmSettingCRUD:
         db: Session,
         *,
         id: int,
-        default_chat_model: Optional[str] = None,
-        enable_parallel_mode: Optional[bool] = None,
-        daily_message_limit: Optional[int] = None,
-        token_alert_threshold: Optional[int] = None,
-        provider_credential_id: Optional[int] = None,
-        updated_by: Optional[int] = None,
+        data: OrgLlmSettingUpdate,
     ) -> Optional[OrgLlmSetting]:
-        values = {}
-        if default_chat_model is not None:
-            values["default_chat_model"] = default_chat_model
-        if enable_parallel_mode is not None:
-            values["enable_parallel_mode"] = enable_parallel_mode
-        if daily_message_limit is not None:
-            values["daily_message_limit"] = daily_message_limit
-        if token_alert_threshold is not None:
-            values["token_alert_threshold"] = token_alert_threshold
-        if provider_credential_id is not None:
-            values["provider_credential_id"] = provider_credential_id
-        if updated_by is not None:
-            values["updated_by"] = updated_by
+        values: dict = {}
+        if data.default_chat_model is not None:
+            values["default_chat_model"] = data.default_chat_model
+        if data.enable_parallel_mode is not None:
+            values["enable_parallel_mode"] = data.enable_parallel_mode
+        if data.daily_message_limit is not None:
+            values["daily_message_limit"] = data.daily_message_limit
+        if data.token_alert_threshold is not None:
+            values["token_alert_threshold"] = data.token_alert_threshold
+        if data.provider_credential_id is not None:
+            values["provider_credential_id"] = data.provider_credential_id
+        if data.updated_by is not None:
+            values["updated_by"] = data.updated_by
         if not values:
             return self.get(db, id)
 

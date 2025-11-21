@@ -61,12 +61,7 @@ def create_provider_credential(
     try:
         obj = provider_credential.create(
             db,
-            partner_id=data.partner_id,
-            provider=data.provider,
-            api_key_encrypted=data.api_key_encrypted,
-            # 관리자가 보기 쉽게 붙이는 라벨 (예: “팀용 OpenAI Key”)
-            credential_label=data.credential_label,
-            is_active=data.is_active,
+            data=data,
         )
     except IntegrityError:
         raise HTTPException(status_code=409, detail="credential for provider already exists")
@@ -92,9 +87,7 @@ def update_provider_credential(
     obj = provider_credential.update(
         db,
         id=cred_id,
-        credential_label=data.credential_label,
-        api_key_encrypted=data.api_key_encrypted,
-        is_active=data.is_active,
+        data=data,
     )
     return ProviderCredentialResponse.model_validate(obj)
 
@@ -182,12 +175,7 @@ def create_model(
     try:
         obj = model_catalog.create(
             db,
-            provider=data.provider,
-            model_name=data.model_name,
-            modality=data.modality,
-            supports_parallel=data.supports_parallel,
-            default_pricing=data.default_pricing,
-            is_active=data.is_active,
+            data=data,
         )
     except IntegrityError:
         raise HTTPException(status_code=409, detail="model already exists for provider")
@@ -209,12 +197,7 @@ def update_model(
     obj = model_catalog.update(
         db,
         id=model_id,
-        provider=data.provider,
-        model_name=data.model_name,
-        modality=data.modality,
-        supports_parallel=data.supports_parallel,
-        default_pricing=data.default_pricing,
-        is_active=data.is_active,
+        data=data,
     )
     return ModelCatalogResponse.model_validate(obj)
 
@@ -251,16 +234,14 @@ def upsert_org_llm_setting(
     partner_id: int = Path(..., ge=1),
     data: OrgLlmSettingUpdate = Body(...),
     db: Session = Depends(get_db),
-    me = Depends(get_current_partner_admin),
+    me=Depends(get_current_partner_admin),
 ):
+    # updated_by는 항상 현재 파트너 관리자 기준으로 강제 세팅
+    data.updated_by = getattr(me, "user_id", None)
+
     obj = org_llm_setting.upsert_by_partner(
         db,
         partner_id=partner_id,
-        default_chat_model=data.default_chat_model,
-        enable_parallel_mode=data.enable_parallel_mode,
-        daily_message_limit=data.daily_message_limit,
-        token_alert_threshold=data.token_alert_threshold,
-        provider_credential_id=data.provider_credential_id,
-        updated_by=getattr(me, "user_id", None),
+        data=data,
     )
     return OrgLlmSettingResponse.model_validate(obj)
