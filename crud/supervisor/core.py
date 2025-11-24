@@ -20,7 +20,7 @@ from models.supervisor.core import (
     PartnerPromotionRequest,
 )
 from models.user.account import AppUser, UserProfile
-from models.partner.partner_core import Partner, PartnerUser  # partners, partner_users
+from models.partner.partner_core import Org, PartnerUser
 
 
 # ==============================
@@ -30,15 +30,16 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _gen_code(prefix: str = "PT", length: int = 6) -> str:
+def _gen_code(prefix: str = "ORG", length: int = 6) -> str:
     body = "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
     return f"{prefix}{body}"
 
 
 def _slugify_code(name: str, max_len: int = 12) -> str:
     base = "".join(ch for ch in name.upper() if ch.isalnum())
-    base = base[: max_len] or "PARTNER"
+    base = base[: max_len] or "ORG"
     return base
+
 
 
 # ==============================
@@ -141,16 +142,16 @@ def _promote_user_to_partner_internal(
     db: Session,
     *,
     email: str,
-    partner_name: str,
+    partner_name: str,              # 실제로는 Org 이름
     created_by: Optional[int] = None,
     partner_user_role: str = "partner",
-) -> Tuple[Partner, PartnerUser]:
+) -> Tuple[Org, PartnerUser]:
     """
-    실제 partners / partner_users 를 만드는 하위 유틸.
+    실제 partner.org / partner.partner(PartnerUser)를 만드는 하위 유틸.
 
     - 주어진 email 에 해당하는 AppUser 를 찾고
-    - partner_name 기반 Partner 를 생성/재사용
-    - 그 Partner 와 AppUser 를 연결하는 PartnerUser 를 생성/재사용
+    - partner_name 기반 Org 를 생성/재사용
+    - 그 Org 와 AppUser 를 연결하는 PartnerUser 를 생성/재사용
     - 트랜잭션/상태 전이는 서비스 레이어에서 처리
     """
     # 1) 가입 사용자 확인 (user.users)
@@ -160,25 +161,27 @@ def _promote_user_to_partner_internal(
     if not app_user:
         raise PromotionNotFound(f"no user.users found for email={email}")
 
-    # 2) 파트너 코드/이름 정리 (코드는 내부에서 자동 생성)
+    # 2) Org 코드/이름 정리 (코드는 내부에서 자동 생성)
     base_code = _slugify_code(partner_name)[:16]
 
-    # 3) 멱등: 동일 code 파트너가 있으면 재사용
-    partner = db.execute(
-        select(Partner).where(Partner.code == base_code)
+    # 3) 멱등: 동일 code Org 가 있으면 재사용
+    org = db.execute(
+        select(Org).where(Org.code == base_code)
     ).scalar_one_or_none()
-    if not partner:
+
+    if not org:
         try_code = base_code
         tries = 0
         while True:
             try:
-                partner = Partner(
+                org = Org(
                     name=partner_name,
                     code=try_code,
                     status="active",
                     created_by=created_by,
+                    # timezone 은 기본값 'UTC' 사용
                 )
-                db.add(partner)
+                db.add(org)
                 db.flush()  # PK 확보
                 break
             except IntegrityError:
@@ -193,16 +196,17 @@ def _promote_user_to_partner_internal(
                 else:
                     try_code = f"{base_code}{tries}"
 
-    # 4) 멱등: 이미 partner_users 매핑이 있으면 그대로 반환
+    # 4) 멱등: 이미 PartnerUser 매핑이 있으면 그대로 반환
     pu = db.execute(
         select(PartnerUser).where(
-            PartnerUser.partner_id == partner.id,
+            PartnerUser.partner_id == org.id,          # partner_id = org_id 역할
             PartnerUser.user_id == app_user.user_id,
         )
     ).scalar_one_or_none()
+
     if not pu:
         pu = PartnerUser(
-            partner_id=partner.id,
+            partner_id=org.id,
             user_id=app_user.user_id,
             full_name=getattr(app_user, "full_name", None)
             or getattr(app_user, "name", None)
@@ -214,9 +218,8 @@ def _promote_user_to_partner_internal(
         db.add(pu)
 
     db.commit()
-    db.refresh(partner)
+    db.refresh(org)
     db.refresh(pu)
-    return partner, pu
 
 
 def get_promotion_request(
