@@ -141,7 +141,7 @@ def _promote_user_to_partner_internal(
     email: str,
     partner_name: str,
     created_by: Optional[int] = None,
-    partner_user_role: str = "partner_admin",
+    partner_user_role: str = "partner",
 ) -> Tuple[Partner, PartnerUser]:
     """
     실제 partners / partner_users 를 만드는 하위 유틸
@@ -394,7 +394,7 @@ def bootstrap_default_roles(db: Session) -> Sequence[UserRole]:
     defaults = [
         ("supervisor_admin", {"scope": "platform", "perm": ["all"]}),
         (
-            "partner_admin",
+            "partner",
             {
                 "scope": "partner",
                 "perm": ["manage_partner", "manage_courses", "manage_students"],

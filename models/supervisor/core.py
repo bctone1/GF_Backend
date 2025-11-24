@@ -83,8 +83,8 @@ class PartnerPromotionRequest(Base):
     # 교육 분야 (예: '프로그래밍', '머신러닝', '디자인' 등, 문자열 메타데이터)
     edu_category = Column(String(64), nullable=True)
 
-    # 승인 시 부여할 파트너 역할 (예: partner_admin, instructor)
-    target_role = Column(String(64), nullable=False, server_default=text("'partner_admin'"))
+    # 승인 시 부여할 파트너 역할 (예: partner, instructor)
+    target_role = Column(String(64), nullable=False, server_default=text("'partner'"))
 
     # 상태: pending / approved / rejected / cancelled
     status = Column(String(32), nullable=False, server_default=text("'pending'"))

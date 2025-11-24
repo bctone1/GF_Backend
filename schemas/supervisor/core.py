@@ -65,7 +65,7 @@ class PartnerPromotionRequestCreate(ORMBase):
     org_name: str
     edu_category: Optional[str] = None
     # 기본 파트너 역할
-    target_role: str = "partner_admin"
+    target_role: str = "partner"
 
 
 class PartnerPromotionRequestUpdate(ORMBase):
@@ -100,7 +100,7 @@ class PartnerPromotionRequestResponse(ORMBase):
     email: str
     org_name: str
     edu_category: Optional[str] = None
-    target_role: str = "partner_admin"
+    target_role: str = "partner"
 
     status: PromotionStatus
     requested_at: datetime

@@ -199,7 +199,7 @@ class PartnerPromotionRequestCreate(BaseModel):
     edu_category: Optional[str] = None
 
     # 기본 파트너 역할
-    target_role: str = "partner_admin"
+    target_role: str = "partner"
 
 
 class PartnerPromotionRequestResponse(BaseModel):
