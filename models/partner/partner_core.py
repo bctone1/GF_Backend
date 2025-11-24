@@ -62,8 +62,7 @@ class PartnerUser(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 실제로는 org_id 역할
-    partner_id = Column(
+    org_id = Column(
         BigInteger,
         ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,

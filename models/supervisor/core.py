@@ -93,7 +93,7 @@ class PartnerPromotionRequest(Base):
     decided_at = Column(DateTime(timezone=True))
 
     # 승인 후 실제로 생성/연결된 partner / partner_user
-    partner_id = Column(
+    org_id = Column(
         BigInteger,
         ForeignKey("partner.org.id", ondelete="SET NULL"),
         nullable=True,
@@ -103,6 +103,7 @@ class PartnerPromotionRequest(Base):
         ForeignKey("partner.partner.id", ondelete="SET NULL"),
         nullable=True,
     )
+
 
     __table_args__ = (
         CheckConstraint(

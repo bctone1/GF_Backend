@@ -58,8 +58,7 @@ class OrgPage(Page[OrgResponse]):
 # ==============================
 
 class PartnerUserBase(BaseModel):
-    # 실제 의미는 org_id 이지만, 컬럼/JSON 키는 partner_id 그대로 사용
-    partner_id: int
+    org_id: int
     full_name: str
     email: EmailStr
     phone: Optional[str] = None

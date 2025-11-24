@@ -62,7 +62,7 @@ def approve_partner_request(
 
     - pending 상태만 승인 가능
     - user.users.is_partner = True 로 플래그 설정
-    - partners / partner_users 생성(or 재사용)
+    - Org / PartnerUser 생성(or 재사용)
     - PartnerPromotionRequest 상태/연결 업데이트
     """
     # 1) 요청 조회
@@ -94,14 +94,14 @@ def approve_partner_request(
     if not getattr(user, "is_partner", False):
         user.is_partner = True
         db.add(user)
-        # commit 은 아래 partner 생성과 함께
+        # commit 은 아래 Org/PartnerUser 생성과 함께
 
-    # 5) 파트너/파트너유저 생성 또는 재사용
+    # 5) Org / PartnerUser 생성 또는 재사용
     try:
-        partner, partner_user = _promote_user_to_partner_internal(
+        org, partner_user = _promote_user_to_partner_internal(
             db=db,
             email=user.email,              # 실제 AppUser 기준
-            partner_name=req.org_name,     # 요청폼에서 받은 기관명
+            partner_name=req.org_name,     # 요청 폼에서 받은 기관명
             created_by=None,               # 별도 supervisor 유저 없으니 None
             partner_user_role=target_role or req.target_role,
         )
@@ -119,8 +119,9 @@ def approve_partner_request(
         req.decided_at = now
     # decided_by 같은 컬럼이 있어도 지금은 별도 supervisor 유저가 없으니 건드리지 않음
 
+    # 컬럼 이름은 partner_id 이지만 실제로는 Org.id를 가리킴
     if hasattr(req, "partner_id"):
-        req.partner_id = partner.id
+        req.partner_id = org.id
     if hasattr(req, "partner_user_id"):
         req.partner_user_id = partner_user.id
 
