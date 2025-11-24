@@ -12,7 +12,7 @@ class Invoice(Base):
     __tablename__ = "invoices"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     invoice_number = Column(Text, nullable=False)
 
     billing_period_start = Column(Date, nullable=False)
@@ -78,7 +78,7 @@ class Payout(Base):
     __tablename__ = "payouts"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     payout_number = Column(Text, nullable=False)
 
     period_start = Column(Date, nullable=False)
@@ -132,7 +132,7 @@ class FeeRate(Base):
     __tablename__ = "fee_rates"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     fee_type   = Column(Text, nullable=False)  # 'platform', 'processing', ...
 
     percentage  = Column(Numeric(5, 2))
@@ -157,7 +157,7 @@ class PayoutAccount(Base):
     __tablename__ = "payout_accounts"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
 
     bank_name = Column(Text, nullable=False)
     account_number_encrypted = Column(Text, nullable=False)
@@ -179,7 +179,7 @@ class PayoutAccount(Base):
 class BusinessProfile(Base):
     __tablename__ = "business_profiles"
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), primary_key=True, nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), primary_key=True, nullable=False)
 
     business_registration_number = Column(Text)
     company_name        = Column(Text, nullable=False)

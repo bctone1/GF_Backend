@@ -17,7 +17,7 @@ class AnalyticsSnapshot(Base):
 
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,
     )
     snapshot_date = Column(Date, nullable=False)  # 일 단위 스냅샷
@@ -42,7 +42,7 @@ class EnrollmentFinanceMonthly(Base):
     __tablename__ = "enrollment_finance_monthly"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     enrollment_id = Column(BigInteger, ForeignKey("partner.enrollments.id", ondelete="CASCADE"), nullable=False)
     month = Column(Date, nullable=False)  # YYYY-MM-01 고정
 

@@ -95,12 +95,12 @@ class PartnerPromotionRequest(Base):
     # 승인 후 실제로 생성/연결된 partner / partner_user
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="SET NULL"),
+        ForeignKey("partner.org.id", ondelete="SET NULL"),
         nullable=True,
     )
     partner_user_id = Column(
         BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),
         nullable=True,
     )
 

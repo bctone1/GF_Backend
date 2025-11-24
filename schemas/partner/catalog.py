@@ -90,7 +90,7 @@ class OrgLlmSettingCreate(ORMBase):
     daily_message_limit: Optional[int] = None
     token_alert_threshold: Optional[int] = None
     provider_credential_id: Optional[int] = None
-    updated_by: Optional[int] = None  # partner.partners.id, 서버에서 채우기 가능
+    updated_by: Optional[int] = None  # partner.org.id, 서버에서 채우기 가능
 
 
 class OrgLlmSettingUpdate(ORMBase):

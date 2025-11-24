@@ -1,48 +1,72 @@
 from __future__ import annotations
 from typing import Optional, Sequence, Tuple
-import random, string
+import random
+import string
 
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models.partner.partner_core import Partner, PartnerUser
+from models.partner.partner_core import Org, PartnerUser   # Org, PartnerUser로 변경
 from models.user.account import AppUser
 
 
 # ========= Exceptions =========
-class PartnerError(Exception): ...
-class PartnerNotFound(PartnerError): ...
-class PartnerConflict(PartnerError): ...
-class PartnerUserNotFound(PartnerError): ...
-class PartnerUserConflict(PartnerError): ...
+class OrgError(Exception):
+    ...
+
+
+class OrgNotFound(OrgError):
+    ...
+
+
+class OrgConflict(OrgError):
+    ...
+
+
+class PartnerUserError(OrgError):
+    ...
+
+
+class PartnerUserNotFound(PartnerUserError):
+    ...
+
+
+class PartnerUserConflict(PartnerUserError):
+    ...
 
 
 # ========= Helpers =========
-def _gen_code(prefix: str = "PT", length: int = 6) -> str:
+def _gen_code(prefix: str = "ORG", length: int = 6) -> str:
     body = "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
     return f"{prefix}{body}"
 
+
 def _slugify(s: str, max_len: int = 16) -> str:
     base = "".join(ch for ch in s.upper() if ch.isalnum())
-    return (base or "PARTNER")[:max_len]
+    return (base or "ORG")[:max_len]
 
 
-# ========= Partner CRUD =========
-def create_partner(
+# ========= Org CRUD =========
+def create_org(
     db: Session,
     *,
     name: str,
     code: Optional[str] = None,
     status: str = "active",
     timezone: str = "UTC",
-) -> Partner:
+) -> Org:
+    """
+    Org(기관) 생성.
+    code가 없으면 name 기반으로 slug 생성, 유니크 충돌 시 자동 재시도.
+    """
     base_code = (code or _slugify(name))[:16]
     try_code = base_code
     tries = 0
+
     while True:
         try:
-            obj = Partner(name=name, code=try_code, status=status, timezone=timezone)
+            obj = Org(name=name, code=try_code, status=status, timezone=timezone)
             db.add(obj)
             db.commit()
             db.refresh(obj)
@@ -53,40 +77,49 @@ def create_partner(
             if tries <= 3:
                 try_code = f"{base_code}{tries}"
             else:
-                try_code = _gen_code(prefix=_slugify(name)[:4] or "PT", length=6)
+                try_code = _gen_code(prefix=_slugify(name)[:4] or "ORG", length=6)
 
-def get_partner(db: Session, partner_id: int) -> Optional[Partner]:
-    return db.get(Partner, partner_id)
 
-def get_partner_by_code(db: Session, code: str) -> Optional[Partner]:
-    stmt = select(Partner).where(Partner.code == code).limit(1)
+def get_org(db: Session, org_id: int) -> Optional[Org]:
+    return db.get(Org, org_id)
+
+
+def get_org_by_code(db: Session, code: str) -> Optional[Org]:
+    stmt = select(Org).where(Org.code == code).limit(1)
     return db.execute(stmt).scalar_one_or_none()
 
-def list_partners(
+
+def list_orgs(
     db: Session,
     *,
     status: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
-) -> Sequence[Partner]:
-    stmt = select(Partner).order_by(Partner.created_at.desc()).limit(limit).offset(offset)
+) -> Sequence[Org]:
+    stmt = (
+        select(Org)
+        .order_by(Org.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     if status:
-        stmt = stmt.where(Partner.status == status)
+        stmt = stmt.where(Org.status == status)
     if q:
         like = f"%{q}%"
-        stmt = stmt.where(Partner.name.ilike(like) | Partner.code.ilike(like))
+        stmt = stmt.where(Org.name.ilike(like) | Org.code.ilike(like))
     return db.execute(stmt).scalars().all()
 
-def update_partner(db: Session, partner_id: int, **fields) -> Optional[Partner]:
-    if "code" in fields:
-        # 코드 변경은 유니크 충돌 가능
+
+def update_org(db: Session, org_id: int, **fields) -> Optional[Org]:
+    if "code" in fields and fields["code"] is not None:
         fields["code"] = fields["code"][:16]
+
     stmt = (
-        update(Partner)
-        .where(Partner.id == partner_id)
+        update(Org)
+        .where(Org.id == org_id)
         .values(**fields)
-        .returning(Partner)
+        .returning(Org)
     )
     try:
         row = db.execute(stmt).fetchone()
@@ -95,12 +128,13 @@ def update_partner(db: Session, partner_id: int, **fields) -> Optional[Partner]:
             return None
         db.commit()
         return row[0]
-    except IntegrityError:
+    except IntegrityError as e:
         db.rollback()
-        raise PartnerConflict("partner code already exists")
+        raise OrgConflict("org code already exists") from e
 
-def delete_partner(db: Session, partner_id: int) -> bool:
-    res = db.execute(delete(Partner).where(Partner.id == partner_id))
+
+def delete_org(db: Session, org_id: int) -> bool:
+    res = db.execute(delete(Org).where(Org.id == org_id))
     db.commit()
     return res.rowcount > 0
 
@@ -110,35 +144,51 @@ def _find_app_user_by_email(db: Session, email: str) -> Optional[AppUser]:
     stmt = select(AppUser).where(func.lower(AppUser.email) == func.lower(email)).limit(1)
     return db.execute(stmt).scalar_one_or_none()
 
+
 def get_partner_user(db: Session, partner_user_id: int) -> Optional[PartnerUser]:
     return db.get(PartnerUser, partner_user_id)
 
-def get_partner_user_by_email(db: Session, *, partner_id: int, email: str) -> Optional[PartnerUser]:
+
+def get_partner_user_by_email(
+    db: Session,
+    *,
+    org_id: int,
+    email: str,
+) -> Optional[PartnerUser]:
+    """
+    org_id = PartnerUser.partner_id (FK → partner.org.id)
+    """
     stmt = (
         select(PartnerUser)
         .where(
-            PartnerUser.partner_id == partner_id,
+            PartnerUser.partner_id == org_id,
             func.lower(PartnerUser.email) == func.lower(email),
         )
         .limit(1)
     )
     return db.execute(stmt).scalar_one_or_none()
 
+
 def list_partner_users(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     role: Optional[str] = None,
     is_active: Optional[bool] = None,
     q: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
 ) -> Sequence[PartnerUser]:
+    """
+    특정 Org에 속한 강사/어시 리스트.
+    org_id → PartnerUser.partner_id 로 매핑.
+    """
     stmt = (
         select(PartnerUser)
-        .where(PartnerUser.partner_id == partner_id)
+        .where(PartnerUser.partner_id == org_id)
         .order_by(PartnerUser.created_at.desc())
-        .limit(limit).offset(offset)
+        .limit(limit)
+        .offset(offset)
     )
     if role:
         stmt = stmt.where(PartnerUser.role == role)
@@ -147,25 +197,29 @@ def list_partner_users(
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
-            PartnerUser.full_name.ilike(like) |
-            PartnerUser.email.ilike(like) |
-            (PartnerUser.phone.isnot(None) & PartnerUser.phone.ilike(like))
+            PartnerUser.full_name.ilike(like)
+            | PartnerUser.email.ilike(like)
+            | (PartnerUser.phone.isnot(None) & PartnerUser.phone.ilike(like))
         )
     return db.execute(stmt).scalars().all()
+
 
 def add_partner_user(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     email: str,
     full_name: Optional[str] = None,
-    role: str = "partner",  # 기본값 partner_admin → partner 로 변경
+    role: str = "partner",  # partner | assistant
     phone: Optional[str] = None,
     is_active: bool = True,
     user_id: Optional[int] = None,  # user.users PK. 주어지지 않으면 email로 조회
 ) -> PartnerUser:
-    # 멱등: 이미 매핑되어 있으면 반환
-    existing = get_partner_user_by_email(db, partner_id=partner_id, email=email)
+    """
+    Org에 속한 PartnerUser(강사/어시) 추가.
+    - 이미 org_id + email 매핑이 있으면 그대로 반환 (멱등)
+    """
+    existing = get_partner_user_by_email(db, org_id=org_id, email=email)
     if existing:
         return existing
 
@@ -175,7 +229,7 @@ def add_partner_user(
         app_user_id = getattr(app_user, "user_id", None) if app_user else None
 
     obj = PartnerUser(
-        partner_id=partner_id,
+        partner_id=org_id,            # FK → partner.org.id
         user_id=app_user_id,
         full_name=full_name or email,
         email=email,
@@ -188,13 +242,13 @@ def add_partner_user(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        # email 유니크/ partner_id+user_id 유니크 위반 분기
-        raise PartnerUserConflict("duplicate mapping or email in this partner") from e
+        # email 유니크 / (partner_id, user_id) 유니크 위반
+        raise PartnerUserConflict("duplicate mapping or email in this org") from e
     db.refresh(obj)
     return obj
 
+
 def update_partner_user(db: Session, partner_user_id: int, **fields) -> Optional[PartnerUser]:
-    # 이메일 변경은 citext + 유니크 고려
     stmt = (
         update(PartnerUser)
         .where(PartnerUser.id == partner_user_id)
@@ -212,11 +266,14 @@ def update_partner_user(db: Session, partner_user_id: int, **fields) -> Optional
         db.rollback()
         raise PartnerUserConflict("email or mapping conflict") from e
 
+
 def deactivate_partner_user(db: Session, partner_user_id: int) -> Optional[PartnerUser]:
     return update_partner_user(db, partner_user_id, is_active=False)
 
+
 def change_partner_user_role(db: Session, partner_user_id: int, role: str) -> Optional[PartnerUser]:
     return update_partner_user(db, partner_user_id, role=role)
+
 
 def remove_partner_user(db: Session, partner_user_id: int) -> bool:
     res = db.execute(delete(PartnerUser).where(PartnerUser.id == partner_user_id))
@@ -225,35 +282,42 @@ def remove_partner_user(db: Session, partner_user_id: int) -> bool:
 
 
 # ========= Convenience =========
-def ensure_partner_and_admin(
+def ensure_org_and_admin(
     db: Session,
     *,
-    partner_name: str,
-    partner_code: Optional[str],
+    org_name: str,
+    org_code: Optional[str],
     admin_email: str,
     admin_full_name: Optional[str] = None,
-) -> Tuple[Partner, PartnerUser]:
+) -> Tuple[Org, PartnerUser]:
     """
-    파트너 없으면 생성, 있으면 사용. 관리자(대표 강사) 없으면 생성.
+    Org(기관) 없으면 생성, 있으면 재사용.
+    해당 Org의 관리자(대표 강사 역할) 없으면 PartnerUser 생성.
     """
-    partner = None
-    if partner_code:
-        partner = get_partner_by_code(db, partner_code)
-    if not partner:
-        # 이름 기반 검색은 충돌이 있을 수 있어 code 우선
-        try:
-            partner = create_partner(db, name=partner_name, code=partner_code or _slugify(partner_name))
-        except PartnerConflict:
-            partner = get_partner_by_code(db, partner_code or _slugify(partner_name))
+    org: Optional[Org] = None
 
-    puser = get_partner_user_by_email(db, partner_id=partner.id, email=admin_email)
+    if org_code:
+        org = get_org_by_code(db, org_code)
+
+    if not org:
+        try:
+            org = create_org(
+                db,
+                name=org_name,
+                code=org_code or _slugify(org_name),
+            )
+        except OrgConflict:
+            org = get_org_by_code(db, org_code or _slugify(org_name))
+
+    puser = get_partner_user_by_email(db, org_id=org.id, email=admin_email)
     if not puser:
         puser = add_partner_user(
             db,
-            partner_id=partner.id,
+            org_id=org.id,
             email=admin_email,
             full_name=admin_full_name or admin_email,
-            role="partner",  # partner_admin → partner
+            role="partner",
             is_active=True,
         )
-    return partner, puser
+
+    return org, puser

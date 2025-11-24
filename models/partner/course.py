@@ -1,3 +1,4 @@
+# models/partner/course.py
 from sqlalchemy import (
     Column, BigInteger, Integer, Text, Boolean,
     Date, DateTime, ForeignKey, UniqueConstraint,
@@ -13,14 +14,16 @@ class Course(Base):
     __tablename__ = "courses"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    # 이 코스를 운영하는 org (교육기관)
     org_id = Column(
         BigInteger,
-        ForeignKey("supervisor.organizations.organization_id", ondelete="CASCADE"),
+        ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,
     )
 
     title = Column(Text, nullable=False)
-    course_key = Column(Text, nullable=False)  # unique within org
+    course_key = Column(Text, nullable=False)  # org 내에서 unique
     status = Column(Text, nullable=False, server_default=text("'draft'"))  # draft|active|archived
     start_date = Column(Date)
     end_date = Column(Date)
@@ -28,6 +31,9 @@ class Course(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # org ↔ course 연결 (Org 쪽에도 courses 관계 추가해두면 좋음)
+    org = relationship("Org", back_populates="courses", passive_deletes=True)
 
     classes = relationship(
         "Class",
@@ -49,10 +55,10 @@ class Class(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 1 class : 1 partner(강사)
+    # 1 class : 1 partner(강사) = PartnerUser.id
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -77,11 +83,12 @@ class Class(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+    # course ↔ class
     course = relationship("Course", back_populates="classes", passive_deletes=True)
 
-    # 클래스 → 담당 파트너(강사)
+    # 클래스 → 담당 파트너(강사, PartnerUser)
     partner = relationship(
-        "Partner",
+        "PartnerUser",
         back_populates="classes",
         passive_deletes=True,
     )
@@ -115,13 +122,14 @@ class InviteCode(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
+    # 이 초대코드를 소유하는 파트너(강사)
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # CHANGED: student 초대코드는 항상 특정 class 기준
+    # student 초대코드는 항상 특정 class 기준
     class_id = Column(
         BigInteger,
         ForeignKey("partner.classes.id", ondelete="CASCADE"),
@@ -144,9 +152,10 @@ class InviteCode(Base):
         server_default=text("'active'"),
     )  # active|expired|disabled
 
+    # 실제 생성한 PartnerUser (강사/assistant)
     created_by = Column(
         BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),
     )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

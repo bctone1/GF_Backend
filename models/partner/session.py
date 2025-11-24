@@ -41,7 +41,7 @@ class AiSession(Base):
 
     initiated_by = Column(
         BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),
         nullable=True,
     )
 

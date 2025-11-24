@@ -1,82 +1,100 @@
+# schemas/partner/partner_core.py
 from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional, Literal
-from pydantic import ConfigDict, EmailStr
-from schemas.base import ORMBase, Page
+from typing import Optional
 
-# DB 제약과 동일 집합
-PartnerStatus = Literal["active", "inactive", "suspended"]
-PartnerUserRole = Literal["partner", "assistant"]
+from pydantic import BaseModel, EmailStr, ConfigDict
+
+from schemas.base import Page
 
 
 # ==============================
-# partners
+# Org (partner.org)
 # ==============================
-class PartnerCreate(ORMBase):
+
+class OrgBase(BaseModel):
     name: str
     code: str
-    status: Optional[PartnerStatus] = None      # DB default 'active'
-    timezone: Optional[str] = None              # DB default 'UTC'
+    status: str = "active"   # active|inactive|suspended
+    timezone: str = "UTC"
 
 
-class PartnerUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
+class OrgCreate(OrgBase):
+    """
+    Org 생성 시 사용하는 스키마.
+    created_by, created_at 등은 서버에서 채움.
+    """
+    pass
+
+
+class OrgUpdate(BaseModel):
+    """
+    Org 수정 시 사용하는 스키마.
+    부분 업데이트 허용.
+    """
     name: Optional[str] = None
     code: Optional[str] = None
-    status: Optional[PartnerStatus] = None
+    status: Optional[str] = None
     timezone: Optional[str] = None
 
 
-class PartnerResponse(ORMBase):
+class OrgResponse(OrgBase):
     id: int
-    name: str
-    code: str
-    status: PartnerStatus
-    timezone: str
+    created_by: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
+    model_config = ConfigDict(from_attributes=True)
 
-PartnerPage = Page[PartnerResponse]
+
+class OrgPage(Page[OrgResponse]):
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==============================
-# partner_users
+# PartnerUser (partner.partner)
+# Org(기관)에 속한 강사/어시
 # ==============================
-class PartnerUserCreate(ORMBase):
+
+class PartnerUserBase(BaseModel):
+    # 실제 의미는 org_id 이지만, 컬럼/JSON 키는 partner_id 그대로 사용
     partner_id: int
-    user_id: Optional[int] = None                  # user.users.user_id
     full_name: str
     email: EmailStr
     phone: Optional[str] = None
-    role: Optional[PartnerUserRole] = None         # DB default 'partner'
-    is_active: Optional[bool] = None               # DB default true
-    last_login_at: Optional[datetime] = None
+    role: str = "partner"   # partner | assistant
+    is_active: bool = True
 
 
-class PartnerUserUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
+class PartnerUserCreate(PartnerUserBase):
+    """
+    강사/어시스턴트 생성용.
+    user_id는 이메일로 매핑하거나, 필요하면 별도 Create에서 받도록.
+    """
     user_id: Optional[int] = None
+
+
+class PartnerUserUpdate(BaseModel):
+    """
+    강사/어시스턴트 수정용.
+    """
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
     phone: Optional[str] = None
-    role: Optional[PartnerUserRole] = None
+    role: Optional[str] = None
     is_active: Optional[bool] = None
-    last_login_at: Optional[datetime] = None
 
 
-class PartnerUserResponse(ORMBase):
+class PartnerUserResponse(PartnerUserBase):
     id: int
-    partner_id: int
     user_id: Optional[int] = None
-    full_name: str
-    email: str
-    phone: Optional[str] = None
-    role: PartnerUserRole
-    is_active: bool
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
+    model_config = ConfigDict(from_attributes=True)
 
-PartnerUserPage = Page[PartnerUserResponse]
+
+class PartnerUserPage(Page[PartnerUserResponse]):
+    model_config = ConfigDict(from_attributes=True)

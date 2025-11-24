@@ -16,7 +16,7 @@ class ComparisonRun(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     student_id = Column(BigInteger, ForeignKey("partner.students.id", ondelete="SET NULL"), nullable=True)
-    initiated_by = Column(BigInteger, ForeignKey("partner.partner_users.id", ondelete="SET NULL"), nullable=True)
+    initiated_by = Column(BigInteger, ForeignKey("partner.partner.id", ondelete="SET NULL"), nullable=True)
 
     status = Column(Text, nullable=False, server_default=text("'running'"))  # running|completed|failed|canceled
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -15,7 +15,7 @@ class NotificationPreference(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     partner_user_id = Column(BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),
         nullable=False)
 
     new_student_email    = Column(Boolean, nullable=False, server_default=text("true"))
@@ -41,7 +41,7 @@ class EmailSubscription(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     partner_user_id = Column(BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),
         nullable=False)
     subscription_type = Column(Text, nullable=False)   # 'weekly_digest' | 'alerts' | 'marketing'
     is_subscribed     = Column(Boolean, nullable=False, server_default=text("true"))
@@ -62,7 +62,7 @@ class MfaSetting(Base):
     __tablename__ = "mfa_settings"
 
     partner_user_id = Column(BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),
         primary_key=True, nullable=False)
 
     is_enabled       = Column(Boolean, nullable=False, server_default=text("false"))
@@ -87,7 +87,7 @@ class LoginActivity(Base):
     id       = Column(BigInteger, primary_key=True, nullable=False)  # 부모엔 IDENTITY/serial 미적용. 파티션에서 처리 또는 애플리케이션에서 채움.
 
     partner_user_id = Column(BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),
         nullable=True)
     ip_address = Column(INET)
     user_agent = Column(Text)

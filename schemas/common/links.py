@@ -35,18 +35,18 @@ except Exception:
 
 
 # =========================================================
-# partner_org_link  (supervisor.organizations ↔ partner.partners)
+# partner_org_link  (supervisor.organizations ↔ partner.org)
 # =========================================================
 
 class PartnerOrgLinkCreate(ORMBase):
     """
     교차 링크 생성 스키마.
-    - supervisor.organizations.organization_id ↔ partner.partners.id
+    - supervisor.organizations.organization_id ↔ partner.org.id
     """
     model_config = ConfigDict(from_attributes=False)
 
     organization_id: int  # supervisor.organizations PK
-    partner_id: int       # partner.partners PK
+    partner_id: int       # partner.org PK
     is_primary: bool = False
     notes: Optional[str] = None
 

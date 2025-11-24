@@ -16,7 +16,7 @@ class Student(Base):
 
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,
     )
 

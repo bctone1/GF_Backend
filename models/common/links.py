@@ -10,7 +10,7 @@ from models.base import Base
 # ====================== common.partner_org_link ======================
 class PartnerOrgLink(Base):
     """
-    supervisor.organizations  <->  partner.partners 연결용 링크 테이블
+    supervisor.organizations  <->  partner.org 연결용 링크 테이블
 
     - 한 organization 은 여러 partner 와 연결 가능
     - is_primary = true 인 링크는 조직당 최대 1개 (대표 파트너)
@@ -26,7 +26,7 @@ class PartnerOrgLink(Base):
     )
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -72,7 +72,7 @@ class OrgUserLink(Base):
       - manager : 실무 책임자
       - member  : 일반 멤버
 
-    학생/강사 역할은 partner.students / partner.partner_users 등
+    학생/강사 역할은 partner.students / partner.partner 등
     partner 레이어에서 관리하므로, 이 테이블 role 에서는 제외.
     """
     __tablename__ = "org_user_link"

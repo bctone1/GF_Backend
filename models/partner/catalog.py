@@ -14,7 +14,7 @@ class ProviderCredential(Base):
     __tablename__ = "provider_credentials"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     provider = Column(Text, nullable=False)                 # 예: openai, anthropic, google
     credential_label = Column(Text)                         # 키 식별 라벨
     api_key_encrypted = Column(Text, nullable=False)        # 원문 금지, 암호화 저장
@@ -64,7 +64,7 @@ class OrgLlmSetting(Base):
     __tablename__ = "org_llm_settings"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
 
     default_chat_model = Column(Text, nullable=False)       # 예: gpt-4o-mini
     enable_parallel_mode = Column(Boolean, nullable=False, server_default=text("false"))
@@ -78,7 +78,7 @@ class OrgLlmSetting(Base):
     )
     updated_by = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="SET NULL"),
+        ForeignKey("partner.org.id", ondelete="SET NULL"),
         nullable=True,
     )
 

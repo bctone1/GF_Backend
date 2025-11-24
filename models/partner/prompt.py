@@ -18,7 +18,7 @@ class PromptTemplate(Base):
     # scope='global'이면 NULL, scope='partner'면 NOT NULL
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=True,
     )
 
@@ -27,7 +27,7 @@ class PromptTemplate(Base):
     scope = Column(Text, nullable=False, server_default=text("'partner'"))  # 'partner' | 'global'
     created_by = Column(
         BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),
         nullable=True,
     )
     is_archived = Column(Boolean, nullable=False, server_default=text("false"))
@@ -72,7 +72,7 @@ class PromptTemplateVersion(Base):
 
     created_by = Column(
         BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),
         nullable=True,
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

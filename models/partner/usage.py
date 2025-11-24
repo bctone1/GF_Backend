@@ -14,7 +14,7 @@ class UsageDaily(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id    = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id    = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     class_id      = Column(BigInteger, ForeignKey("partner.classes.id", ondelete="SET NULL"), nullable=True)
     enrollment_id = Column(BigInteger, ForeignKey("partner.enrollments.id", ondelete="SET NULL"), nullable=True)
     student_id    = Column(BigInteger, ForeignKey("partner.students.id", ondelete="SET NULL"), nullable=True)
@@ -66,7 +66,7 @@ class ApiCostDaily(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     usage_date = Column(Date, nullable=False)
     provider   = Column(Text, nullable=False)
     total_cost = Column(Numeric(14, 4), nullable=False)
@@ -86,7 +86,7 @@ class ModelUsageMonthly(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="CASCADE"), nullable=False)
+    partner_id = Column(BigInteger, ForeignKey("partner.org.id", ondelete="CASCADE"), nullable=False)
     month      = Column(Date, nullable=False)             # YYYY-MM-01
     provider   = Column(Text, nullable=False)
     model_name = Column(Text, nullable=False)

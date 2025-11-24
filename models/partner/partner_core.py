@@ -8,13 +8,13 @@ from sqlalchemy.dialects.postgresql import CITEXT
 from models.base import Base
 
 
-# ========== partner.partners ==========
-class Partner(Base):
-    __tablename__ = "partners"
+# ========== partner.org ==========
+class Org(Base):
+    __tablename__ = "org"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    name = Column(Text, nullable=False)
-    code = Column(Text, nullable=False)
+    name = Column(Text, nullable=False)           # 기관명
+    code = Column(Text, nullable=False)           # 기관 코드
     status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|suspended
     timezone = Column(Text, nullable=False, server_default=text("'UTC'"))
 
@@ -27,34 +27,45 @@ class Partner(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    users = relationship("PartnerUser", back_populates="partner", passive_deletes=True)
-
-    # 강사가 연 모든 클래스 역참조 가능하도록
-    classes = relationship(
-        "Class",
-        back_populates="partner",
+    # Org에 속한 강사/조교들
+    partner_users = relationship(
+        "PartnerUser",
+        back_populates="org",
         passive_deletes=True,
     )
 
+    # Org에서 운영 중인 클래스들
+    classes = relationship(
+        "Class",
+        back_populates="org",
+        passive_deletes=True,
+    )
+    courses = relationship("Course", back_populates="org", passive_deletes=True)
+
     __table_args__ = (
-        UniqueConstraint("code", name="uq_partners_code"),
-        CheckConstraint("status IN ('active','inactive','suspended')", name="chk_partners_status"),
-        Index("idx_partners_status", "status"),
-        Index("idx_partners_created", "created_at"),
-        Index("idx_partners_created_by", "created_by"),
+        UniqueConstraint("code", name="uq_org_code"),
+        CheckConstraint("status IN ('active','inactive','suspended')", name="chk_org_status"),
+        Index("idx_org_status", "status"),
+        Index("idx_org_created", "created_at"),
+        Index("idx_org_created_by", "created_by"),
         {"schema": "partner"},
     )
 
 
-# ========== partner.partner_users ==========
+# ========== partner.partner ==========
 class PartnerUser(Base):
-    __tablename__ = "partner_users"
+    """
+    Org(기관)에 소속된 강사/어시스턴트.
+    리팩토링 편의상 클래스 이름은 일단 PartnerUser 유지.
+    """
+    __tablename__ = "partner"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
+    # 실제로는 org_id 역할
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partners.id", ondelete="CASCADE"),
+        ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -68,6 +79,7 @@ class PartnerUser(Base):
     email = Column(CITEXT, nullable=False)
     phone = Column(Text, nullable=True)
 
+    # partner = 강사, assistant = 운영자/조직관리자
     role = Column(
         Text,
         nullable=False,
@@ -79,15 +91,21 @@ class PartnerUser(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    partner = relationship("Partner", back_populates="users", passive_deletes=True)
+    # 소속 Org
+    org = relationship(
+        "Org",
+        back_populates="partner_users",
+        passive_deletes=True,
+    )
+    classes = relationship("Class", back_populates="partner", passive_deletes=True)
 
     __table_args__ = (
-        UniqueConstraint("partner_id", "user_id", name="uq_partner_users_partner_user"),
-        UniqueConstraint("partner_id", "email", name="uq_partner_users_partner_email"),
-        CheckConstraint("role IN ('partner','assistant')", name="chk_partner_users_role"),
-        Index("idx_partner_users_partner_email", "partner_id", "email"),
-        Index("idx_partner_users_active", "is_active"),
-        Index("idx_partner_users_role", "role"),
-        Index("idx_partner_users_last_login", "last_login_at"),
+        UniqueConstraint("partner_id", "user_id", name="uq_partner_user_user"),
+        UniqueConstraint("partner_id", "email", name="uq_partner_user_email"),
+        CheckConstraint("role IN ('partner','assistant')", name="chk_partner_role"),
+        Index("idx_partner_email", "partner_id", "email"),
+        Index("idx_partner_active", "is_active"),
+        Index("idx_partner_role", "role"),
+        Index("idx_partner_last_login", "last_login_at"),
         {"schema": "partner"},
     )
