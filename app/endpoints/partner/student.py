@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from core.deps import get_db, get_current_partner_admin, get_current_partner_member
+from core.deps import get_db, get_current_partner_user
 from crud.partner import student as student_crud
 
 from schemas.partner.student import (
@@ -27,7 +27,7 @@ def list_students(
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_member),
+    _ = Depends(get_current_partner_user),
 ):
     return student_crud.list_students(
         db,
@@ -44,7 +44,7 @@ def create_student(
     partner_id: int,
     data: StudentCreate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     try:
         return student_crud.create_student(
@@ -65,7 +65,7 @@ def get_student(
     partner_id: int,
     student_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_member),
+    _ = Depends(get_current_partner_user),
 ):
     obj = student_crud.get_student(db, student_id)
     if not obj or obj.partner_id != partner_id:
@@ -79,7 +79,7 @@ def update_student(
     student_id: int,
     data: StudentUpdate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     try:
         updated = student_crud.update_student(db, student_id, **data.model_dump(exclude_unset=True))
@@ -95,7 +95,7 @@ def deactivate_student(
     partner_id: int,
     student_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     """
     비활성화 시킴(종료와 다름)
@@ -111,7 +111,7 @@ def archive_student(
     partner_id: int,
     student_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     updated = student_crud.archive_student(db, student_id)
     if not updated or updated.partner_id != partner_id:
@@ -124,7 +124,7 @@ def delete_student(
     partner_id: int,
     student_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     obj = student_crud.get_student(db, student_id)
     if not obj or obj.partner_id != partner_id:
@@ -146,7 +146,7 @@ def list_enrollments_for_student(
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_member),
+    _ = Depends(get_current_partner_user),
 ):
     # 소속 확인
     st = student_crud.get_student(db, student_id)
@@ -167,7 +167,7 @@ def enroll_student(
     student_id: int,
     data: EnrollmentCreate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     # 소속 확인
     st = student_crud.get_student(db, student_id)
@@ -198,7 +198,7 @@ def update_enrollment(
     enrollment_id: int,
     data: EnrollmentUpdate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     obj = student_crud.get_enrollment(db, enrollment_id)
     if not obj:
@@ -219,7 +219,7 @@ def complete_enrollment(
     partner_id: int,
     enrollment_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     obj = student_crud.get_enrollment(db, enrollment_id)
     if not obj:
@@ -239,7 +239,7 @@ def drop_enrollment(
     partner_id: int,
     enrollment_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     obj = student_crud.get_enrollment(db, enrollment_id)
     if not obj:
@@ -259,7 +259,7 @@ def delete_enrollment(
     partner_id: int,
     enrollment_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     obj = student_crud.get_enrollment(db, enrollment_id)
     if not obj:

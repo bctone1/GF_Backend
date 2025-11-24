@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import notify as notify_crud
 from schemas.partner.notify import (
     NotificationPreferenceCreate,
@@ -44,7 +44,7 @@ def list_notification_preferences(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = notify_crud.list_notification_prefs(
         db,
@@ -64,7 +64,7 @@ def get_notification_preference(
     partner_id: int = Path(..., ge=1),
     pref_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_notification_pref(db, pref_id=pref_id)
     if not obj:
@@ -81,7 +81,7 @@ def create_notification_preference(
     partner_id: int = Path(..., ge=1),
     payload: NotificationPreferenceCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     obj = notify_crud.create_notification_pref(db, data=data)
@@ -97,7 +97,7 @@ def update_notification_preference(
     pref_id: int = Path(..., ge=1),
     payload: NotificationPreferenceUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_notification_pref(db, pref_id=pref_id)
     if not obj:
@@ -116,7 +116,7 @@ def delete_notification_preference(
     partner_id: int = Path(..., ge=1),
     pref_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_notification_pref(db, pref_id=pref_id)
     if not obj:
@@ -142,7 +142,7 @@ def list_email_subscriptions(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = notify_crud.list_email_subscriptions(
         db,
@@ -164,7 +164,7 @@ def get_email_subscription(
     partner_id: int = Path(..., ge=1),
     sub_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_email_subscription(db, sub_id=sub_id)
     if not obj:
@@ -181,7 +181,7 @@ def create_email_subscription(
     partner_id: int = Path(..., ge=1),
     payload: EmailSubscriptionCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     obj = notify_crud.create_email_subscription(db, data=data)
@@ -197,7 +197,7 @@ def update_email_subscription(
     sub_id: int = Path(..., ge=1),
     payload: EmailSubscriptionUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_email_subscription(db, sub_id=sub_id)
     if not obj:
@@ -216,7 +216,7 @@ def delete_email_subscription(
     partner_id: int = Path(..., ge=1),
     sub_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_email_subscription(db, sub_id=sub_id)
     if not obj:
@@ -241,7 +241,7 @@ def list_mfa_settings(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = notify_crud.list_mfa_settings(
         db,
@@ -262,7 +262,7 @@ def get_mfa_setting(
     partner_id: int = Path(..., ge=1),
     partner_user_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_mfa_setting(db, partner_user_id=partner_user_id)
     if not obj:
@@ -279,7 +279,7 @@ def create_mfa_setting(
     partner_id: int = Path(..., ge=1),
     payload: MfaSettingCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     obj = notify_crud.create_mfa_setting(db, data=data)
@@ -295,7 +295,7 @@ def update_mfa_setting(
     partner_user_id: int = Path(..., ge=1),
     payload: MfaSettingUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = notify_crud.get_mfa_setting(db, partner_user_id=partner_user_id)
     if not obj:
@@ -324,7 +324,7 @@ def list_login_activities(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = notify_crud.list_login_activities(
         db,
@@ -349,7 +349,7 @@ def create_login_activity(
     partner_id: int = Path(..., ge=1),
     payload: LoginActivityCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     일반적으로는 service/partner/auth 에서 사용.

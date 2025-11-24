@@ -6,7 +6,7 @@ from typing import Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import prompt as prompt_crud
 from schemas.partner.prompt import (
     TemplateScope,
@@ -61,7 +61,7 @@ def list_prompt_templates(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = prompt_crud.list_prompt_templates(
         db,
@@ -82,7 +82,7 @@ def get_prompt_template(
     partner_id: int = Path(..., ge=1),
     template_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = prompt_crud.get_prompt_template(db, template_id=template_id)
     if not obj:
@@ -97,7 +97,7 @@ def create_prompt_template(
     partner_id: int = Path(..., ge=1),
     payload: PromptTemplateCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     # 파트너 엔드포인트에서는 항상 partner scope 로 고정
@@ -113,7 +113,7 @@ def update_prompt_template(
     template_id: int = Path(..., ge=1),
     payload: PromptTemplateUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = prompt_crud.get_prompt_template(db, template_id=template_id)
     if not obj:
@@ -135,7 +135,7 @@ def delete_prompt_template(
     partner_id: int = Path(..., ge=1),
     template_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = prompt_crud.get_prompt_template(db, template_id=template_id)
     if not obj:
@@ -161,7 +161,7 @@ def list_prompt_template_versions(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     template = prompt_crud.get_prompt_template(db, template_id=template_id)
     if not template:
@@ -189,7 +189,7 @@ def create_prompt_template_version(
     template_id: int = Path(..., ge=1),
     payload: PromptTemplateVersionCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     template = prompt_crud.get_prompt_template(db, template_id=template_id)
     if not template:
@@ -212,7 +212,7 @@ def get_prompt_template_version(
     partner_id: int = Path(..., ge=1),
     version_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     version = prompt_crud.get_prompt_template_version(db, version_id=version_id)
     if not version:
@@ -235,7 +235,7 @@ def update_prompt_template_version(
     version_id: int = Path(..., ge=1),
     payload: PromptTemplateVersionUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     version = prompt_crud.get_prompt_template_version(db, version_id=version_id)
     if not version:
@@ -260,7 +260,7 @@ def delete_prompt_template_version(
     partner_id: int = Path(..., ge=1),
     version_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     version = prompt_crud.get_prompt_template_version(db, version_id=version_id)
     if not version:
@@ -290,7 +290,7 @@ def list_prompt_bindings(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     # template_version_id 로 필터링할 경우, 접근 가능한 템플릿인지 한 번 체크
     if template_version_id is not None:
@@ -321,7 +321,7 @@ def get_prompt_binding(
     partner_id: int = Path(..., ge=1),
     binding_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     binding = prompt_crud.get_prompt_binding(db, binding_id=binding_id)
     if not binding:
@@ -344,7 +344,7 @@ def create_prompt_binding(
     partner_id: int = Path(..., ge=1),
     payload: PromptBindingCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     # 템플릿 버전 접근 가능 여부 체크
     version = prompt_crud.get_prompt_template_version(db, version_id=payload.template_version_id)
@@ -368,7 +368,7 @@ def update_prompt_binding(
     binding_id: int = Path(..., ge=1),
     payload: PromptBindingUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     binding = prompt_crud.get_prompt_binding(db, binding_id=binding_id)
     if not binding:
@@ -405,7 +405,7 @@ def delete_prompt_binding(
     partner_id: int = Path(..., ge=1),
     binding_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     binding = prompt_crud.get_prompt_binding(db, binding_id=binding_id)
     if not binding:

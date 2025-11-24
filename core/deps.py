@@ -78,61 +78,6 @@ def get_current_session_id(request: Request) -> Optional[int]:
     sid = request.headers.get("X-Session-Id")
     return int(sid) if sid and sid.isdigit() else None
 
-
-# # ==============================
-# # 파트너 권한 검사
-# # ==============================
-# ADMIN_ROLES = ("partner_admin", "partner_manager")
-#
-#
-# def get_current_partner_admin(
-#     partner_id: int,
-#     db: Session = Depends(get_db),
-#     current_user: AppUser = Depends(get_current_user),  # ✅ 타입
-# ) -> PartnerUser:
-#     uid = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
-#     if uid is None:
-#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-#
-#     stmt = (
-#         select(PartnerUser)
-#         .where(
-#             PartnerUser.partner_id == partner_id,
-#             PartnerUser.user_id == uid,
-#             PartnerUser.is_active.is_(True),
-#         )
-#         .limit(1)
-#     )
-#     pu = db.execute(stmt).scalars().first()
-#     if not pu or pu.role not in ADMIN_ROLES:
-#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-#     return pu
-#
-#
-# def get_current_partner_member(
-#     partner_id: int,
-#     db: Session = Depends(get_db),
-#     current_user: AppUser = Depends(get_current_user),
-# ) -> PartnerUser:
-#     uid = getattr(current_user, "user_id", None) or getattr(current_user, "id", None)
-#     if uid is None:
-#         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
-#
-#     stmt = (
-#         select(PartnerUser)
-#         .where(
-#             PartnerUser.partner_id == partner_id,
-#             PartnerUser.user_id == uid,
-#             PartnerUser.is_active.is_(True),
-#         )
-#         .limit(1)
-#     )
-#     pu = db.execute(stmt).scalars().first()
-#     if not pu:
-#         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-#     return pu
-
-
 # ==============================
 # 파트너 권한 검사
 # ==============================

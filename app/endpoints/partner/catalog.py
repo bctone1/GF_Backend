@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path, Body, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner.catalog import provider_credential, model_catalog, org_llm_setting
 from schemas.partner.catalog import (
     ProviderCredentialCreate, ProviderCredentialUpdate,
@@ -30,7 +30,7 @@ def list_provider_credentials(
     provider: Optional[str] = Query(None, description="openai, anthropic, google"),
     is_active: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = provider_credential.list(
         db,
@@ -53,7 +53,7 @@ def create_provider_credential(
     partner_id: int = Path(..., ge=1),
     data: ProviderCredentialCreate = Body(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     if data.partner_id != partner_id:
         raise HTTPException(status_code=400, detail="partner_id mismatch")
@@ -78,7 +78,7 @@ def update_provider_credential(
     cred_id: int = Path(..., ge=1),
     data: ProviderCredentialUpdate = Body(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = provider_credential.get(db, cred_id)
     if not obj or obj.partner_id != partner_id:
@@ -100,7 +100,7 @@ def mark_provider_credential_validated(
     partner_id: int = Path(..., ge=1),
     cred_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = provider_credential.get(db, cred_id)
     if not obj or obj.partner_id != partner_id:
@@ -118,7 +118,7 @@ def delete_provider_credential(
     partner_id: int = Path(..., ge=1),
     cred_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = provider_credential.get(db, cred_id)
     if not obj or obj.partner_id != partner_id:
@@ -140,7 +140,7 @@ def list_models(
     q: Optional[str] = Query(None, description="모델이름 포함"),
     only_available: bool = Query(False, description="파트너가 키를 가진 모델만"),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     if only_available:
         rows, total = model_catalog.list_available_for_partner(
@@ -170,7 +170,7 @@ def create_model(
     partner_id: int = Path(..., ge=1),
     data: ModelCatalogCreate = Body(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     try:
         obj = model_catalog.create(
@@ -188,7 +188,7 @@ def update_model(
     model_id: int = Path(..., ge=1),
     data: ModelCatalogUpdate = Body(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = model_catalog.get(db, model_id)
     if not obj:
@@ -207,7 +207,7 @@ def delete_model(
     partner_id: int = Path(..., ge=1),
     model_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = model_catalog.get(db, model_id)
     if not obj:
@@ -223,7 +223,7 @@ def delete_model(
 def get_org_llm_setting(
     partner_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = org_llm_setting.get_by_partner(db, partner_id=partner_id)
     return None if not obj else OrgLlmSettingResponse.model_validate(obj)
@@ -234,7 +234,7 @@ def upsert_org_llm_setting(
     partner_id: int = Path(..., ge=1),
     data: OrgLlmSettingUpdate = Body(...),
     db: Session = Depends(get_db),
-    me=Depends(get_current_partner_admin),
+    me=Depends(get_current_partner_user),
 ):
     # updated_by는 항상 현재 파트너 관리자 기준으로 강제 세팅
     data.updated_by = getattr(me, "user_id", None)

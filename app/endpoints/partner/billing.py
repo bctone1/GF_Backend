@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import billing as billing_crud
 from schemas.partner.billing import (
     InvoiceCreate,
@@ -61,7 +61,7 @@ def list_invoices(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = billing_crud.list_invoices(
         db,
@@ -84,7 +84,7 @@ def get_invoice(
     partner_id: int = Path(..., ge=1),
     invoice_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_invoice(db, invoice_id=invoice_id)
     if not obj or obj.partner_id != partner_id:
@@ -97,7 +97,7 @@ def create_invoice(
     partner_id: int = Path(..., ge=1),
     payload: InvoiceCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     # path 의 partner_id 강제 적용
@@ -112,7 +112,7 @@ def update_invoice(
     invoice_id: int = Path(..., ge=1),
     payload: InvoiceUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_invoice(db, invoice_id=invoice_id)
     if not obj or obj.partner_id != partner_id:
@@ -128,7 +128,7 @@ def delete_invoice(
     partner_id: int = Path(..., ge=1),
     invoice_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_invoice(db, invoice_id=invoice_id)
     if not obj or obj.partner_id != partner_id:
@@ -149,7 +149,7 @@ def list_invoice_items(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     invoice = billing_crud.get_invoice(db, invoice_id=invoice_id)
     if not invoice or invoice.partner_id != partner_id:
@@ -175,7 +175,7 @@ def create_invoice_item(
     invoice_id: int = Path(..., ge=1),
     payload: InvoiceItemCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     invoice = billing_crud.get_invoice(db, invoice_id=invoice_id)
     if not invoice or invoice.partner_id != partner_id:
@@ -192,7 +192,7 @@ def get_invoice_item(
     partner_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = billing_crud.get_invoice_item(db, item_id=item_id)
     if not item:
@@ -211,7 +211,7 @@ def update_invoice_item(
     item_id: int = Path(..., ge=1),
     payload: InvoiceItemUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = billing_crud.get_invoice_item(db, item_id=item_id)
     if not item:
@@ -231,7 +231,7 @@ def delete_invoice_item(
     partner_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = billing_crud.get_invoice_item(db, item_id=item_id)
     if not item:
@@ -261,7 +261,7 @@ def list_payouts(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = billing_crud.list_payouts(
         db,
@@ -284,7 +284,7 @@ def get_payout(
     partner_id: int = Path(..., ge=1),
     payout_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_payout(db, payout_id=payout_id)
     if not obj or obj.partner_id != partner_id:
@@ -297,7 +297,7 @@ def create_payout(
     partner_id: int = Path(..., ge=1),
     payload: PayoutCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     data["partner_id"] = partner_id
@@ -311,7 +311,7 @@ def update_payout(
     payout_id: int = Path(..., ge=1),
     payload: PayoutUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_payout(db, payout_id=payout_id)
     if not obj or obj.partner_id != partner_id:
@@ -327,7 +327,7 @@ def delete_payout(
     partner_id: int = Path(..., ge=1),
     payout_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_payout(db, payout_id=payout_id)
     if not obj or obj.partner_id != partner_id:
@@ -348,7 +348,7 @@ def list_payout_items(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     payout = billing_crud.get_payout(db, payout_id=payout_id)
     if not payout or payout.partner_id != partner_id:
@@ -374,7 +374,7 @@ def create_payout_item(
     payout_id: int = Path(..., ge=1),
     payload: PayoutItemCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     payout = billing_crud.get_payout(db, payout_id=payout_id)
     if not payout or payout.partner_id != partner_id:
@@ -391,7 +391,7 @@ def get_payout_item(
     partner_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = billing_crud.get_payout_item(db, item_id=item_id)
     if not item:
@@ -410,7 +410,7 @@ def update_payout_item(
     item_id: int = Path(..., ge=1),
     payload: PayoutItemUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = billing_crud.get_payout_item(db, item_id=item_id)
     if not item:
@@ -430,7 +430,7 @@ def delete_payout_item(
     partner_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = billing_crud.get_payout_item(db, item_id=item_id)
     if not item:
@@ -457,7 +457,7 @@ def list_fee_rates(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = billing_crud.list_fee_rates(
         db,
@@ -477,7 +477,7 @@ def get_fee_rate(
     partner_id: int = Path(..., ge=1),
     fee_rate_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_fee_rate(db, fee_rate_id=fee_rate_id)
     if not obj or obj.partner_id != partner_id:
@@ -490,7 +490,7 @@ def create_fee_rate(
     partner_id: int = Path(..., ge=1),
     payload: FeeRateCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     data["partner_id"] = partner_id
@@ -504,7 +504,7 @@ def update_fee_rate(
     fee_rate_id: int = Path(..., ge=1),
     payload: FeeRateUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_fee_rate(db, fee_rate_id=fee_rate_id)
     if not obj or obj.partner_id != partner_id:
@@ -520,7 +520,7 @@ def delete_fee_rate(
     partner_id: int = Path(..., ge=1),
     fee_rate_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_fee_rate(db, fee_rate_id=fee_rate_id)
     if not obj or obj.partner_id != partner_id:
@@ -540,7 +540,7 @@ def list_payout_accounts(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = billing_crud.list_payout_accounts(
         db,
@@ -557,7 +557,7 @@ def get_payout_account(
     partner_id: int = Path(..., ge=1),
     account_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_payout_account(db, account_id=account_id)
     if not obj or obj.partner_id != partner_id:
@@ -570,7 +570,7 @@ def create_payout_account(
     partner_id: int = Path(..., ge=1),
     payload: PayoutAccountCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     data["partner_id"] = partner_id
@@ -584,7 +584,7 @@ def update_payout_account(
     account_id: int = Path(..., ge=1),
     payload: PayoutAccountUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_payout_account(db, account_id=account_id)
     if not obj or obj.partner_id != partner_id:
@@ -600,7 +600,7 @@ def delete_payout_account(
     partner_id: int = Path(..., ge=1),
     account_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_payout_account(db, account_id=account_id)
     if not obj or obj.partner_id != partner_id:
@@ -618,7 +618,7 @@ def set_primary_payout_account(
     partner_id: int = Path(..., ge=1),
     account_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     파트너의 primary 정산 계좌 설정.
@@ -639,7 +639,7 @@ def set_primary_payout_account(
 def get_business_profile(
     partner_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_business_profile(db, partner_id=partner_id)
     if not obj:
@@ -652,7 +652,7 @@ def upsert_business_profile(
     partner_id: int = Path(..., ge=1),
     payload: BusinessProfileCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     비즈니스 프로필 upsert.
@@ -678,7 +678,7 @@ def list_class_finance_monthly(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     분반별 월간 재무 집계 목록 조회.
@@ -701,7 +701,7 @@ def get_class_finance_monthly(
     partner_id: int = Path(..., ge=1),
     cfm_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = billing_crud.get_class_finance_monthly(db, cfm_id=cfm_id)
     if not obj:

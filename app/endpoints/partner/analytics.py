@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import analytics as analytics_crud
 from schemas.partner.analytics import (
     AnalyticsSnapshotResponse,
@@ -32,7 +32,7 @@ def list_analytics_snapshots(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = analytics_crud.list_analytics_snapshots(
         db,
@@ -52,7 +52,7 @@ def get_analytics_snapshot(
     partner_id: int = Path(..., ge=1),
     snapshot_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = analytics_crud.get_analytics_snapshot(db, snapshot_id=snapshot_id)
     if not obj or obj.partner_id != partner_id:
@@ -73,7 +73,7 @@ def list_enrollment_finance_monthly(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = analytics_crud.list_enrollment_finance_monthly(
         db,
@@ -93,7 +93,7 @@ def get_enrollment_finance_monthly(
     partner_id: int = Path(..., ge=1),
     efm_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = analytics_crud.get_enrollment_finance_monthly(db, efm_id=efm_id)
     if not obj or obj.partner_id != partner_id:

@@ -51,7 +51,7 @@ import models.user.agent
 import models.user.practice
 import models.user.activity
 import models.user.account_delete
-import models.links.links
+import models.common.links
 
 import models, inspect
 print(">>> models file loaded from:", inspect.getfile(models))

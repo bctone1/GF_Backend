@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from schemas.partner.course import (
     CourseCreate, CourseUpdate, CourseResponse, CoursePage,
     ClassCreate, ClassUpdate, ClassResponse, ClassPage,
@@ -29,7 +29,7 @@ def list_courses(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = crud_course.list_courses(
         db,
@@ -56,7 +56,7 @@ def create_course(
     org_id: int,
     payload: CourseCreate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.create_course(
         db,
@@ -76,7 +76,7 @@ def get_course(
     org_id: int,
     course_id: int,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.get_course(db, course_id)
     if not obj or obj.org_id != org_id:
@@ -90,7 +90,7 @@ def update_course(
     course_id: int,
     payload: CourseUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.get_course(db, course_id)
     if not obj or obj.org_id != org_id:
@@ -114,7 +114,7 @@ def delete_course(
     org_id: int,
     course_id: int,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.get_course(db, course_id)
     if not obj or obj.org_id != org_id:
@@ -137,7 +137,7 @@ def list_classes(
     status: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = crud_course.list_classes(
         db,
@@ -157,7 +157,7 @@ def create_class(
     course_id: int,
     payload: ClassCreate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.create_class(
         db,
@@ -183,7 +183,7 @@ def get_class(
     course_id: int,
     class_id: int,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.get_class(db, class_id)
     if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
@@ -198,7 +198,7 @@ def update_class(
     class_id: int,
     payload: ClassUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.get_class(db, class_id)
     if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
@@ -227,7 +227,7 @@ def delete_class(
     course_id: int,
     class_id: int,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.get_class(db, class_id)
     if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
@@ -252,7 +252,7 @@ def list_invite_codes(
     target_role: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     target_role: 'partner' | 'student'
@@ -278,7 +278,7 @@ def create_invite_code(
     class_id: int,
     payload: InviteCodeCreate,
     db: Session = Depends(get_db),
-    current_admin=Depends(get_current_partner_admin),
+    current_admin=Depends(get_current_partner_user),
 ):
     """
     target_role: 'partner' | 'student'
@@ -306,7 +306,7 @@ def update_invite_code(
     invite_code: str,
     payload: InviteCodeUpdate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = crud_course.update_invite_code(
         db,
@@ -326,7 +326,7 @@ def delete_invite_code(
     partner_id: int,
     invite_code: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     ok = crud_course.delete_invite_code(db, code=invite_code)
     if not ok:
@@ -371,7 +371,7 @@ def create_and_send_invite(
     partner_id: int,
     payload: InviteSendRequest,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     파트너가 특정 이메일로 초대코드를 생성해서 즉시 발송
@@ -410,7 +410,7 @@ def resend_invite(
     invite_id: int,
     payload: InviteResendRequest,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     이미 생성된 초대코드를 다른(또는 같은) 이메일로 재발송
@@ -445,7 +445,7 @@ def assign_invite_by_email(
     partner_id: int,
     payload: InviteAssignRequest,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     이메일 기준으로:

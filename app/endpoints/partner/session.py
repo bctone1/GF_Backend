@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import session as session_crud
 from schemas.partner.session import (
     AiSessionCreate,
@@ -36,7 +36,7 @@ def list_ai_sessions(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     세션 목록 조회 (파트너 관점).
@@ -59,7 +59,7 @@ def get_ai_session(
     partner_id: int = Path(..., ge=1),
     session_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     단일 세션 상세 조회.
@@ -81,7 +81,7 @@ def create_ai_session(
     partner_id: int = Path(..., ge=1),
     payload: AiSessionCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     세션 생성.
@@ -99,7 +99,7 @@ def update_ai_session(
     session_id: int = Path(..., ge=1),
     payload: AiSessionUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     세션 메타 정보 업데이트.
@@ -121,7 +121,7 @@ def delete_ai_session(
     partner_id: int = Path(..., ge=1),
     session_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     세션 삭제 (메시지는 CASCADE 로 함께 삭제).
@@ -149,7 +149,7 @@ def list_session_messages(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     특정 세션의 메시지 목록 조회.
@@ -177,7 +177,7 @@ def create_session_message(
     session_id: int = Path(..., ge=1),
     payload: SessionMessageCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     세션에 메시지 추가.
@@ -206,7 +206,7 @@ def get_session_message(
     session_id: int = Path(..., ge=1),
     message_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     단일 메시지 조회.
@@ -229,7 +229,7 @@ def update_session_message(
     message_id: int = Path(..., ge=1),
     payload: SessionMessageUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     메시지 수정.
@@ -255,7 +255,7 @@ def delete_session_message(
     session_id: int = Path(..., ge=1),
     message_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     메시지 삭제.

@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import compare as compare_crud
 from schemas.partner.compare import (
     ComparisonRunCreate,
@@ -39,7 +39,7 @@ def list_comparison_runs(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     rows, total = compare_crud.list_runs(
         db,
@@ -60,7 +60,7 @@ def get_comparison_run(
     partner_id: int = Path(..., ge=1),
     run_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = compare_crud.get_run(db, run_id=run_id)
     if not obj:
@@ -73,7 +73,7 @@ def create_comparison_run(
     partner_id: int = Path(..., ge=1),
     payload: ComparisonRunCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     data = payload.model_dump(exclude_unset=True)
     obj = compare_crud.create_run(db, data=data)
@@ -86,7 +86,7 @@ def update_comparison_run(
     run_id: int = Path(..., ge=1),
     payload: ComparisonRunUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = compare_crud.get_run(db, run_id=run_id)
     if not obj:
@@ -102,7 +102,7 @@ def delete_comparison_run(
     partner_id: int = Path(..., ge=1),
     run_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     obj = compare_crud.get_run(db, run_id=run_id)
     if not obj:
@@ -125,7 +125,7 @@ def list_comparison_run_items(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     run = compare_crud.get_run(db, run_id=run_id)
     if not run:
@@ -153,7 +153,7 @@ def create_comparison_run_item(
     run_id: int = Path(..., ge=1),
     payload: ComparisonRunItemCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     run = compare_crud.get_run(db, run_id=run_id)
     if not run:
@@ -175,7 +175,7 @@ def get_comparison_run_item(
     run_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = compare_crud.get_run_item(db, item_id=item_id)
     if not item or item.run_id != run_id:
@@ -193,7 +193,7 @@ def update_comparison_run_item(
     item_id: int = Path(..., ge=1),
     payload: ComparisonRunItemUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = compare_crud.get_run_item(db, item_id=item_id)
     if not item or item.run_id != run_id:
@@ -213,7 +213,7 @@ def delete_comparison_run_item(
     run_id: int = Path(..., ge=1),
     item_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     item = compare_crud.get_run_item(db, item_id=item_id)
     if not item or item.run_id != run_id:

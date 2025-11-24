@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
-from core.deps import get_db, get_current_partner_admin
+from core.deps import get_db, get_current_partner_user
 from crud.partner import usage as usage_crud
 from schemas.partner.usage import (
     UsageDailyResponse,
@@ -45,7 +45,7 @@ def list_usage_daily(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     partner.usage_daily 일별 집계 조회.
@@ -71,7 +71,7 @@ def get_usage_daily(
     partner_id: int = Path(..., ge=1),
     usage_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     usage_daily 단건 조회.
@@ -95,7 +95,7 @@ def list_api_cost_daily(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     partner.api_cost_daily 일별 비용 집계 조회.
@@ -118,7 +118,7 @@ def get_api_cost_daily(
     partner_id: int = Path(..., ge=1),
     row_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     api_cost_daily 단건 조회.
@@ -142,7 +142,7 @@ def list_model_usage_monthly(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     partner.model_usage_monthly 월별 모델 사용량 집계 조회.
@@ -166,7 +166,7 @@ def get_model_usage_monthly(
     partner_id: int = Path(..., ge=1),
     row_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     model_usage_monthly 단건 조회.
@@ -194,7 +194,7 @@ def list_usage_events_llm(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     LLM 사용 이벤트 목록.
@@ -226,7 +226,7 @@ def create_usage_event_llm(
     partner_id: int = Path(..., ge=1),
     payload: UsageEventLLMCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     LLM 사용 이벤트 기록.
@@ -243,7 +243,7 @@ def get_usage_event_llm(
     partner_id: int = Path(..., ge=1),
     event_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     LLM 이벤트 단건 조회.
@@ -260,7 +260,7 @@ def update_usage_event_llm(
     event_id: int = Path(..., ge=1),
     payload: UsageEventLLMUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     LLM 이벤트 수정 (예외 상황용).
@@ -279,7 +279,7 @@ def delete_usage_event_llm(
     partner_id: int = Path(..., ge=1),
     event_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     LLM 이벤트 삭제 (운영상 특별한 경우에만 사용 권장).
@@ -307,7 +307,7 @@ def list_usage_events_stt(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     STT 사용 이벤트 목록.
@@ -336,7 +336,7 @@ def create_usage_event_stt(
     partner_id: int = Path(..., ge=1),
     payload: UsageEventSTTCreate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     STT 사용 이벤트 기록.
@@ -352,7 +352,7 @@ def get_usage_event_stt(
     partner_id: int = Path(..., ge=1),
     event_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     STT 이벤트 단건 조회.
@@ -369,7 +369,7 @@ def update_usage_event_stt(
     event_id: int = Path(..., ge=1),
     payload: UsageEventSTTUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     STT 이벤트 수정 (예외 상황용).
@@ -388,7 +388,7 @@ def delete_usage_event_stt(
     partner_id: int = Path(..., ge=1),
     event_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_admin),
+    _=Depends(get_current_partner_user),
 ):
     """
     STT 이벤트 삭제.

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
-from core.deps import get_db, get_current_partner_admin, get_current_partner_member
+from core.deps import get_db, get_current_partner_user
 from crud.partner import partner_core as partner_crud
 
 from schemas.partner.partner_core import (
@@ -23,7 +23,7 @@ router = APIRouter()
 def get_partner(
     partner_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_member),  # 멤버 이상 접근 허용
+    _ = Depends(get_current_partner_user),  # 멤버 이상 접근 허용
 ):
     obj = partner_crud.get_partner(db, partner_id)
     if not obj:
@@ -36,7 +36,7 @@ def update_partner(
     partner_id: int,
     data: PartnerUpdate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),  # 관리자만 수정
+    _ = Depends(get_current_partner_user),  # 관리자만 수정
 ):
     try:
         updated = partner_crud.update_partner(db, partner_id, **data.model_dump(exclude_unset=True))
@@ -59,7 +59,7 @@ def list_partner_users(
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_member),  # 멤버 이상 조회 가능
+    _ = Depends(get_current_partner_user),  # 멤버 이상 조회 가능
 ):
     return partner_crud.list_partner_users(
         db,
@@ -77,7 +77,7 @@ def add_partner_user(
     partner_id: int,
     data: PartnerUserCreate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),  # 관리자만 추가
+    _ = Depends(get_current_partner_user),  # 관리자만 추가
 ):
     try:
         return partner_crud.add_partner_user(
@@ -99,7 +99,7 @@ def get_partner_user(
     partner_id: int,  # 경로 정합성 체크용
     partner_user_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_member),
+    _ = Depends(get_current_partner_user),
 ):
     obj = partner_crud.get_partner_user(db, partner_user_id)
     if not obj or obj.partner_id != partner_id:
@@ -113,7 +113,7 @@ def update_partner_user(
     partner_user_id: int,
     data: PartnerUserUpdate,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     try:
         updated = partner_crud.update_partner_user(db, partner_user_id, **data.model_dump(exclude_unset=True))
@@ -129,7 +129,7 @@ def deactivate_partner_user(
     partner_id: int,
     partner_user_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     updated = partner_crud.deactivate_partner_user(db, partner_user_id)
     if not updated or updated.partner_id != partner_id:
@@ -143,7 +143,7 @@ def change_partner_user_role(
     partner_user_id: int,
     role: str = Query(..., pattern="^(partner|assistant)$"),
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     updated = partner_crud.change_partner_user_role(db, partner_user_id, role=role)
     if not updated or updated.partner_id != partner_id:
@@ -156,7 +156,7 @@ def remove_partner_user(
     partner_id: int,
     partner_user_id: int,
     db: Session = Depends(get_db),
-    _ = Depends(get_current_partner_admin),
+    _ = Depends(get_current_partner_user),
 ):
     # 존재 및 소유 확인
     obj = partner_crud.get_partner_user(db, partner_user_id)
