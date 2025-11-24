@@ -220,7 +220,7 @@ def _promote_user_to_partner_internal(
     db.commit()
     db.refresh(org)
     db.refresh(pu)
-
+    return org, pu
 
 def get_promotion_request(
     db: Session,
