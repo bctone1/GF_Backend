@@ -249,20 +249,18 @@ def list_invite_codes(
     class_id: int,
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
-    target_role: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
     _=Depends(get_current_partner_user),
 ):
     """
-    target_role: 'partner' | 'student'
+    특정 class 에 연결된 학생 초대코드 목록
     """
     rows, total = crud_course.list_invite_codes(
         db,
         partner_id=partner_id,
         class_id=class_id,
         status=status,
-        target_role=target_role,
         limit=limit,
         offset=offset,
     )
@@ -271,7 +269,7 @@ def list_invite_codes(
     return {"total": total, "items": rows, "page": page, "size": size}
 
 
-@router.post("/{course_id}/classes/{class_id}/invites", response_model=InviteCodeResponse)
+@router.post("/{course_id}/classes/{class_id}/invites", response_model=InviteCodeResponse, status_code=status.HTTP_201_CREATED)
 def create_invite_code(
     partner_id: int,
     course_id: int,
@@ -281,7 +279,7 @@ def create_invite_code(
     current_admin=Depends(get_current_partner_user),
 ):
     """
-    target_role: 'partner' | 'student'
+    특정 class 용 학생 초대코드 생성 (이메일 발송 없이 코드만 생성)
     """
     try:
         obj = crud_course.create_invite_code(
@@ -289,7 +287,6 @@ def create_invite_code(
             partner_id=partner_id,
             class_id=class_id,
             code=payload.code,
-            target_role=payload.target_role,
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
             status=payload.status or "active",
@@ -311,7 +308,6 @@ def update_invite_code(
     obj = crud_course.update_invite_code(
         db,
         code=invite_code,
-        target_role=payload.target_role,
         expires_at=payload.expires_at,
         max_uses=payload.max_uses,
         status=payload.status,
@@ -335,7 +331,7 @@ def delete_invite_code(
 
 
 # ==============================
-# redeem partner invite (강사 초대)
+# redeem partner invite (강사 초대) - 현재 설계에서는 미사용
 # ==============================
 @router.post("/redeem-invite", status_code=status.HTTP_200_OK)
 def redeem_invite_and_attach_instructor(
@@ -344,8 +340,8 @@ def redeem_invite_and_attach_instructor(
     db: Session = Depends(get_db),
 ):
     """
-    초대코드 입력 → 유효성 검증 → partner(강사) 롤 연결
-    - InviteCode.target_role == 'partner' 인 코드만 허용
+    [Deprecated] 예전 partner 초대코드용 엔드포인트.
+    지금 InviteCode 는 student-only 로 쓰이기 때문에 항상 에러를 반환한다.
     """
     try:
         partner_id, class_id, role = crud_course.redeem_invite_and_attach_instructor(
@@ -359,30 +355,32 @@ def redeem_invite_and_attach_instructor(
 
 
 # ==============================
-# Invite 이메일 관련
+# Invite 이메일 관련 (class 단위)
 # ==============================
 @router.post(
-    "/invites/send",
+    "/{course_id}/classes/{class_id}/invites/send",
     response_model=InviteSendResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="partner_create_and_send_invite",
 )
 def create_and_send_invite(
     partner_id: int,
+    course_id: int,
+    class_id: int,
     payload: InviteSendRequest,
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
     """
-    파트너가 특정 이메일로 초대코드를 생성해서 즉시 발송
+    특정 class 에 대한 학생 초대코드를 생성하고, 바로 이메일로 발송
     """
     try:
         result = invite_service.create_and_send_invite(
             db,
             partner_id=partner_id,
             email=payload.email,
-            class_id=payload.class_id,
-            target_role=payload.target_role,  # 'partner' | 'student'
+            class_id=class_id,
+            target_role="student",  # student-only 고정
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
         )
@@ -413,7 +411,7 @@ def resend_invite(
     _=Depends(get_current_partner_user),
 ):
     """
-    이미 생성된 초대코드를 다른(또는 같은) 이메일로 재발송
+    이미 생성된 학생 초대코드를 다른(또는 같은) 이메일로 재발송
     """
     try:
         result = invite_service.resend_invite(
@@ -436,13 +434,15 @@ def resend_invite(
 
 
 @router.post(
-    "/invites/assign",
+    "/{course_id}/classes/{class_id}/invites/assign",
     response_model=InviteSendResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="partner_assign_invite_by_email",
 )
 def assign_invite_by_email(
     partner_id: int,
+    course_id: int,
+    class_id: int,
     payload: InviteAssignRequest,
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
@@ -450,16 +450,15 @@ def assign_invite_by_email(
     """
     이메일 기준으로:
     - 이미 가입된 user 인지 확인
-    - 초대코드 생성
-    - 템플릿은 service에서 신규/기가입 분기
+    - 해당 class 용 학생 초대코드 생성/매핑 후 이메일 발송
     """
     try:
         result = invite_service.assign_invite_by_email(
             db,
             partner_id=partner_id,
             email=payload.email,
-            class_id=payload.class_id,
-            target_role=payload.target_role,  # 'partner' | 'student'
+            class_id=class_id,
+            target_role="student",  # student-only 고정
             expires_at=payload.expires_at,
             max_uses=payload.max_uses,
         )

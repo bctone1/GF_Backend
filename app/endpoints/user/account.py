@@ -136,7 +136,7 @@ def user_signup(
 ):
     """
     기본 사용자 회원가입.
-    - 공개 회원가입에서는 is_partner 는 무시 (항상 일반 사용자로 가입)
+    - 공개 회원가입에서는 is_partner 는 무시 (True 입력해도 False로 뱉음)
     - 실제 생성은 service.user.account_service.signup 에 위임
     """
     # 혹시라도 클라이언트가 is_partner 를 넣어 보내도 무시

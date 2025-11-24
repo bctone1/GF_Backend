@@ -19,6 +19,7 @@ from schemas.supervisor.core import (
     UserRoleAssignmentResponse,
     PartnerPromotionRequestResponse,
 )
+from service.supervisor import promotion as promotion_service
 
 router = APIRouter()
 
@@ -27,7 +28,9 @@ router = APIRouter()
 # Partner Promotion Requests (승격 요청 승인/거절)
 # ==============================
 class PromotionDecision(BaseModel):
-    # 승인 시에만 사용, 거절 시에는 무시(현재는 저장 안 함)
+    """
+    partner 로 받을 시 승격
+    """
     target_role: Optional[str] = None
 
 
@@ -43,7 +46,7 @@ def list_partner_promotion_requests(
     승격 요청 목록 조회
     - status 쿼리로 pending/approved/rejected/cancelled 필터
     """
-    rows = super_crud.list_promotion_requests(db, status=status_)
+    rows = promotion_service.list_promotion_requests(db, status=status_)
     return rows
 
 
@@ -56,9 +59,10 @@ def get_partner_promotion_request(
     db: Session = Depends(get_db),
     # _ = Depends(require_supervisor_admin),
 ):
-    req = super_crud.get_promotion_request(db, request_id=request_id)
-    if not req:
-        raise HTTPException(status_code=404, detail="promotion request not found")
+    """
+    단일 승격 요청 상세 조회
+    """
+    req = promotion_service.get_promotion_request(db, request_id=request_id)
     return req
 
 
@@ -70,23 +74,20 @@ def approve_partner_promotion_request(
     request_id: int,
     body: PromotionDecision,
     db: Session = Depends(get_db),
+    # me = Depends(require_supervisor_admin),
 ):
     """
     승격 요청 승인
+    - is_partner = true
     - partner/partner_user 생성(또는 재사용)
     - 요청 status = approved 로 변경
     """
-    try:
-        req = super_crud.approve_promotion_request(
-            db,
-            request_id=request_id,
-            target_role=body.target_role,
-        )
-        return req
-    except super_crud.PromotionNotFound as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except super_crud.PromotionConflict as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    req = promotion_service.approve_partner_request(
+        db=db,
+        request_id=request_id,
+        target_role=body.target_role,
+    )
+    return req
 
 
 @router.post(
@@ -96,21 +97,17 @@ def approve_partner_promotion_request(
 def reject_partner_promotion_request(
     request_id: int,
     db: Session = Depends(get_db),
-    # _ = Depends(require_supervisor_admin),
+    # me = Depends(require_supervisor_admin),
 ):
     """
     승격 요청 거절, pending 상태만 거절 가능
     """
-    try:
-        req = super_crud.reject_promotion_request(
-            db,
-            request_id=request_id,
-        )
-        return req
-    except super_crud.PromotionNotFound as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except super_crud.PromotionConflict as e:
-        raise HTTPException(status_code=409, detail=str(e))
+    req = promotion_service.reject_partner_request(
+        db=db,
+        request_id=request_id,
+    )
+    return req
+
 
 
 # ==============================
@@ -135,6 +132,7 @@ def create_supervisor_user(
         status=data.status or "active",
     )
 
+
 @router.get("/users/by-email", response_model=SupervisorUserResponse)
 def get_supervisor_user_by_email(
     email: str = Query(...),
@@ -145,6 +143,7 @@ def get_supervisor_user_by_email(
     if not sup:
         raise HTTPException(status_code=404, detail="supervisor user not found")
     return sup
+
 
 # ==============================
 # Roles
@@ -161,6 +160,7 @@ def create_role(
     )
     return role
 
+
 @router.post("/roles/bootstrap", response_model=List[UserRoleResponse])
 def bootstrap_roles(
     db: Session = Depends(get_db),
@@ -168,12 +168,12 @@ def bootstrap_roles(
 ):
     return list(super_crud.bootstrap_default_roles(db))
 
+
 @router.post("/users/{user_id}/roles/{role_name}", response_model=UserRoleAssignmentResponse)
 def assign_role_to_user(
     user_id: int,
     role_name: str,
     db: Session = Depends(get_db),
-
 ):
     ura = super_crud.assign_role(
         db,
@@ -182,7 +182,6 @@ def assign_role_to_user(
         assigned_by=getattr("user_id", None),
     )
     return ura
-
 
 
 # # ==============================

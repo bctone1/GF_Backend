@@ -131,7 +131,6 @@ class UserRoleResponse(ORMBase):
     created_at: datetime
     updated_at: datetime
 
-
 # =========================
 # user_role_assignments
 # =========================

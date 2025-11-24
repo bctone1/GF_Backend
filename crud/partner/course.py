@@ -253,7 +253,6 @@ def delete_class(db: Session, class_id: int) -> bool:
     db.commit()
     return res.rowcount > 0
 
-
 # ==============================
 # InviteCode
 # ==============================
@@ -297,18 +296,20 @@ def list_invite_codes(
     *,
     class_id: Optional[int] = None,
     status: Optional[str] = None,
-    target_role: Optional[str] = None,  # "partner" | "student"
     search: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ) -> Tuple[List[InviteCode], int]:
+    """
+    partner 단위 초대코드 목록.
+    - class_id 로 필터하면 특정 반의 코드만 조회
+    - target_role 은 student-only 이므로 별도 필터 없음
+    """
     conds = [InviteCode.partner_id == partner_id]
     if class_id is not None:
         conds.append(InviteCode.class_id == class_id)
     if status:
         conds.append(InviteCode.status == status)
-    if target_role:
-        conds.append(InviteCode.target_role == target_role)
     if search:
         conds.append(InviteCode.code.ilike(f"%{search}%"))
 
@@ -328,27 +329,30 @@ def create_invite_code(
     db: Session,
     *,
     partner_id: int,
+    class_id: int,
     code: str,
-    target_role: str = "student",  # "partner" | "student"
-    class_id: Optional[int] = None,
     expires_at: Optional[datetime] = None,
     max_uses: Optional[int] = None,
     status: str = "active",
     created_by: Optional[int] = None,
 ) -> InviteCode:
-    # class_id 제공 시 partner 일치성 검사
-    if class_id is not None:
-        clazz = db.get(Class, class_id)
-        if not clazz:
-            raise ValueError("class not found")
-        if clazz.partner_id != partner_id:
-            raise ValueError("partner_id mismatch with class")
+    """
+    class 단위 학생 초대코드 생성.
+    - partner_id: 코드 소유 파트너
+    - class_id: 반드시 이 파트너가 가진 class 여야 함
+    """
+    # class 존재/소유권 검사
+    clazz = db.get(Class, class_id)
+    if not clazz:
+        raise ValueError("class not found")
+    if clazz.partner_id != partner_id:
+        raise ValueError("partner_id mismatch with class")
 
     obj = InviteCode(
         partner_id=partner_id,
         class_id=class_id,
         code=code,
-        target_role=target_role,
+        target_role="student",  # student-only
         expires_at=expires_at,
         max_uses=max_uses,
         status=status,
@@ -364,22 +368,25 @@ def update_invite_code(
     db: Session,
     *,
     code: str,
-    target_role: Optional[str] = None,
     expires_at: Optional[datetime] = None,
     max_uses: Optional[int] = None,
     status: Optional[str] = None,
 ) -> Optional[InviteCode]:
+    """
+    초대코드 속성 일부 수정.
+    - target_role 은 DB 레벨에서 student-only 이므로 변경 불가
+    """
     obj = get_invite_code(db, code)
     if not obj:
         return None
-    if target_role is not None:
-        obj.target_role = target_role
+
     if expires_at is not None:
         obj.expires_at = expires_at
     if max_uses is not None:
         obj.max_uses = max_uses
     if status is not None:
         obj.status = status
+
     db.commit()
     db.refresh(obj)
     return obj
@@ -471,7 +478,7 @@ def upsert_partner_user_role(
 
 
 # ==============================
-# redeem partner invite (강사 초대)
+# redeem partner invite (강사 초대) - 현재 설계에서는 미사용
 # ==============================
 def redeem_invite_and_attach_instructor(
     db: Session,
@@ -480,32 +487,14 @@ def redeem_invite_and_attach_instructor(
     user_id: int,
 ) -> Tuple[int, Optional[int], str]:
     """
-    초대코드 검증 → 사용량 증가 → 파트너 강사 연결(멱등)
-    반환: (partner_id, class_id, target_role)
-    서비스 계층에서 토큰 재발급/세션 리프레시 처리.
+    [Deprecated]
+    - 현재 InviteCode 는 student-only, class 기반 초대코드로 사용.
+    - 파트너 승격은 supervisor 프로모션 플로우 등을 통해 처리해야 함.
     """
-    inv = get_invite_code(db, invite_code)
-    if not inv:
-        raise InviteNotFound("invite not found")
-
-    # partner(강사) 전용 코드만 허용
-    if inv.target_role != "partner":
-        raise InviteError("invite is not for partner")
-
-    check_invite_usable(inv)
-
-    # 사용량 증가 (원자적)
-    inv = increment_invite_use(db, code=invite_code)
-
-    # 파트너-유저 partner 롤 부여/업서트
-    upsert_partner_user_role(
-        db,
-        partner_id=inv.partner_id,
-        user_id=user_id,
-        role="partner",
+    raise InviteError(
+        "partner invites are no longer supported on InviteCode; "
+        "use the supervisor promotion flow instead."
     )
-
-    return inv.partner_id, inv.class_id, inv.target_role
 
 
 # ==============================
@@ -532,7 +521,7 @@ def redeem_student_invite_and_enroll(
     if not inv:
         raise InviteNotFound("invite not found")
 
-    # student 전용 코드만 허용
+    # student 전용 코드만 허용 (DB에서도 강제)
     if inv.target_role != "student":
         raise InviteError("invite is not for student")
 

@@ -19,10 +19,7 @@ from models.supervisor.core import (
     Session as SupSession,
     PartnerPromotionRequest,
 )
-from models.supervisor.core import PartnerPromotionRequest
-
 from models.user.account import AppUser, UserProfile
-
 from models.partner.partner_core import Partner, PartnerUser  # partners, partner_users
 
 
@@ -32,9 +29,11 @@ from models.partner.partner_core import Partner, PartnerUser  # partners, partne
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
+
 def _gen_code(prefix: str = "PT", length: int = 6) -> str:
     body = "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
     return f"{prefix}{body}"
+
 
 def _slugify_code(name: str, max_len: int = 12) -> str:
     base = "".join(ch for ch in name.upper() if ch.isalnum())
@@ -121,19 +120,22 @@ def assign_role(
 
 
 # ==============================
-# Promotion: PartnerPromotionRequest 기반 승격
+# Promotion: PartnerPromotionRequest 관련 헬퍼
 # ==============================
 class PromotionError(Exception):
     ...
 
+
 class PromotionNotFound(PromotionError):
     ...
+
 
 class PromotionConflict(PromotionError):
     """
     이미 처리된 요청 등을 다시 처리하려 할 때 사용
     """
     ...
+
 
 def _promote_user_to_partner_internal(
     db: Session,
@@ -144,10 +146,12 @@ def _promote_user_to_partner_internal(
     partner_user_role: str = "partner",
 ) -> Tuple[Partner, PartnerUser]:
     """
-    실제 partners / partner_users 를 만드는 하위 유틸
+    실제 partners / partner_users 를 만드는 하위 유틸.
 
-    - 기존 promote_user_to_partner 로직을 내부용으로 옮긴 것
-    - 승격 요청(PartnerPromotionRequest) 승인에서만 호출하는 걸 권장
+    - 주어진 email 에 해당하는 AppUser 를 찾고
+    - partner_name 기반 Partner 를 생성/재사용
+    - 그 Partner 와 AppUser 를 연결하는 PartnerUser 를 생성/재사용
+    - 트랜잭션/상태 전이는 서비스 레이어에서 처리
     """
     # 1) 가입 사용자 확인 (user.users)
     app_user = db.execute(
@@ -215,7 +219,6 @@ def _promote_user_to_partner_internal(
     return partner, pu
 
 
-# ----- 승격 요청 조회/승인/거절 -----
 def get_promotion_request(
     db: Session,
     request_id: int,
@@ -238,79 +241,6 @@ def list_promotion_requests(
     if status:
         stmt = stmt.where(PartnerPromotionRequest.status == status)
     return db.execute(stmt).scalars().all()
-
-
-def approve_promotion_request(
-    db: Session,
-    request_id: int,
-    decided_by: Optional[int] = None,
-    target_role: str | None = None,
-) -> PartnerPromotionRequest:
-    """
-    파트너/강사 승격 요청 승인 처리
-    - pending 상태만 승인 가능
-    - partners / partner_users 생성(or 재사용) 후 요청 레코드에 연결
-    """
-    # 1) 요청 조회
-    req = db.get(PartnerPromotionRequest, request_id)
-    if not req:
-        raise PromotionNotFound(f"promotion request not found: id={request_id}")
-
-    if req.status != "pending":
-        # 이미 approved / rejected / cancelled 등
-        raise PromotionConflict(f"promotion request already {req.status}")
-
-    # 2) 실제 user 조회 (users 테이블에서)
-    user = db.get(AppUser, req.user_id)
-    if not user:
-        raise PromotionNotFound(f"user not found for request: id={request_id}")
-
-    # 3) 파트너/파트너유저 생성 또는 재사용
-    partner, partner_user = _promote_user_to_partner_internal(
-        db=db,
-        email=user.email,             # 요청 스키마의 email 말고 실제 AppUser 기준
-        partner_name=req.org_name,    # 요청폼에서 받은 기관명
-        created_by=decided_by,
-        partner_user_role=target_role or req.target_role,
-    )
-
-    # 4) 요청 상태 업데이트
-    now = _utcnow()
-    req.status = "approved"
-    req.decided_at = now
-    req.partner_id = partner.id
-    req.partner_user_id = partner_user.id
-
-    db.add(req)
-    db.commit()
-    db.refresh(req)
-
-    return req
-
-
-def reject_promotion_request(
-    db: Session,
-    *,
-    request_id: int,
-) -> PartnerPromotionRequest:
-    """
-    승격 요청 거절
-    - pending 상태만 거절 가능
-    """
-    req = db.get(PartnerPromotionRequest, request_id)
-    if not req:
-        raise PromotionNotFound(f"promotion request not found: id={request_id}")
-
-    if req.status != "pending":
-        raise PromotionConflict(f"promotion request already {req.status}")
-
-    req.status = "rejected"
-    req.decided_at = _utcnow()
-
-    db.add(req)
-    db.commit()
-    db.refresh(req)
-    return req
 
 
 # ==============================
@@ -388,7 +318,7 @@ def delete_org(db: Session, org_id: int) -> bool:
 
 
 # ==============================
-# Convenience: bootstrap roles ?
+# Convenience: bootstrap roles
 # ==============================
 def bootstrap_default_roles(db: Session) -> Sequence[UserRole]:
     defaults = [
@@ -410,63 +340,3 @@ def bootstrap_default_roles(db: Session) -> Sequence[UserRole]:
     for name, perms in defaults:
         out.append(get_or_create_role(db, role_name=name, permissions=perms))
     return out
-
-
-# # ==============================
-# # Plans : 추후 기능
-# # ==============================
-# def create_plan(
-#     db: Session,
-#     *,
-#     name: str,
-#     billing_cycle: str = "monthly",
-#     price_mrr: float = 0,
-#     price_arr: float = 0,
-#     features_json: Optional[dict] = None,
-#     max_users: Optional[int] = None,
-#     is_active: bool = True,
-# ) -> Plan:
-#     plan = Plan(
-#         plan_name=name,
-#         billing_cycle=billing_cycle,
-#         price_mrr=price_mrr,
-#         price_arr=price_arr,
-#         features_json=features_json,
-#         max_users=max_users,
-#         is_active=is_active,
-#     )
-#     db.add(plan)
-#     db.commit()
-#     db.refresh(plan)
-#     return plan
-#
-#
-# def get_plan(db: Session, plan_id: int) -> Optional[Plan]:
-#     return db.get(Plan, plan_id)
-#
-#
-# def list_plans(db: Session, *, q: Optional[str] = None) -> Sequence[Plan]:
-#     stmt = select(Plan).order_by(Plan.plan_name)
-#     if q:
-#         stmt = stmt.where(Plan.plan_name.ilike(f"%{q}%"))
-#     return db.execute(stmt).scalars().all()
-#
-#
-# def update_plan(db: Session, plan_id: int, **fields) -> Optional[Plan]:
-#     stmt = (
-#         update(Plan)
-#         .where(Plan.plan_id == plan_id)
-#         .values(**fields)
-#         .returning(Plan)
-#     )
-#     row = db.execute(stmt).fetchone()
-#     if not row:
-#         return None
-#     db.commit()
-#     return row[0]
-#
-#
-# def delete_plan(db: Session, plan_id: int) -> bool:
-#     res = db.execute(delete(Plan).where(Plan.plan_id == plan_id))
-#     db.commit()
-#     return res.rowcount > 0
