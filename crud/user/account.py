@@ -38,12 +38,14 @@ def list_users(
     db: Session,
     *,
     status: Optional[str] = None,
+    is_partner: Optional[bool] = None,
     page: int = 1,
     size: int = 50,
 ) -> Tuple[List[AppUser], int]:
     """
     사용자 목록 조회.
     - status 필터(예: active/suspended 등)
+    - is_partner 필터(True/False)
     - 페이징 (rows, total) 반환
     """
     if page < 1:
@@ -54,6 +56,12 @@ def list_users(
     filters = []
     if status is not None:
         filters.append(AppUser.status == status)
+
+    # 강사 여부 필터 (한 번 승격되면 is_partner = true 로 유지)
+    if is_partner is True:
+        filters.append(AppUser.is_partner.is_(True))
+    elif is_partner is False:
+        filters.append(AppUser.is_partner.is_(False))
 
     base_stmt: Select[AppUser] = select(AppUser)
     if filters:
@@ -81,6 +89,7 @@ def create_user(
     순수 user.users 생성.
     - data 에는 이미 password_hash 가 세팅되어 있어야 함.
     - 평문 password → hash 는 service/endpoint 에서 처리.
+    - is_partner 는 기본적으로 false, 승격시 true 로 변경.
     """
     obj = AppUser(**data)
     db.add(obj)
@@ -122,7 +131,7 @@ def create_with_profile(
     """
     user_crud.create_with_profile(db, user_in={...}, profile_in={...}, ensure_settings=True)
 
-    - user.users 생성
+    - user.users 생성 (user_in 안에 is_partner 포함 가능)
     - user.user_profiles (옵션)
     - user.user_security_settings / user.user_privacy_settings (ensure_settings=True 일 때 기본 생성)
     """
@@ -366,7 +375,6 @@ def close_all_sessions_for_user(
 
 
 
-
 # =============================================================================
 # UserPrivacySetting (user.user_privacy_settings)
 # =============================================================================
@@ -403,4 +411,3 @@ def delete_privacy_setting(
         return
     db.delete(obj)
     db.commit()
-

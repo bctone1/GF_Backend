@@ -16,17 +16,22 @@ class AppUser(Base):
     user_id = Column(BigInteger, primary_key=True, autoincrement=True)
     email = Column(CITEXT, nullable=False, unique=True)
     password_hash = Column(Text, nullable=False)
+
+    # 한 번 승격되면 true 로 유지되는 강사 여부 플래그
+    is_partner = Column(Boolean, nullable=False, server_default=text("false"))
+
     status = Column(Text, nullable=False, server_default=text("'active'"))
-    default_role = Column(Text, nullable=False, server_default=text("'member'"))
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    default_role = Column(Text, nullable=False, server_default=text("'member'"))
 
     profile = relationship("UserProfile", back_populates="user", uselist=False, passive_deletes=True)
     security = relationship("UserSecuritySetting", back_populates="user", uselist=False, passive_deletes=True)
 
     __table_args__ = (
         Index("idx_users_status_created", "status", "created_at"),
+        Index("idx_users_is_partner_created", "is_partner", "created_at"),
         {"schema": "user"},
     )
 

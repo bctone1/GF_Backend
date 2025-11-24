@@ -36,6 +36,7 @@ class LoginInput(ORMBase):
     email: EmailStr
     password: str
 
+
 class AuthTokens(ORMBase):
     access_token: str
     refresh_token: str
@@ -53,7 +54,9 @@ class UserCreate(ORMBase):
     full_name: Optional[str] = None          # 프로필 초기값에 사용 가능
     status: Optional[str] = None             # 서버 기본값 'active' 사용 가능
     default_role: Optional[str] = None       # 서버 기본값 'member' 사용 가능
-    # email_verified_token: Optional[str] = None
+    # 일반 회원가입에서는 사용하지 않고, supervisor/관리자 API에서만 의미 있게 쓸 수 있음
+    is_partner: Optional[bool] = None        # 서버 기본값 false 사용
+
 
 class UserUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
@@ -61,12 +64,15 @@ class UserUpdate(ORMBase):
     password: Optional[str] = None
     status: Optional[str] = None
     default_role: Optional[str] = None
+    is_partner: Optional[bool] = None        # 승격/해지 로직에서만 사용
+
 
 class UserResponse(ORMBase):
     user_id: int
     email: EmailStr
     status: str
     default_role: str
+    is_partner: bool                         # 한 번 승격되면 true 유지
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -87,6 +93,7 @@ class UserProfileCreate(ORMBase):
     avatar_url: Optional[str] = None
     avatar_initials: Optional[str] = None
 
+
 class UserProfileUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     full_name: Optional[str] = None
@@ -97,6 +104,7 @@ class UserProfileUpdate(ORMBase):
     bio: Optional[str] = None
     avatar_url: Optional[str] = None
     avatar_initials: Optional[str] = None
+
 
 class UserProfileResponse(ORMBase):
     user_id: int
@@ -122,12 +130,14 @@ class UserSecuritySettingCreate(ORMBase):
     backup_codes: Optional[List[str]] = None
     recovery_email: Optional[EmailStr] = None
 
+
 class UserSecuritySettingUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     two_factor_enabled: Optional[bool] = None
     two_factor_method: Optional[str] = None
     backup_codes: Optional[List[str]] = None
     recovery_email: Optional[EmailStr] = None
+
 
 class UserSecuritySettingResponse(ORMBase):
     user_id: int
@@ -150,10 +160,12 @@ class UserLoginSessionCreate(ORMBase):
     location: Optional[str] = None
     user_agent: Optional[str] = None
 
+
 class UserLoginSessionUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     logged_out_at: Optional[datetime] = None
     is_current: Optional[bool] = None
+
 
 class UserLoginSessionResponse(ORMBase):
     session_id: int
@@ -177,11 +189,13 @@ class UserPrivacySettingCreate(ORMBase):
     allow_data_collection: Optional[bool] = None
     allow_personalized_ai: Optional[bool] = None
 
+
 class UserPrivacySettingUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     save_conversation_history: Optional[bool] = None
     allow_data_collection: Optional[bool] = None
     allow_personalized_ai: Optional[bool] = None
+
 
 class UserPrivacySettingResponse(ORMBase):
     user_id: int
@@ -189,6 +203,7 @@ class UserPrivacySettingResponse(ORMBase):
     allow_data_collection: bool
     allow_personalized_ai: bool
     updated_at: datetime
+
 
 # ------------------------
 class PartnerPromotionRequestCreate(BaseModel):

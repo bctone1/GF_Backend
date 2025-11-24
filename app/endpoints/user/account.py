@@ -134,29 +134,17 @@ def user_signup(
     payload: UserCreate,
     db: Session = Depends(get_db),
 ):
-    # """
-    # 기본 사용자 회원가입.
-    # - email 인증 토큰(email_verified_token) 검증
-    # - 실제 생성은 service.user.account_service.signup 에 위임
-    # """
-    # # 1) 이메일 인증 토큰 확인
-    # if not getattr(payload, "email_verified_token", None):
-    #     raise HTTPException(status_code=400, detail="email verification required")
-    #
-    # try:
-    #     vdata = verify_signed_payload(payload.email_verified_token)
-    # except Exception:
-    #     raise HTTPException(status_code=400, detail="invalid email_verified_token")
-    #
-    # # 이메일/플래그/만료 확인
-    # if vdata.get("email") != payload.email or not vdata.get("verified"):
-    #     raise HTTPException(status_code=400, detail="email not verified")
-    #
-    # now_ts = int(datetime.now(timezone.utc).timestamp())
-    # if vdata.get("exp", 0) < now_ts:
-    #     raise HTTPException(status_code=400, detail="verification token expired")
-    #
-    # # 2) 실제 회원 생성은 서비스 레이어에 위임
+    """
+    기본 사용자 회원가입.
+    - 공개 회원가입에서는 is_partner 는 무시 (항상 일반 사용자로 가입)
+    - 실제 생성은 service.user.account_service.signup 에 위임
+    """
+    # 혹시라도 클라이언트가 is_partner 를 넣어 보내도 무시
+    # (파트너 승격은 supervisor 플로우에서만 처리)
+    if hasattr(payload, "is_partner"):
+        payload.is_partner = None
+
+    # 이메일 인증 토큰 검증 로직은 주석으로 보류 중
     return account_service.signup(db, payload)
 
 
@@ -203,7 +191,7 @@ def update_my_account(
     내 계정 정보 수정.
     - email 변경
     - password 변경 시 해시 재계산
-    - status/default_role 은 자기 계정에서 수정하지 않도록 무시
+    - status/default_role/is_partner 는 자기 계정에서 수정하지 않도록 무시
     """
     data = payload.model_dump(exclude_unset=True)
 
@@ -212,9 +200,10 @@ def update_my_account(
         new_password = data.pop("password")
         data["password_hash"] = hash_password(new_password)
 
-    # 자기 계정에서는 status/default_role 수정하지 않도록 제거
+    # 자기 계정에서는 status/default_role/is_partner 수정하지 않도록 제거
     data.pop("status", None)
     data.pop("default_role", None)
+    data.pop("is_partner", None)
 
     updated = user_crud.update_user(db, user=me, data=data)
     return UserResponse.model_validate(updated)
@@ -333,6 +322,13 @@ def create_partner_promotion_request(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),  # 여기서 user_id만 가져옴
 ):
+    # 이미 파트너면 추가 승격 요청은 불필요
+    if getattr(me, "is_partner", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="already_partner",
+        )
+
     # 1) 이미 pending 상태의 요청이 있는지 체크 (user_id 기준)
     existing = (
         db.execute(
