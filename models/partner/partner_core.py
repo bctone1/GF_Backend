@@ -1,3 +1,5 @@
+# models/partner/partner_core.py
+
 from sqlalchemy import (
     Column, BigInteger, Text, Boolean, DateTime,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text
@@ -34,12 +36,6 @@ class Org(Base):
         passive_deletes=True,
     )
 
-    # Org에서 운영 중인 클래스들
-    classes = relationship(
-        "Class",
-        back_populates="org",
-        passive_deletes=True,
-    )
     courses = relationship("Course", back_populates="org", passive_deletes=True)
 
     __table_args__ = (
@@ -56,12 +52,12 @@ class Org(Base):
 class PartnerUser(Base):
     """
     Org(기관)에 소속된 강사/어시스턴트.
-    리팩토링 편의상 클래스 이름은 일단 PartnerUser 유지.
     """
     __tablename__ = "partner"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
+    # FK → Org.id
     org_id = Column(
         BigInteger,
         ForeignKey("partner.org.id", ondelete="CASCADE"),
@@ -78,11 +74,11 @@ class PartnerUser(Base):
     email = Column(CITEXT, nullable=False)
     phone = Column(Text, nullable=True)
 
-    # partner = 강사, assistant = 운영자/조직관리자
+    # partner = 강사, assistant = 운영자
     role = Column(
         Text,
         nullable=False,
-        server_default=text("'partner'"),  # partner | assistant
+        server_default=text("'partner'"),
     )
 
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
@@ -99,10 +95,10 @@ class PartnerUser(Base):
     classes = relationship("Class", back_populates="partner", passive_deletes=True)
 
     __table_args__ = (
-        UniqueConstraint("partner_id", "user_id", name="uq_partner_user_user"),
-        UniqueConstraint("partner_id", "email", name="uq_partner_user_email"),
+        UniqueConstraint("org_id", "user_id", name="uq_partner_user_user"),
+        UniqueConstraint("org_id", "email", name="uq_partner_user_email"),
         CheckConstraint("role IN ('partner','assistant')", name="chk_partner_role"),
-        Index("idx_partner_email", "partner_id", "email"),
+        Index("idx_partner_email", "org_id", "email"),
         Index("idx_partner_active", "is_active"),
         Index("idx_partner_role", "role"),
         Index("idx_partner_last_login", "last_login_at"),

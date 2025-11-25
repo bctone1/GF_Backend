@@ -122,37 +122,26 @@ class InviteCode(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 이 초대코드를 소유하는 파트너(강사)
     partner_id = Column(
         BigInteger,
         ForeignKey("partner.partner.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # student 초대코드는 항상 특정 class 기준
     class_id = Column(
         BigInteger,
         ForeignKey("partner.classes.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    code = Column(Text, nullable=False)  # globally unique
-    target_role = Column(
-        Text,
-        nullable=False,
-        server_default=text("'student'"),
-    )  # 학생용 초대코드 전용
+    code = Column(Text, nullable=False)
+    target_role = Column(Text, nullable=False, server_default=text("'student'"))
 
     expires_at = Column(DateTime(timezone=True))
-    max_uses = Column(Integer)  # NULL = unlimited
+    max_uses = Column(Integer)
     used_count = Column(Integer, nullable=False, server_default=text("0"))
-    status = Column(
-        Text,
-        nullable=False,
-        server_default=text("'active'"),
-    )  # active|expired|disabled
+    status = Column(Text, nullable=False, server_default=text("'active'"))
 
-    # 실제 생성한 PartnerUser (강사/assistant)
     created_by = Column(
         BigInteger,
         ForeignKey("partner.partner.id", ondelete="SET NULL"),
@@ -160,8 +149,14 @@ class InviteCode(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    # 관계 설정
     clazz = relationship("Class", back_populates="invite_codes", passive_deletes=True)
-    creator = relationship("PartnerUser", passive_deletes=True)
+
+    creator = relationship(
+        "PartnerUser",
+        foreign_keys=[created_by],
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("code", name="uq_invite_codes_code"),
@@ -170,7 +165,6 @@ class InviteCode(Base):
             "(max_uses IS NULL) OR (used_count <= max_uses)",
             name="chk_invite_codes_used_le_max",
         ),
-        # student 전용으로 고정
         CheckConstraint(
             "target_role = 'student'",
             name="chk_invite_codes_target_role_student_only",
@@ -180,7 +174,6 @@ class InviteCode(Base):
             name="chk_invite_codes_status",
         ),
         Index("idx_invite_codes_partner_status", "partner_id", "status"),
-        # class 단위로 초대코드 조회용 인덱스
         Index("idx_invite_codes_class_status", "class_id", "status"),
         {"schema": "partner"},
     )

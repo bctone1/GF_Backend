@@ -92,19 +92,6 @@ class PartnerPromotionRequest(Base):
     requested_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     decided_at = Column(DateTime(timezone=True))
 
-    # 승인 후 실제로 생성/연결된 partner / partner_user
-    org_id = Column(
-        BigInteger,
-        ForeignKey("partner.org.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    partner_user_id = Column(
-        BigInteger,
-        ForeignKey("partner.partner.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
-
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending','approved','rejected','cancelled')",
@@ -239,7 +226,7 @@ class Organization(Base):
     supervisors = relationship(
         "SupervisorUser", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True
     )
-    sessions = relationship(  # ← 추가
+    sessions = relationship(
         "Session", back_populates="organization", cascade="all, delete-orphan", passive_deletes=True
     )
 

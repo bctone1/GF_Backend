@@ -146,6 +146,7 @@ def list_classes(
         limit=limit,
         offset=offset,
     )
+    # 여기서는 course_id 기준 전체 class 조회 (partner_id 필터링은 안 함)
     page = offset // limit + 1 if limit > 0 else 1
     size = limit
     return {"total": total, "items": rows, "page": page, "size": size}
@@ -256,6 +257,10 @@ def list_invite_codes(
     """
     특정 class 에 연결된 학생 초대코드 목록
     """
+    clazz = crud_course.get_class(db, class_id)
+    if not clazz or clazz.partner_id != partner_id or clazz.course_id != course_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     rows, total = crud_course.list_invite_codes(
         db,
         partner_id=partner_id,
@@ -281,6 +286,10 @@ def create_invite_code(
     """
     특정 class 용 학생 초대코드 생성 (이메일 발송 없이 코드만 생성)
     """
+    clazz = crud_course.get_class(db, class_id)
+    if not clazz or clazz.partner_id != partner_id or clazz.course_id != course_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     try:
         obj = crud_course.create_invite_code(
             db,
@@ -305,6 +314,10 @@ def update_invite_code(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
+    inv = crud_course.get_invite_code(db, invite_code)
+    if not inv or inv.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
     obj = crud_course.update_invite_code(
         db,
         code=invite_code,
@@ -313,6 +326,7 @@ def update_invite_code(
         status=payload.status,
     )
     if not obj:
+        # 동시성 등으로 인해 사라진 경우
         raise HTTPException(status_code=404, detail="Invite not found")
     return obj
 
@@ -324,6 +338,10 @@ def delete_invite_code(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
+    inv = crud_course.get_invite_code(db, invite_code)
+    if not inv or inv.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
     ok = crud_course.delete_invite_code(db, code=invite_code)
     if not ok:
         raise HTTPException(status_code=404, detail="Invite not found")
@@ -374,6 +392,10 @@ def create_and_send_invite(
     """
     특정 class 에 대한 학생 초대코드를 생성하고, 바로 이메일로 발송
     """
+    clazz = crud_course.get_class(db, class_id)
+    if not clazz or clazz.partner_id != partner_id or clazz.course_id != course_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     try:
         result = invite_service.create_and_send_invite(
             db,
@@ -413,6 +435,10 @@ def resend_invite(
     """
     이미 생성된 학생 초대코드를 다른(또는 같은) 이메일로 재발송
     """
+    inv = crud_course.get_invite_by_id(db, invite_id)
+    if not inv or inv.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
     try:
         result = invite_service.resend_invite(
             db,
@@ -452,6 +478,10 @@ def assign_invite_by_email(
     - 이미 가입된 user 인지 확인
     - 해당 class 용 학생 초대코드 생성/매핑 후 이메일 발송
     """
+    clazz = crud_course.get_class(db, class_id)
+    if not clazz or clazz.partner_id != partner_id or clazz.course_id != course_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
     try:
         result = invite_service.assign_invite_by_email(
             db,

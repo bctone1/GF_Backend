@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session, sessionmaker
 
-from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status, Path
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.config import DB, DB_USER, DB_PASSWORD, DB_SERVER, DB_PORT, DB_NAME
@@ -105,7 +105,7 @@ def get_current_partner_user(
     stmt = (
         select(PartnerUser)
         .where(
-            PartnerUser.partner_id == partner_id,
+            PartnerUser.id == partner_id,
             PartnerUser.user_id == uid,
             PartnerUser.is_active.is_(True),
         )

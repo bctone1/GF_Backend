@@ -63,7 +63,7 @@ def approve_partner_request(
     - pending 상태만 승인 가능
     - user.users.is_partner = True 로 플래그 설정
     - Org / PartnerUser 생성(or 재사용)
-    - PartnerPromotionRequest 상태/연결 업데이트
+    - PartnerPromotionRequest 상태 업데이트
     """
     # 1) 요청 조회
     req = sup_core.get_promotion_request(db, request_id)
@@ -75,7 +75,6 @@ def approve_partner_request(
 
     # 2) 상태 검증
     if req.status != "pending":
-        # 이미 approved / rejected / cancelled 등
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"promotion_request_already_{req.status}",
@@ -84,7 +83,6 @@ def approve_partner_request(
     # 3) 유저 조회
     user = db.get(AppUser, req.user_id)
     if not user:
-        # 데이터가 꼬인 케이스
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="user_not_found_for_request",
@@ -94,7 +92,6 @@ def approve_partner_request(
     if not getattr(user, "is_partner", False):
         user.is_partner = True
         db.add(user)
-        # commit 은 아래 Org/PartnerUser 생성과 함께
 
     # 5) Org / PartnerUser 생성 또는 재사용
     try:
@@ -106,24 +103,16 @@ def approve_partner_request(
             partner_user_role=target_role or req.target_role,
         )
     except PromotionNotFound:
-        # 이 경우는 거의 안 나와야 하지만, 방어적으로 처리
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="user_not_found_for_partner",
         )
 
-    # 6) 요청 상태/메타 업데이트
+    # 6) 요청 상태 업데이트 (여기가 지금 빠져 있었음)
     now = _utcnow()
     req.status = "approved"
     if hasattr(req, "decided_at"):
         req.decided_at = now
-    # decided_by 같은 컬럼이 있어도 지금은 별도 supervisor 유저가 없으니 건드리지 않음
-
-    # 컬럼 이름은 partner_id 이지만 실제로는 Org.id를 가리킴
-    if hasattr(req, "partner_id"):
-        req.partner_id = org.id
-    if hasattr(req, "partner_user_id"):
-        req.partner_user_id = partner_user.id
 
     db.add(req)
     db.commit()
