@@ -137,90 +137,78 @@ class PromotionConflict(PromotionError):
     """
     ...
 
-
 def _promote_user_to_partner_internal(
     db: Session,
     *,
     email: str,
-    partner_name: str,              # 실제로는 Org 이름
-    created_by: Optional[int] = None,
-    partner_user_role: str = "partner",
-) -> Tuple[Org, PartnerUser]:
+    partner_name: str,
+    created_by: int | None,
+    partner_user_role: str | None = None,
+) -> tuple[Org, PartnerUser]:
     """
-    실제 partner.org / partner.partner(PartnerUser)를 만드는 하위 유틸.
+    주어진 email 을 가진 user를 partner.org / partner.partner(PartnerUser)로 승격.
 
-    - 주어진 email 에 해당하는 AppUser 를 찾고
-    - partner_name 기반 Org 를 생성/재사용
-    - 그 Org 와 AppUser 를 연결하는 PartnerUser 를 생성/재사용
-    - 트랜잭션/상태 전이는 서비스 레이어에서 처리
+    - Org는 partner_name 기준으로 찾고, 없으면 새로 생성
+    - PartnerUser는 (org_id, email) 기준으로 찾고, 없으면 생성
     """
-    # 1) 가입 사용자 확인 (user.users)
-    app_user = db.execute(
-        select(AppUser).where(func.lower(AppUser.email) == func.lower(email))
-    ).scalar_one_or_none()
-    if not app_user:
-        raise PromotionNotFound(f"no user.users found for email={email}")
+    from models.partner.partner_core import Org, PartnerUser  # 이미 위에 import 되어 있으면 이 줄은 제거해도 됨
 
-    # 2) Org 코드/이름 정리 (코드는 내부에서 자동 생성)
-    base_code = _slugify_code(partner_name)[:16]
+    partner_user_role = partner_user_role or "partner"
 
-    # 3) 멱등: 동일 code Org 가 있으면 재사용
-    org = db.execute(
-        select(Org).where(Org.code == base_code)
-    ).scalar_one_or_none()
+    # 1) Org 조회 또는 생성
+    org = (
+        db.query(Org)
+        .filter(Org.name == partner_name)
+        .order_by(Org.id.asc())
+        .first()
+    )
 
     if not org:
-        try_code = base_code
-        tries = 0
-        while True:
-            try:
-                org = Org(
-                    name=partner_name,
-                    code=try_code,
-                    status="active",
-                    created_by=created_by,
-                    # timezone 은 기본값 'UTC' 사용
-                )
-                db.add(org)
-                db.flush()  # PK 확보
-                break
-            except IntegrityError:
-                db.rollback()
-                tries += 1
-                if tries > 3:
-                    # 최종 백오프: 랜덤 코드
-                    try_code = _gen_code(
-                        prefix=_slugify_code(partner_name)[:4],
-                        length=6,
-                    )
-                else:
-                    try_code = f"{base_code}{tries}"
+        # org.code 아무 문자열이나 넣으면 안 되니까, 간단한 코드 생성
+        # (이미 다른 유틸 있으면 그거 써도 됨)
+        base_code = partner_name.strip().replace(" ", "_") or "org"
+        base_code = base_code.lower()
+        code = base_code
+        i = 1
+        while db.query(Org).filter(Org.code == code).first() is not None:
+            i += 1
+            code = f"{base_code}_{i}"
 
-    # 4) 멱등: 이미 PartnerUser 매핑이 있으면 그대로 반환
-    pu = db.execute(
-        select(PartnerUser).where(
-            PartnerUser.partner_id == org.id,          # partner_id = org_id 역할
-            PartnerUser.user_id == app_user.user_id,
+        org = Org(
+            name=partner_name,
+            code=code,
+            status="active",
+            timezone="UTC",
+            created_by=created_by,
         )
-    ).scalar_one_or_none()
+        db.add(org)
+        db.flush()  # org.id 확보
 
-    if not pu:
-        pu = PartnerUser(
-            partner_id=org.id,
-            user_id=app_user.user_id,
-            full_name=getattr(app_user, "full_name", None)
-            or getattr(app_user, "name", None)
-            or email,
-            email=app_user.email,
+    # 2) PartnerUser 조회 또는 생성
+    partner_user = (
+        db.query(PartnerUser)
+        .filter(
+            PartnerUser.org_id == org.id,
+            PartnerUser.email == email,
+        )
+        .order_by(PartnerUser.id.asc())
+        .first()
+    )
+
+    if not partner_user:
+        partner_user = PartnerUser(
+            org_id=org.id,
+            user_id=None,          # 필요하면 나중에 AppUser와 매핑
+            full_name=partner_name,  # 또는 req.name / user.name 으로 바꿀 수 있음
+            email=email,
             role=partner_user_role,
             is_active=True,
         )
-        db.add(pu)
+        db.add(partner_user)
+        db.flush()
 
-    db.commit()
-    db.refresh(org)
-    db.refresh(pu)
-    return org, pu
+    return org, partner_user
+
 
 def get_promotion_request(
     db: Session,

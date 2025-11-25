@@ -75,8 +75,6 @@ class PartnerPromotionRequestUpdate(ORMBase):
 
     status: Optional[PromotionStatus] = None
     decided_at: Optional[datetime] = None
-    partner_id: Optional[int] = None
-    partner_user_id: Optional[int] = None
     target_role: Optional[str] = None
 
     # 필요 시 신청 정보도 수정 가능하도록 옵션 필드로 둠
@@ -106,9 +104,6 @@ class PartnerPromotionRequestResponse(ORMBase):
     requested_at: datetime
     decided_at: Optional[datetime] = None
 
-    # 승인 후 실제 연결된 partner / partner_user
-    partner_id: Optional[int] = None
-    partner_user_id: Optional[int] = None
 
 
 # =========================
