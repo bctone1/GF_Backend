@@ -161,7 +161,7 @@ def get_partner_user_by_email(
     stmt = (
         select(PartnerUser)
         .where(
-            PartnerUser.partner_id == org_id,
+            PartnerUser.org_id == org_id,
             func.lower(PartnerUser.email) == func.lower(email),
         )
         .limit(1)
@@ -185,7 +185,7 @@ def list_partner_users(
     """
     stmt = (
         select(PartnerUser)
-        .where(PartnerUser.partner_id == org_id)
+        .where(PartnerUser.org_id == org_id)
         .order_by(PartnerUser.created_at.desc())
         .limit(limit)
         .offset(offset)

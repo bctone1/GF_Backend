@@ -63,7 +63,6 @@ def approve_partner_request(
     - pending 상태만 승인 가능
     - user.users.is_partner = True 로 플래그 설정
     - Org / PartnerUser 생성(or 재사용)
-    - PartnerPromotionRequest 상태 업데이트
     """
     # 1) 요청 조회
     req = sup_core.get_promotion_request(db, request_id)
@@ -88,7 +87,7 @@ def approve_partner_request(
             detail="user_not_found_for_request",
         )
 
-    # 4) is_partner 플래그 보장 (멱등)
+    # 4) is_partner 플래그 보장
     if not getattr(user, "is_partner", False):
         user.is_partner = True
         db.add(user)
@@ -97,10 +96,9 @@ def approve_partner_request(
     try:
         org, partner_user = _promote_user_to_partner_internal(
             db=db,
-            app_user=user,
-            # email=user.email,              # 실제 AppUser 기준
-            partner_name=req.org_name,     # 요청 폼에서 받은 기관명
-            created_by=None,               # 별도 supervisor 유저 없으니 None
+            email=user.email,
+            partner_name=req.org_name,
+            created_by=None,
             partner_user_role=target_role or req.target_role,
         )
     except PromotionNotFound:
@@ -109,7 +107,7 @@ def approve_partner_request(
             detail="user_not_found_for_partner",
         )
 
-    # 6) 요청 상태 업데이트 (여기가 지금 빠져 있었음)
+    # 6) 요청 상태 업데이트 (승인)
     now = _utcnow()
     req.status = "approved"
     if hasattr(req, "decided_at"):

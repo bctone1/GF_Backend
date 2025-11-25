@@ -136,94 +136,79 @@ class PromotionConflict(PromotionError):
     """
     ...
 
+# 내부 유틸: AppUser(email)을 Org + PartnerUser 로 승격
 def _promote_user_to_partner_internal(
     db: Session,
     *,
-    app_user: AppUser,
+    email: str,
     partner_name: str,
     created_by: int | None,
     partner_user_role: str | None = None,
 ) -> tuple[Org, PartnerUser]:
     """
-    AppUser 를 partner.org / partner.partner(PartnerUser)로 승격.
-
-    - Org: partner_name 기준으로 찾고 없으면 생성
-    - PartnerUser: (org_id, user_id) 우선 조회, 없으면 (org_id, email)로 조회 후 user_id 매핑
+    - email 로 AppUser 찾기
+    - partner_name 으로 Org 찾거나 생성
+    - Org 안에서 (org_id, user_id) 기준으로 PartnerUser 찾거나 생성
     """
-    partner_user_role = partner_user_role or "partner"
 
-    # 1) Org 조회 또는 생성
+    # 0) AppUser 조회
+    user = (
+        db.query(AppUser)
+        .filter(AppUser.email == email)
+        .first()
+    )
+    if not user:
+        # 원래 쓰던 예외 있으면 그대로 사용
+        raise PromotionNotFound("user_not_found")
+
+    # 1) Org 찾기 or 생성 (기관)
     org = (
         db.query(Org)
         .filter(Org.name == partner_name)
-        .order_by(Org.id.asc())
+        .order_by(Org.id)
         .first()
     )
-
     if not org:
-        base_code = partner_name.strip().replace(" ", "_") or "org"
-        base_code = base_code.lower()
-        code = base_code
-        i = 1
-        while db.query(Org).filter(Org.code == code).first() is not None:
-            i += 1
-            code = f"{base_code}_{i}"
-
         org = Org(
             name=partner_name,
-            code=code,
-            status="active",
+            code=f"ORG-{user.user_id}",  # 간단한 코드(임시용) – 나중에 규칙 바꿔도 됨
             timezone="UTC",
+            status="active",
             created_by=created_by,
         )
         db.add(org)
         db.flush()  # org.id 확보
 
-    # 2) PartnerUser 조회/생성 (user_id 우선 매칭)
+    # 2) Org 안에서 PartnerUser 찾기 or 생성 (강사/어시스턴트)
     partner_user = (
         db.query(PartnerUser)
         .filter(
-            PartnerUser.org_id == org.id,
-            PartnerUser.user_id == app_user.user_id,
+            PartnerUser.org_id == org.id,          # ★ 여기서 org_id 사용
+            PartnerUser.user_id == user.user_id,   # ★ AppUser.user_id 연결
         )
-        .order_by(PartnerUser.id.asc())
+        .order_by(PartnerUser.id)
         .first()
     )
 
     if not partner_user:
-        # 같은 org 안에서 email 기준으로 기존 partner 있는지 확인
-        partner_user = (
-            db.query(PartnerUser)
-            .filter(
-                PartnerUser.org_id == org.id,
-                PartnerUser.email == app_user.email,
-            )
-            .order_by(PartnerUser.id.asc())
-            .first()
+        full_name = (
+            getattr(user, "full_name", None)
+            or getattr(user, "name", None)
+            or user.email
         )
-
-        # 있으면 user_id를 매핑
-        if partner_user and partner_user.user_id is None:
-            partner_user.user_id = app_user.user_id
-            db.add(partner_user)
-
-    # 그래도 없으면 새로 생성
-    if not partner_user:
-        # AppUser 쪽 이름 필드 이름이 다를 수 있으니 적당히 가져오기
-        full_name = getattr(app_user, "full_name", None) or getattr(app_user, "name", None) or app_user.email
-
         partner_user = PartnerUser(
             org_id=org.id,
-            user_id=app_user.user_id,
+            user_id=user.user_id,          # ★ 네가 원하던 user_id 연결
             full_name=full_name,
-            email=app_user.email,
-            role=partner_user_role,
+            email=user.email,
+            role=partner_user_role or "partner",
             is_active=True,
         )
         db.add(partner_user)
         db.flush()
 
     return org, partner_user
+
 
 
 
