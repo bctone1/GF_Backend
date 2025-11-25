@@ -214,7 +214,7 @@ def _promote_user_to_partner_internal(
 
         partner_user = PartnerUser(
             org_id=org.id,
-            user_id=app_user.user_id,   # ★ 여기서 user_id 채움
+            user_id=app_user.user_id,
             full_name=full_name,
             email=app_user.email,
             role=partner_user_role,
