@@ -1,3 +1,4 @@
+# models/partner/student.py
 from sqlalchemy import (
     Column, BigInteger, Text, Boolean, DateTime, Numeric,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text
@@ -14,7 +15,8 @@ class Student(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    partner_id = Column(
+    # Org(기관) 기준 학생
+    org_id = Column(
         BigInteger,
         ForeignKey("partner.org.id", ondelete="CASCADE"),
         nullable=False,
@@ -32,17 +34,18 @@ class Student(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('active','inactive','archived')", name="chk_students_status"),
-        Index("idx_students_partner_status", "partner_id", "status"),
-        Index("idx_students_partner_email", "partner_id", "email"),
-        # 파트너 내 이메일 단일, NULL 허용
+        Index("idx_students_org_status", "org_id", "status"),
+        Index("idx_students_org_email", "org_id", "email"),
+        # org 내 이메일 단일, NULL 허용
         Index(
-            "uq_students_partner_email_notnull",
-            "partner_id", "email",
+            "uq_students_org_email_notnull",
+            "org_id", "email",
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
         ),
         {"schema": "partner"},
     )
+
 
 
 # ========== partner.enrollments ==========
