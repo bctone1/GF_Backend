@@ -22,7 +22,6 @@ from models.supervisor.core import (
 from models.user.account import AppUser, UserProfile
 from models.partner.partner_core import Org, PartnerUser
 
-
 # ==============================
 # helpers
 # ==============================
@@ -140,19 +139,17 @@ class PromotionConflict(PromotionError):
 def _promote_user_to_partner_internal(
     db: Session,
     *,
-    email: str,
+    app_user: AppUser,
     partner_name: str,
     created_by: int | None,
     partner_user_role: str | None = None,
 ) -> tuple[Org, PartnerUser]:
     """
-    주어진 email 을 가진 user를 partner.org / partner.partner(PartnerUser)로 승격.
+    AppUser 를 partner.org / partner.partner(PartnerUser)로 승격.
 
-    - Org는 partner_name 기준으로 찾고, 없으면 새로 생성
-    - PartnerUser는 (org_id, email) 기준으로 찾고, 없으면 생성
+    - Org: partner_name 기준으로 찾고 없으면 생성
+    - PartnerUser: (org_id, user_id) 우선 조회, 없으면 (org_id, email)로 조회 후 user_id 매핑
     """
-    from models.partner.partner_core import Org, PartnerUser  # 이미 위에 import 되어 있으면 이 줄은 제거해도 됨
-
     partner_user_role = partner_user_role or "partner"
 
     # 1) Org 조회 또는 생성
@@ -164,8 +161,6 @@ def _promote_user_to_partner_internal(
     )
 
     if not org:
-        # org.code 아무 문자열이나 넣으면 안 되니까, 간단한 코드 생성
-        # (이미 다른 유틸 있으면 그거 써도 됨)
         base_code = partner_name.strip().replace(" ", "_") or "org"
         base_code = base_code.lower()
         code = base_code
@@ -184,23 +179,44 @@ def _promote_user_to_partner_internal(
         db.add(org)
         db.flush()  # org.id 확보
 
-    # 2) PartnerUser 조회 또는 생성
+    # 2) PartnerUser 조회/생성 (user_id 우선 매칭)
     partner_user = (
         db.query(PartnerUser)
         .filter(
             PartnerUser.org_id == org.id,
-            PartnerUser.email == email,
+            PartnerUser.user_id == app_user.user_id,
         )
         .order_by(PartnerUser.id.asc())
         .first()
     )
 
     if not partner_user:
+        # 같은 org 안에서 email 기준으로 기존 partner 있는지 확인
+        partner_user = (
+            db.query(PartnerUser)
+            .filter(
+                PartnerUser.org_id == org.id,
+                PartnerUser.email == app_user.email,
+            )
+            .order_by(PartnerUser.id.asc())
+            .first()
+        )
+
+        # 있으면 user_id를 매핑
+        if partner_user and partner_user.user_id is None:
+            partner_user.user_id = app_user.user_id
+            db.add(partner_user)
+
+    # 그래도 없으면 새로 생성
+    if not partner_user:
+        # AppUser 쪽 이름 필드 이름이 다를 수 있으니 적당히 가져오기
+        full_name = getattr(app_user, "full_name", None) or getattr(app_user, "name", None) or app_user.email
+
         partner_user = PartnerUser(
             org_id=org.id,
-            user_id=None,          # 필요하면 나중에 AppUser와 매핑
-            full_name=partner_name,  # 또는 req.name / user.name 으로 바꿀 수 있음
-            email=email,
+            user_id=app_user.user_id,   # ★ 여기서 user_id 채움
+            full_name=full_name,
+            email=app_user.email,
             role=partner_user_role,
             is_active=True,
         )
@@ -208,6 +224,7 @@ def _promote_user_to_partner_internal(
         db.flush()
 
     return org, partner_user
+
 
 
 def get_promotion_request(
