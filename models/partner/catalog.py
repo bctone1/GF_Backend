@@ -34,25 +34,41 @@ class ProviderCredential(Base):
     )
 
 
-# ========= partner.model_catalog =========
 class ModelCatalog(Base):
     __tablename__ = "model_catalog"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     provider = Column(Text, nullable=False)
     model_name = Column(Text, nullable=False)
-    modality = Column(Text, nullable=False, server_default=text("'chat'"))  # chat | embedding | stt | image
+    modality = Column(Text, nullable=False, server_default=text("'chat'"))
     supports_parallel = Column(Boolean, nullable=False, server_default=text("false"))
-    default_pricing = Column(JSONB)  # {input_per_1k, output_per_1k, audio_per_sec, ...}
+    default_pricing = Column(JSONB)
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    # 이 모델을 primary_model 로 쓰는 코스들
+    primary_for_courses = relationship(
+        "Course",
+        back_populates="primary_model",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("provider", "model_name", name="uq_model_catalog_provider_model"),
-        CheckConstraint("modality IN ('chat','embedding','stt','image','tts','rerank')", name="chk_model_catalog_modality"),
-        # JSONB는 객체만 허용
-        CheckConstraint("default_pricing IS NULL OR jsonb_typeof(default_pricing) = 'object'", name="chk_model_catalog_pricing_obj"),
+        CheckConstraint(
+            "modality IN ('chat','embedding','stt','image','tts','rerank')",
+            name="chk_model_catalog_modality",
+        ),
+        CheckConstraint(
+            "default_pricing IS NULL OR jsonb_typeof(default_pricing) = 'object'",
+            name="chk_model_catalog_pricing_obj",
+        ),
         Index("idx_model_catalog_provider_modality", "provider", "modality"),
         Index("idx_model_catalog_active", "is_active"),
         {"schema": "partner"},

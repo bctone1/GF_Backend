@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 
 from schemas.base import ORMBase, Page
 from schemas.enums import CourseStatus, ClassStatus
@@ -26,6 +26,10 @@ class CourseBase(ORMBase):
     end_date: Optional[date] = None
     description: Optional[str] = None
 
+    # LLM 설정
+    primary_model_id: Optional[int] = None
+    allowed_model_ids: List[int] = Field(default_factory=list)
+
 
 class CourseCreate(ORMBase):
     """
@@ -38,6 +42,10 @@ class CourseCreate(ORMBase):
     end_date: Optional[date] = None
     description: Optional[str] = None
 
+    # LLM 설정 (선택)
+    primary_model_id: Optional[int] = None
+    allowed_model_ids: List[int] = Field(default_factory=list)
+
 
 class CourseUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
@@ -48,6 +56,10 @@ class CourseUpdate(ORMBase):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     description: Optional[str] = None
+
+    # 부분 수정용
+    primary_model_id: Optional[int] = None
+    allowed_model_ids: Optional[List[int]] = None
 
 
 class CourseResponse(CourseBase):
@@ -63,41 +75,47 @@ class CourseResponse(CourseBase):
 # classes
 # ==============================
 class ClassBase(ORMBase):
+    """
+    Class 공통 필드
+    - name, 시간, 정원, 장소 등
+    - status / timezone / invite_only 에는 기본값 부여
+    """
     name: str
-    section_code: Optional[str] = None
-    status: Optional[ClassStatus] = None
+    description: Optional[str] = None
+
+    status: ClassStatus = ClassStatus.planned
+
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
     capacity: Optional[int] = None
-    timezone: Optional[str] = None
+
+    timezone: str = "UTC"
     location: Optional[str] = None
     online_url: Optional[str] = None
-    invite_only: Optional[bool] = None
+    invite_only: bool = False
 
 
-class ClassCreate(ORMBase):
+class ClassCreate(ClassBase):
     """
-    partner_id 는 path(`/partner/{partner_id}/classes`) 등에서
-    course_id 가 있다면 path(`/courses/{course_id}/classes`)나 컨텍스트에서 받음
-    body에는 포함 X. 코스가 없을수도 있어서 분리해서 가는 구조로
+    partner_id, course_id 는 path / 컨텍스트에서 받기 때문에 body 에선 제외.
+    UI 기준으로 필수인 값(정원, 시작/종료일)을 Create 쪽에서만 필수로 강제하고 싶으면
+    아래처럼 override 하면 됨.
     """
-    name: str
-    section_code: Optional[str] = None
-    status: Optional[ClassStatus] = None
-    start_at: Optional[datetime] = None
-    end_at: Optional[datetime] = None
-    capacity: Optional[int] = None
-    timezone: Optional[str] = None
-    location: Optional[str] = None
-    online_url: Optional[str] = None
-    invite_only: Optional[bool] = None
+    # 예시: 강제 필수로 쓰고 싶으면 주석 해제해서 사용
+    # start_at: datetime
+    # end_at: datetime
+    # capacity: int
+    pass
 
 
 class ClassUpdate(ORMBase):
+    """
+    부분 수정용. 전부 Optional.
+    """
     model_config = ConfigDict(from_attributes=False)
 
     name: Optional[str] = None
-    section_code: Optional[str] = None
+    description: Optional[str] = None
     status: Optional[ClassStatus] = None
     start_at: Optional[datetime] = None
     end_at: Optional[datetime] = None
@@ -109,6 +127,9 @@ class ClassUpdate(ORMBase):
 
 
 class ClassResponse(ClassBase):
+    """
+    DB → 응답용 스키마
+    """
     id: int
     partner_id: int
     course_id: Optional[int] = None
