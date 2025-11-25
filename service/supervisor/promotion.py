@@ -98,7 +98,7 @@ def approve_partner_request(
         org, partner_user = _promote_user_to_partner_internal(
             db=db,
             app_user=user,
-            email=user.email,              # 실제 AppUser 기준
+            # email=user.email,              # 실제 AppUser 기준
             partner_name=req.org_name,     # 요청 폼에서 받은 기관명
             created_by=None,               # 별도 supervisor 유저 없으니 None
             partner_user_role=target_role or req.target_role,
