@@ -16,6 +16,39 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def create_default_class_invite(
+    db: Session,
+    *,
+    partner_id: int,
+    class_id: int,
+    expires_at: Optional[datetime] = None,
+    max_uses: Optional[int] = None,
+    created_by_partner_user_id: Optional[int] = None,
+) -> InviteCode:
+    """
+    클래스 생성 후, 공유용 기본 초대코드 1개 발급용
+    - 이메일 발송 없음
+    - target_role 은 항상 'student'
+    """
+    code = _generate_unique_code(db)
+
+    invite = course_crud.create_invite_code(
+        db,
+        partner_id=partner_id,
+        code=code,
+        target_role="student",
+        class_id=class_id,
+        expires_at=expires_at,
+        max_uses=max_uses,
+        status="active",
+        created_by=created_by_partner_user_id,
+    )
+    return invite
+
+
+
+
 # ==============================
 # Service 레벨 에러
 # ==============================

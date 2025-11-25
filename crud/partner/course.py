@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple
 from sqlalchemy import select, update, delete, func, and_, or_, desc
 from sqlalchemy.orm import Session
 
-from models.partner.course import Course, Class
+from models.partner.course import Course, Class, InviteCode  # ← InviteCode 추가
 
 
 # ==============================
@@ -261,3 +261,62 @@ def delete_class(db: Session, class_id: int) -> bool:
     res = db.execute(delete(Class).where(Class.id == class_id))
     db.commit()
     return res.rowcount > 0
+
+
+# ==============================
+# InviteCode
+# ==============================
+def get_invite_code(db: Session, code: str) -> Optional[InviteCode]:
+    """
+    초대코드 문자열로 단일 InviteCode 조회.
+    code 는 유니크 제약이 있으므로 0 또는 1개만 존재.
+    """
+    stmt = select(InviteCode).where(InviteCode.code == code)
+    return db.execute(stmt).scalars().first()
+
+
+def get_invite_by_id(db: Session, invite_id: int) -> Optional[InviteCode]:
+    """
+    PK 기준 InviteCode 조회.
+    """
+    return db.get(InviteCode, invite_id)
+
+
+def create_invite_code(
+    db: Session,
+    *,
+    partner_id: int,
+    code: str,
+    target_role: str,
+    class_id: Optional[int],
+    expires_at: Optional[datetime],
+    max_uses: Optional[int],
+    status: str,
+    created_by: Optional[int],
+) -> InviteCode:
+    """
+    partner.invite_codes 생성.
+    - target_role 은 현재 'student' 만 허용 (CheckConstraint 와 동일)
+    - class_id 는 NOT NULL 이므로 None 이면 에러.
+    """
+    if target_role != "student":
+        raise ValueError("InviteCode.target_role 은 'student'만 허용됩니다.")
+    if class_id is None:
+        raise ValueError("class 기반 초대코드이므로 class_id 는 필수입니다.")
+    if status not in ("active", "expired", "disabled"):
+        raise ValueError("InviteCode.status 값이 올바르지 않습니다.")
+
+    obj = InviteCode(
+        partner_id=partner_id,
+        class_id=class_id,
+        code=code,
+        target_role=target_role,
+        expires_at=expires_at,
+        max_uses=max_uses,
+        status=status,
+        created_by=created_by,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj

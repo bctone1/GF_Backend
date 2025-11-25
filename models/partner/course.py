@@ -78,17 +78,15 @@ class Class(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 수업 설명
     description = Column(Text)
 
     # 1 class : 1 partner(강사) = PartnerUser.id
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),  # ← 여기
         nullable=False,
     )
 
-    # course 에 속하지 않는 class 허용
     course_id = Column(
         BigInteger,
         ForeignKey("partner.courses.id", ondelete="SET NULL"),
@@ -96,8 +94,7 @@ class Class(Base):
     )
 
     name = Column(Text, nullable=False)
-    # section_code 제거됨
-    status = Column(Text, nullable=False, server_default=text("'planned'"))  # planned|ongoing|ended
+    status = Column(Text, nullable=False, server_default=text("'planned'"))
     start_at = Column(DateTime(timezone=True))
     end_at = Column(DateTime(timezone=True))
     capacity = Column(Integer)
@@ -109,23 +106,23 @@ class Class(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    # course ↔ class
     course = relationship("Course", back_populates="classes", passive_deletes=True)
 
     # 클래스 → 담당 파트너(강사, PartnerUser)
     partner = relationship(
         "PartnerUser",
         back_populates="classes",
+        foreign_keys=[partner_id],
         passive_deletes=True,
     )
 
-    # 하나의 class 에 여러 학생 초대코드
     invite_codes = relationship(
         "InviteCode",
         back_populates="clazz",
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
     enrollments = relationship(
         "Enrollment",
         back_populates="class_",
@@ -147,10 +144,10 @@ class InviteCode(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 이 초대코드를 소유하는 파트너(강사)
+    # 이 초대코드를 소유하는 파트너(강사, PartnerUser)
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner.id", ondelete="CASCADE"),  # ← 여기
         nullable=False,
     )
 
@@ -172,17 +169,31 @@ class InviteCode(Base):
     # 실제 생성한 PartnerUser (강사/assistant)
     created_by = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="SET NULL"),
+        ForeignKey("partner.partner.id", ondelete="SET NULL"),  # ← 여기
     )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    # 관계 설정
-    clazz = relationship("Class", back_populates="invite_codes", passive_deletes=True)
+    # class 관계
+    clazz = relationship(
+        "Class",
+        back_populates="invite_codes",
+        passive_deletes=True,
+    )
 
+    # 이 초대코드를 소유하는 강사(PartnerUser)
+    partner = relationship(
+        "PartnerUser",
+        foreign_keys=[partner_id],
+        back_populates="invite_codes",
+        passive_deletes=True,
+    )
+
+    # 초대코드를 실제 생성한 PartnerUser
     creator = relationship(
         "PartnerUser",
         foreign_keys=[created_by],
+        back_populates="created_invite_codes",
         passive_deletes=True,
     )
 
@@ -193,7 +204,6 @@ class InviteCode(Base):
             "(max_uses IS NULL) OR (used_count <= max_uses)",
             name="chk_invite_codes_used_le_max",
         ),
-        # student 전용 target_role
         CheckConstraint(
             "target_role = 'student'",
             name="chk_invite_codes_target_role_student_only",
@@ -203,7 +213,6 @@ class InviteCode(Base):
             name="chk_invite_codes_status",
         ),
         Index("idx_invite_codes_partner_status", "partner_id", "status"),
-        # class 단위로 초대코드 조회용 인덱스
         Index("idx_invite_codes_class_status", "class_id", "status"),
         {"schema": "partner"},
     )

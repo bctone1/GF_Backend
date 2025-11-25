@@ -92,7 +92,30 @@ class PartnerUser(Base):
         back_populates="partner_users",
         passive_deletes=True,
     )
-    classes = relationship("Class", back_populates="partner", passive_deletes=True)
+
+    # 담당 Class 들
+    classes = relationship(
+        "Class",
+        back_populates="partner",
+        foreign_keys="Class.partner_id",
+        passive_deletes=True,
+    )
+
+    # 이 파트너 명의의 초대코드들 (InviteCode.partner_id)
+    invite_codes = relationship(
+        "InviteCode",
+        back_populates="partner",
+        foreign_keys="InviteCode.partner_id",
+        passive_deletes=True,
+    )
+
+    # 이 파트너가 생성한 초대코드들 (InviteCode.created_by)
+    created_invite_codes = relationship(
+        "InviteCode",
+        back_populates="creator",
+        foreign_keys="InviteCode.created_by",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         UniqueConstraint("org_id", "user_id", name="uq_partner_user_user"),

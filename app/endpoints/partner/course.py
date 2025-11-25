@@ -12,6 +12,7 @@ from schemas.partner.course import (
     ClassCreate, ClassUpdate, ClassResponse, ClassPage,
 )
 from crud.partner import course as crud_course
+from service.partner import class_code as class_code_service  # ← 추가
 
 router = APIRouter()
 
@@ -166,20 +167,17 @@ def create_class(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
-    obj = crud_course.create_class(
+    """
+    class 생성 + 기본 초대코드 1개 자동 생성.
+    - Class.partner_id = path 의 partner_id (PartnerUser.id)
+    - 기본 초대코드는 student 초대용으로 1개 발급
+    """
+    obj = class_code_service.create_class_with_default_invite(
         db,
         partner_id=partner_id,
         course_id=course_id,
-        name=payload.name,
-        description=getattr(payload, "description", None),
-        status=payload.status,
-        start_at=payload.start_at,
-        end_at=payload.end_at,
-        capacity=payload.capacity,
-        timezone=payload.timezone,
-        location=payload.location,
-        online_url=payload.online_url,
-        invite_only=payload.invite_only,
+        data=payload,
+        created_by_partner_user_id=partner_id,
     )
     return obj
 
