@@ -1,8 +1,6 @@
-# schemas/partner/student.py
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Optional
 
 from pydantic import ConfigDict, EmailStr
@@ -56,8 +54,6 @@ class EnrollmentCreate(ORMBase):
     status: Optional[EnrollmentStatus] = None          # DB default 'active'
     enrolled_at: Optional[datetime] = None             # 서버 채움 가능
     completed_at: Optional[datetime] = None
-    progress_percent: Optional[Decimal] = None         # DB default 0
-    final_grade: Optional[str] = None
 
 
 class EnrollmentUpdate(ORMBase):
@@ -68,8 +64,6 @@ class EnrollmentUpdate(ORMBase):
     status: Optional[EnrollmentStatus] = None
     enrolled_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    progress_percent: Optional[Decimal] = None
-    final_grade: Optional[str] = None
 
 
 class EnrollmentResponse(ORMBase):
@@ -80,8 +74,6 @@ class EnrollmentResponse(ORMBase):
     status: EnrollmentStatus
     enrolled_at: datetime
     completed_at: Optional[datetime] = None
-    progress_percent: Decimal
-    final_grade: Optional[str] = None
 
 
 EnrollmentPage = Page[EnrollmentResponse]

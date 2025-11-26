@@ -25,7 +25,9 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ========= Student CRUD =========
+# ============================================
+#                Student CRUD
+# ============================================
 def create_student(
     db: Session,
     *,
@@ -36,9 +38,6 @@ def create_student(
     primary_contact: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> Student:
-    """
-    파트너 내 email이 not null이면 유일.
-    """
     obj = Student(
         partner_id=partner_id,
         full_name=full_name,
@@ -78,7 +77,7 @@ def list_students(
     *,
     partner_id: int,
     status: Optional[str] = None,
-    q: Optional[str] = None,  # name/email 검색
+    q: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
 ) -> Sequence[Student]:
@@ -94,9 +93,9 @@ def list_students(
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
-            Student.full_name.ilike(like) |
-            (Student.email.isnot(None) & Student.email.ilike(like)) |
-            (Student.primary_contact.isnot(None) & Student.primary_contact.ilike(like))
+            Student.full_name.ilike(like)
+            | (Student.email.isnot(None) & Student.email.ilike(like))
+            | (Student.primary_contact.isnot(None) & Student.primary_contact.ilike(like))
         )
     return db.execute(stmt).scalars().all()
 
@@ -143,20 +142,22 @@ def ensure_student(
     primary_contact: Optional[str] = None,
 ) -> Student:
     """
-    email이 있으면 멱등 생성/조회. 없으면 무조건 생성.
+    email 있으면 멱등 조회·생성 / 없으면 무조건 새로 생성
     """
     if email:
         found = get_student_by_email(db, partner_id=partner_id, email=email)
         if found:
-            # 필요 시 이름/연락처 갱신
             changed = {}
             if not found.full_name and full_name:
                 changed["full_name"] = full_name
             if primary_contact and found.primary_contact != primary_contact:
                 changed["primary_contact"] = primary_contact
+
             if changed:
                 return update_student(db, found.id, **changed) or found
+
             return found
+
     return create_student(
         db,
         partner_id=partner_id,
@@ -166,7 +167,9 @@ def ensure_student(
     )
 
 
-# ========= Enrollment CRUD =========
+# ============================================
+#              Enrollment CRUD
+# ============================================
 def enroll_student(
     db: Session,
     *,
@@ -174,8 +177,6 @@ def enroll_student(
     student_id: int,
     invite_code_id: Optional[int] = None,
     status: str = "active",
-    progress_percent: float = 0.0,
-    final_grade: Optional[str] = None,
 ) -> Enrollment:
     obj = Enrollment(
         class_id=class_id,
@@ -183,15 +184,12 @@ def enroll_student(
         invite_code_id=invite_code_id,
         status=status,
         enrolled_at=_utcnow(),
-        progress_percent=progress_percent,
-        final_grade=final_grade,
     )
     db.add(obj)
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        # (class_id, student_id) 유니크 위반 가능
         raise EnrollmentConflict("already enrolled") from e
     db.refresh(obj)
     return obj
@@ -222,7 +220,8 @@ def list_enrollments_by_class(
         select(Enrollment)
         .where(Enrollment.class_id == class_id)
         .order_by(Enrollment.enrolled_at.desc())
-        .limit(limit).offset(offset)
+        .limit(limit)
+        .offset(offset)
     )
     if status:
         stmt = stmt.where(Enrollment.status == status)
@@ -241,7 +240,8 @@ def list_enrollments_by_student(
         select(Enrollment)
         .where(Enrollment.student_id == student_id)
         .order_by(Enrollment.enrolled_at.desc())
-        .limit(limit).offset(offset)
+        .limit(limit)
+        .offset(offset)
     )
     if status:
         stmt = stmt.where(Enrollment.status == status)
@@ -272,16 +272,14 @@ def mark_completed(
     enrollment_id: int,
     *,
     completed_at: Optional[datetime] = None,
-    final_grade: Optional[str] = None,
 ) -> Optional[Enrollment]:
+    """
+    final_grade / progress_percent 제거 → 단순 완료처리만 남음
+    """
     fields = {
         "status": "completed",
         "completed_at": completed_at or _utcnow(),
     }
-    if final_grade is not None:
-        fields["final_grade"] = final_grade
-    # 진행률 자동 보정(선택)
-    fields.setdefault("progress_percent", 100)
     return update_enrollment(db, enrollment_id, **fields)
 
 
@@ -295,7 +293,9 @@ def delete_enrollment(db: Session, enrollment_id: int) -> bool:
     return res.rowcount > 0
 
 
-# ========= Convenience =========
+# ============================================
+#        Convenience: invite-based join
+# ============================================
 def ensure_enrollment_by_email(
     db: Session,
     *,
@@ -305,14 +305,12 @@ def ensure_enrollment_by_email(
     full_name: str,
     invite_code_id: Optional[int] = None,
 ) -> Tuple[Student, Enrollment]:
-    """
-    1) 파트너 내 학생 email로 멱등 조회/생성
-    2) 해당 학생을 class_id에 멱등 수강등록
-    """
     student = ensure_student(db, partner_id=partner_id, email=email, full_name=full_name)
     existing = find_enrollment(db, class_id=class_id, student_id=student.id)
+
     if existing:
         return student, existing
+
     enr = enroll_student(
         db,
         class_id=class_id,
@@ -321,6 +319,7 @@ def ensure_enrollment_by_email(
         status="active",
     )
     return student, enr
+
 
 def ensure_enrollment_for_invite(
     db: Session,
@@ -333,13 +332,9 @@ def ensure_enrollment_for_invite(
     primary_contact: Optional[str] = None,
 ) -> Tuple[Student, Enrollment]:
     """
-    학생 초대코드 redeem 시에 사용하는 헬퍼.
-
-    1) partner_id + email 기준으로 Student 멱등 생성/조회
-    2) 해당 학생을 class_id에 멱등 수강 등록
-    3) Enrollment.invite_code_id 세팅 (기존 등록이 있으면 필요 시만 업데이트)
+    초대코드 redeem 시 호출되는 표준 헬퍼.
     """
-    # 1) 학생 보장
+
     student = ensure_student(
         db,
         partner_id=partner_id,
@@ -348,10 +343,8 @@ def ensure_enrollment_for_invite(
         primary_contact=primary_contact,
     )
 
-    # 2) 기존 수강 여부 확인
     existing = find_enrollment(db, class_id=class_id, student_id=student.id)
     if existing:
-        # 이미 등록된 경우라도, 초대코드 트래킹이 없다면 채워 넣어 줄 수 있음
         updates = {}
         if existing.invite_code_id is None:
             updates["invite_code_id"] = invite_code_id
@@ -361,7 +354,7 @@ def ensure_enrollment_for_invite(
 
         return student, existing
 
-    # 3) 새로 수강 등록
+    # 새로 수강 등록
     enrollment = enroll_student(
         db,
         class_id=class_id,

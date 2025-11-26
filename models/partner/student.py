@@ -48,7 +48,6 @@ class Student(Base):
 
 
 
-# ========== partner.enrollments ==========
 class Enrollment(Base):
     __tablename__ = "enrollments"
 
@@ -64,27 +63,23 @@ class Enrollment(Base):
         ForeignKey("partner.students.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # 선택: 초대코드 트래킹
+
     invite_code_id = Column(
         BigInteger,
         ForeignKey("partner.invite_codes.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|completed|dropped
+    status = Column(Text, nullable=False, server_default=text("'active'"))
     enrolled_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
-    progress_percent = Column(Numeric(5, 2), nullable=False, server_default=text("0"))
-    final_grade = Column(Text, nullable=True)
 
-    # 표준 이름: class_  (Class 모델의 enrollments와 짝)
     class_ = relationship("Class", back_populates="enrollments", passive_deletes=True)
     student = relationship("Student", back_populates="enrollments", passive_deletes=True)
 
     __table_args__ = (
         UniqueConstraint("class_id", "student_id", name="uq_enrollments_class_student"),
         CheckConstraint("status IN ('active','inactive','completed','dropped')", name="chk_enrollments_status"),
-        CheckConstraint("progress_percent >= 0 AND progress_percent <= 100", name="chk_enrollments_progress_0_100"),
         CheckConstraint("(completed_at IS NULL) OR (completed_at >= enrolled_at)", name="chk_enrollments_time"),
         Index("idx_enrollments_class", "class_id"),
         Index("idx_enrollments_student", "student_id"),
