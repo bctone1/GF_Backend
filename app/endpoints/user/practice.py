@@ -23,6 +23,7 @@ from crud.user.practice import (
     practice_rating_crud,
     model_comparison_crud,
 )
+from models.user.practice import PracticeSessionModel
 from schemas.base import Page
 from schemas.user.practice import (
     PracticeSessionCreate,
@@ -41,11 +42,12 @@ from schemas.user.practice import (
     ModelComparisonUpdate,
     ModelComparisonResponse,
 )
+from schemas.user.practice import PracticeTurnRequest, PracticeTurnResponse
 
 from service.user.practice import (
     set_primary_model_for_session,
     run_practice_turn,  # 추후 LLM 연동 시 사용
-    create_model_comparison_from_metrics,  # 메트릭 기반 비교 생성 시 사용
+    # create_model_comparison_from_metrics,  # 메트릭 기반 비교 생성 시 사용
 )
 
 
@@ -217,6 +219,9 @@ def create_practice_session_model(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    유저의 practice_session_models 테이블에 저장됨
+    """
     _ = _ensure_my_session(db, session_id, me)
     data_in = data.model_copy(update={"session_id": session_id})
     model = practice_session_model_crud.create(db, data_in)
@@ -529,3 +534,50 @@ def delete_model_comparison(
     model_comparison_crud.delete(db, comparison_id=comparison_id)
     db.commit()
     return None
+
+
+@router.post(
+    "/sessions/{session_id}/chat",
+    response_model=PracticeTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="run_practice_turn_for_session",
+)
+def run_practice_turn_endpoint(
+    session_id: int = Path(..., ge=1),
+    body: PracticeTurnRequest = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    # 세션 소유권 체크
+    session = _ensure_my_session(db, session_id, me)
+
+    # 어떤 모델들에 보낼지 결정
+    if body.session_model_ids:
+        models: list[PracticeSessionModel] = []
+        for sm_id in body.session_model_ids:
+            model, model_session = _ensure_my_session_model(db, sm_id, me)
+            if model_session.session_id != session_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="session_model does not belong to this session",
+                )
+            models.append(model)
+    else:
+        # 지정 없으면 세션에 등록된 모든 모델에 병렬 호출
+        models = practice_session_model_crud.list_by_session(db, session_id=session_id)
+
+    if not models:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no models configured for this session",
+        )
+
+    turn_result = run_practice_turn(
+        db=db,
+        session=session,
+        models=models,
+        prompt_text=body.prompt_text,
+        user=me,
+    )
+    db.commit()
+    return PracticeTurnResponse.model_validate(turn_result)

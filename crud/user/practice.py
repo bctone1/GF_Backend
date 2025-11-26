@@ -33,6 +33,10 @@ from schemas.user.practice import (
 # =========================================================
 class PracticeSessionCRUD:
     def create(self, db: Session, data: PracticeSessionCreate) -> PracticeSession:
+        # 엔드포인트에서 me.user_id로 채워진 상태여야 함
+        if data.user_id is None:
+            raise ValueError("PracticeSessionCreate.user_id must be set before create()")
+
         obj = PracticeSession(
             user_id=data.user_id,
             title=data.title,
@@ -138,7 +142,10 @@ class PracticeSessionModelCRUD:
         stmt = (
             select(PracticeSessionModel)
             .where(PracticeSessionModel.session_id == session_id)
-            .order_by(PracticeSessionModel.is_primary.desc(), PracticeSessionModel.session_model_id.asc())
+            .order_by(
+                PracticeSessionModel.is_primary.desc(),
+                PracticeSessionModel.session_model_id.asc(),
+            )
         )
         return db.scalars(stmt).all()
 
@@ -297,6 +304,9 @@ class PracticeRatingCRUD:
         (response_id, user_id) 단위로 1개만 존재
         이미 있으면 score/feedback 업데이트
         """
+        if data.user_id is None:
+            raise ValueError("PracticeRatingCreate.user_id must be set before upsert()")
+
         rating = self.get_by_response_user(
             db,
             response_id=data.response_id,
