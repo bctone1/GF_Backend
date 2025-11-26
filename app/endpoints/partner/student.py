@@ -4,7 +4,6 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 
 from core.deps import get_db, get_current_partner_user
 from crud.partner import student as student_crud
@@ -40,6 +39,8 @@ def list_students(
     )
 
 
+# 혹시몰라주석 강사가 직접 학생을 생성하는 API인데 현재 미사용(PM에서 논의 완전삭제도 가능)
+"""
 @router.post("", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)
 def create_student(
     partner_id: int,
@@ -59,6 +60,7 @@ def create_student(
         )
     except student_crud.StudentConflict as e:
         raise HTTPException(status_code=409, detail=str(e))
+"""
 
 
 @router.get("/{student_id}", response_model=StudentResponse)
@@ -265,7 +267,7 @@ def drop_enrollment(
 
     st = student_crud.get_student(db, obj.student_id)
     if not st or st.partner_id != partner_id:
-        raise HTTPException(status_code=404, detail="enrollment not found")
+        raise HTTPException(statuscode=404, detail="enrollment not found")
 
     dropped = student_crud.drop_enrollment(db, enrollment_id)
     if not dropped:

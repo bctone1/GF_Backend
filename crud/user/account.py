@@ -15,6 +15,7 @@ from models.user.account import (
     UserPrivacySetting,
 )
 
+
 # =============================================================================
 # AppUser (user.users)
 # =============================================================================
@@ -29,7 +30,10 @@ def get_user(db: Session, user_id: int) -> Optional[AppUser]:
 
 
 def get_by_email(db: Session, email: str) -> Optional[AppUser]:
-    """기존 코드 호환용: user_crud.get_by_email(...)"""
+    """
+    이메일로 단일 사용자 조회.
+    (CITEXT 등은 모델/DB 레벨에서 처리된다고 가정)
+    """
     stmt = select(AppUser).where(AppUser.email == email)
     return db.execute(stmt).scalars().first()
 
@@ -89,7 +93,7 @@ def create_user(
     순수 user.users 생성.
     - data 에는 이미 password_hash 가 세팅되어 있어야 함.
     - 평문 password → hash 는 service/endpoint 에서 처리.
-    - is_partner 는 기본적으로 false, 승격시 true 로 변경.
+    - is_partner 는 기본적으로 false, 승격 시 true 로 변경.
     """
     obj = AppUser(**data)
     db.add(obj)
@@ -104,6 +108,11 @@ def update_user(
     user: AppUser,
     data: Dict[str, Any],
 ) -> AppUser:
+    """
+    AppUser 필드 업데이트.
+    endpoints 에서 status/default_role/is_partner 같은 민감 필터링은
+    호출 측에서 이미 제거한 뒤 넘겨준다고 가정.
+    """
     for key, value in data.items():
         setattr(user, key, value)
     db.add(user)
@@ -129,7 +138,12 @@ def create_with_profile(
     ensure_settings: bool = False,
 ) -> AppUser:
     """
-    user_crud.create_with_profile(db, user_in={...}, profile_in={...}, ensure_settings=True)
+    user_crud.create_with_profile(
+        db,
+        user_in={...},
+        profile_in={...},
+        ensure_settings=True,
+    )
 
     - user.users 생성 (user_in 안에 is_partner 포함 가능)
     - user.user_profiles (옵션)
@@ -166,6 +180,7 @@ def set_last_login(
 ) -> None:
     """
     마지막 로그인 시각 업데이트.
+    account_service.login 에서 호출.
     """
     at = at or datetime.now(timezone.utc)
     stmt = (
@@ -175,7 +190,6 @@ def set_last_login(
     )
     db.execute(stmt)
     db.commit()
-
 
 
 # =============================================================================
@@ -275,6 +289,7 @@ def list_login_sessions(
     """
     로그인 세션 목록.
     - only_current=True  → is_current = true만
+    - endpoints 에서는 현재 사용자 기준 + 최근 50개 조회에 사용
     """
     if page < 1:
         page = 1
@@ -372,7 +387,6 @@ def close_all_sessions_for_user(
     )
     db.execute(stmt)
     db.commit()
-
 
 
 # =============================================================================

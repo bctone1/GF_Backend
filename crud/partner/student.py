@@ -1,6 +1,6 @@
 # crud/partner/student.py
 from __future__ import annotations
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence, Tuple,Any
 from datetime import datetime, timezone
 
 from sqlalchemy import select, update, delete, func
@@ -24,22 +24,22 @@ class EnrollmentConflict(EnrollmentError): ...
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
-
-# ============================================
-#                Student CRUD
-# ============================================
+# ========= Student CRUD =========
 def create_student(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     full_name: str,
     email: Optional[str] = None,
     status: str = "active",
     primary_contact: Optional[str] = None,
     notes: Optional[str] = None,
 ) -> Student:
+    """
+    org 내 email이 not null이면 유일.
+    """
     obj = Student(
-        partner_id=partner_id,
+        org_id=org_id,
         full_name=full_name,
         email=email,
         status=status,
@@ -51,7 +51,8 @@ def create_student(
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        raise StudentConflict("duplicate email within partner") from e
+        # UNIQUE (org_id, email) 위반 등
+        raise StudentConflict("duplicate email within org") from e
     db.refresh(obj)
     return obj
 
@@ -60,11 +61,16 @@ def get_student(db: Session, student_id: int) -> Optional[Student]:
     return db.get(Student, student_id)
 
 
-def get_student_by_email(db: Session, *, partner_id: int, email: str) -> Optional[Student]:
+def get_student_by_email(
+    db: Session,
+    *,
+    org_id: int,
+    email: str,
+) -> Optional[Student]:
     stmt = (
         select(Student)
         .where(
-            Student.partner_id == partner_id,
+            Student.org_id == org_id,
             func.lower(Student.email) == func.lower(email),
         )
         .limit(1)
@@ -72,24 +78,21 @@ def get_student_by_email(db: Session, *, partner_id: int, email: str) -> Optiona
     return db.execute(stmt).scalar_one_or_none()
 
 
+
 def list_students(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     status: Optional[str] = None,
-    q: Optional[str] = None,
+    q: Optional[str] = None,  # name/email/연락처 검색
     limit: int = 200,
     offset: int = 0,
 ) -> Sequence[Student]:
-    stmt = (
-        select(Student)
-        .where(Student.partner_id == partner_id)
-        .order_by(Student.joined_at.desc())
-        .limit(limit)
-        .offset(offset)
-    )
+    stmt = select(Student).where(Student.org_id == org_id)
+
     if status:
         stmt = stmt.where(Student.status == status)
+
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
@@ -97,6 +100,12 @@ def list_students(
             | (Student.email.isnot(None) & Student.email.ilike(like))
             | (Student.primary_contact.isnot(None) & Student.primary_contact.ilike(like))
         )
+
+    stmt = (
+        stmt.order_by(Student.joined_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     return db.execute(stmt).scalars().all()
 
 
@@ -136,40 +145,36 @@ def delete_student(db: Session, student_id: int) -> bool:
 def ensure_student(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     email: Optional[str],
     full_name: str,
     primary_contact: Optional[str] = None,
 ) -> Student:
     """
-    email 있으면 멱등 조회·생성 / 없으면 무조건 새로 생성
+    email이 있으면 org 내 멱등 생성/조회. 없으면 무조건 생성.
     """
     if email:
-        found = get_student_by_email(db, partner_id=partner_id, email=email)
+        found = get_student_by_email(db, org_id=org_id, email=email)
         if found:
-            changed = {}
+            changed: dict[str, Any] = {}
             if not found.full_name and full_name:
                 changed["full_name"] = full_name
             if primary_contact and found.primary_contact != primary_contact:
                 changed["primary_contact"] = primary_contact
-
             if changed:
                 return update_student(db, found.id, **changed) or found
-
             return found
 
     return create_student(
         db,
-        partner_id=partner_id,
+        org_id=org_id,
         full_name=full_name,
         email=email,
         primary_contact=primary_contact,
     )
 
 
-# ============================================
-#              Enrollment CRUD
-# ============================================
+# ========= Enrollment CRUD =========
 def enroll_student(
     db: Session,
     *,
@@ -293,9 +298,7 @@ def delete_enrollment(db: Session, enrollment_id: int) -> bool:
     return res.rowcount > 0
 
 
-# ============================================
-#        Convenience: invite-based join
-# ============================================
+# ========= 편의: invite-based join =========
 def ensure_enrollment_by_email(
     db: Session,
     *,
@@ -324,7 +327,7 @@ def ensure_enrollment_by_email(
 def ensure_enrollment_for_invite(
     db: Session,
     *,
-    partner_id: int,
+    org_id: int,
     class_id: int,
     invite_code_id: int,
     email: Optional[str],
@@ -332,17 +335,22 @@ def ensure_enrollment_for_invite(
     primary_contact: Optional[str] = None,
 ) -> Tuple[Student, Enrollment]:
     """
-    초대코드 redeem 시 호출되는 표준 헬퍼.
-    """
+    학생 초대코드 redeem 시에 사용하는 헬퍼.
 
+    1) org_id + email 기준으로 Student 멱등 생성/조회
+    2) 해당 학생을 class_id에 멱등 수강 등록
+    3) Enrollment.invite_code_id 세팅 (기존 등록이 있으면 필요 시만 업데이트)
+    """
+    # 1) 학생 보장
     student = ensure_student(
         db,
-        partner_id=partner_id,
+        org_id=org_id,
         email=email,
         full_name=full_name,
         primary_contact=primary_contact,
     )
 
+    # 2) 기존 수강 여부 확인
     existing = find_enrollment(db, class_id=class_id, student_id=student.id)
     if existing:
         updates = {}
@@ -354,7 +362,7 @@ def ensure_enrollment_for_invite(
 
         return student, existing
 
-    # 새로 수강 등록
+    # 3) 새로 수강 등록
     enrollment = enroll_student(
         db,
         class_id=class_id,
@@ -363,3 +371,4 @@ def ensure_enrollment_for_invite(
         status="active",
     )
     return student, enrollment
+

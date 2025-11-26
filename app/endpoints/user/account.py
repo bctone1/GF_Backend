@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
 
 from core.deps import get_db, get_current_user
 from core.security import (
@@ -19,21 +19,38 @@ from core.security import (
 )
 
 from crud.user import account as user_crud
-from models.user.account import AppUser
-from schemas.user.account import (
-    LoginInput, AuthTokens, UserCreate, UserUpdate,
-    UserResponse, UserProfileUpdate, UserProfileResponse, UserSecuritySettingUpdate,
-    UserSecuritySettingResponse, UserPrivacySettingUpdate,
-    UserPrivacySettingResponse,  UserLoginSessionResponse,
-    EmailCodeSendRequest, EmailCodeSendResponse,
-    EmailCodeVerifyRequest, EmailCodeVerifyResponse, PartnerPromotionRequestCreate, PartnerPromotionRequestResponse
-)
-
+from crud.partner import student as student_crud
+from crud.partner import course as course_crud
 from service.user import account_service
-from service.email import send_email, EmailSendError
+
+from models.user.account import AppUser
 from models.supervisor.core import PartnerPromotionRequest
 
+from schemas.user.account import (
+    LoginInput,
+    AuthTokens,
+    UserCreate,
+    UserUpdate,
+    UserResponse,
+    UserProfileUpdate,
+    UserProfileResponse,
+    UserSecuritySettingUpdate,
+    UserSecuritySettingResponse,
+    UserPrivacySettingUpdate,
+    UserPrivacySettingResponse,
+    UserLoginSessionResponse,
+    EmailCodeSendRequest,
+    EmailCodeSendResponse,
+    EmailCodeVerifyRequest,
+    EmailCodeVerifyResponse,
+    PartnerPromotionRequestCreate,
+    PartnerPromotionRequestResponse,
+)
+from schemas.partner.student import EnrollmentResponse
+
+
 router = APIRouter()
+
 
 # ==============================
 # Auth: 이메일 코드 발송 / 인증
@@ -45,8 +62,9 @@ def send_email_code(
     """
     회원가입 전 이메일 인증코드 발송.
     - DB 저장 없이, email/code/exp 를 서명한 verification_token 으로만 관리
-    - 실제 메일은 service.email.send_email 사용
     """
+    from service.email import send_email, EmailSendError
+
     email = payload.email.strip()
 
     # 6자리 숫자 코드 생성
@@ -58,10 +76,8 @@ def send_email_code(
         "code": code,
         "exp": int(expires_at.timestamp()),
     }
-    # email + code + exp 를 서명해서 프론트에 전달
     verification_token = sign_payload(data)
 
-    # 실제 메일 발송
     subject = "[GrowFit] 이메일 인증 코드"
     body = (
         f"GrowFit 회원가입 이메일 인증 코드입니다.\n\n"
@@ -78,7 +94,6 @@ def send_email_code(
             is_html=False,
         )
     except EmailSendError as e:
-        # 메일 전송 실패 시 에러 반환
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="failed to send verification email",
@@ -95,7 +110,6 @@ def verify_email_code(
     이메일 + 코드 + verification_token 을 받아서 검증.
     성공 시 회원가입에서 사용할 email_verified_token 발급.
     """
-    # 서명/위변조/만료 검증
     try:
         data = verify_signed_payload(payload.verification_token)
     except Exception:
@@ -114,7 +128,6 @@ def verify_email_code(
     if data.get("exp", 0) < now_ts:
         raise HTTPException(status_code=400, detail="code expired")
 
-    # 이 시점에서 "이 이메일은 인증됨" 이라는 토큰 발급 (회원가입에서 사용)
     email_verified_token = sign_payload(
         {
             "email": payload.email,
@@ -136,15 +149,11 @@ def user_signup(
 ):
     """
     기본 사용자 회원가입.
-    - 공개 회원가입에서는 is_partner 는 무시 (True 입력해도 False로 뱉음)
-    - 실제 생성은 service.user.account_service.signup 에 위임
+    - 공개 회원가입에서는 is_partner 는 무시
     """
-    # 혹시라도 클라이언트가 is_partner 를 넣어 보내도 무시
-    # (파트너 승격은 supervisor 플로우에서만 처리)
     if hasattr(payload, "is_partner"):
         payload.is_partner = None
 
-    # 이메일 인증 토큰 검증 로직은 주석으로 보류 중
     return account_service.signup(db, payload)
 
 
@@ -156,7 +165,6 @@ def user_login(
 ):
     """
     이메일/비밀번호 기반 로그인.
-    - 실제 로직은 service.user.account_service.login 에 위임
     """
     client = request.client
     meta = {
@@ -175,9 +183,6 @@ def user_login(
 def get_my_account(
     me: AppUser = Depends(get_current_user),
 ) -> UserResponse:
-    """
-    현재 로그인한 사용자 기본 정보.
-    """
     return UserResponse.model_validate(me)
 
 
@@ -187,20 +192,12 @@ def update_my_account(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ) -> UserResponse:
-    """
-    내 계정 정보 수정.
-    - email 변경
-    - password 변경 시 해시 재계산
-    - status/default_role/is_partner 는 자기 계정에서 수정하지 않도록 무시
-    """
     data = payload.model_dump(exclude_unset=True)
 
-    # 비밀번호는 hash 로 변환해서 저장
     if "password" in data:
         new_password = data.pop("password")
         data["password_hash"] = hash_password(new_password)
 
-    # 자기 계정에서는 status/default_role/is_partner 수정하지 않도록 제거
     data.pop("status", None)
     data.pop("default_role", None)
     data.pop("is_partner", None)
@@ -295,10 +292,6 @@ def list_my_login_sessions(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    현재 사용자 로그인 세션 목록 (최근 순, 상위 50개).
-    Page 스키마를 따로 만들지 않고 단순 리스트로 반환.
-    """
     rows, _ = user_crud.list_login_sessions(
         db,
         user_id=me.user_id,
@@ -309,9 +302,9 @@ def list_my_login_sessions(
     return [UserLoginSessionResponse.model_validate(r) for r in rows]
 
 
-# =========================================
+# ==============================
 # Partner / Instructor 승격 요청 생성
-# =========================================
+# ==============================
 @router.post(
     "/partner-promotion-requests",
     response_model=PartnerPromotionRequestResponse,
@@ -320,16 +313,14 @@ def list_my_login_sessions(
 def create_partner_promotion_request(
     payload: PartnerPromotionRequestCreate,
     db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),  # 여기서 user_id만 가져옴
+    me: AppUser = Depends(get_current_user),
 ):
-    # 이미 파트너면 추가 승격 요청은 불필요
     if getattr(me, "is_partner", False):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="already_partner",
         )
 
-    # 1) 이미 pending 상태의 요청이 있는지 체크 (user_id 기준)
     existing = (
         db.execute(
             select(PartnerPromotionRequest).where(
@@ -346,11 +337,10 @@ def create_partner_promotion_request(
             detail="already_pending_promotion_request",
         )
 
-    # 2) 새 요청 레코드 생성
     obj = PartnerPromotionRequest(
-        user_id=me.user_id,           # 누가 신청했는지는 로그인 유저 기준
-        name=payload.name,            # 폼에서 입력한 이름
-        email=payload.email,          # 폼에서 입력한 이메일
+        user_id=me.user_id,
+        name=payload.name,
+        email=payload.email,
         org_name=payload.org_name,
         edu_category=payload.edu_category,
         target_role=payload.target_role,
@@ -368,3 +358,98 @@ def create_partner_promotion_request(
 
     db.refresh(obj)
     return obj
+# ==============================
+# Class: 클래스 초대코드 redeem
+# ==============================
+class InviteRedeemRequest(BaseModel):
+    """
+    로그인 후, 클래스 초대코드(6자리)만 입력하는 요청 스키마.
+    - code: 클래스 초대코드
+    - 학생 정보(이름/이메일/연락처)는 로그인 계정/프로필에서 가져옴
+    """
+    code: str
+
+
+@router.post(
+    "/class/invites/redeem",
+    response_model=EnrollmentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def redeem_invite_code(
+    payload: InviteRedeemRequest,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),  # 반드시 로그인 후 사용
+):
+    """
+    클래스 초대코드(6자리)로:
+    - (로그인한 유저 정보 기준으로) 학생 생성/조회
+    - 수강 등록(enrollment) 생성 (멱등)
+    - 초대코드 used 처리
+    - 잘못된/만료 코드 처리
+    - 동일 학생 중복 등록 방지
+    """
+    # 1) 코드 정규화
+    code = payload.code.strip().upper()
+    if len(code) != 6:
+        raise HTTPException(status_code=400, detail="invalid_code_format")
+
+    # 2) 초대코드 조회 + 유효성 검사
+    invite = course_crud.get_invite_for_redeem(db, code=code)
+    if not invite:
+        raise HTTPException(status_code=400, detail="invalid_or_expired_code")
+
+    # 2-1) class / course / org_id 계산
+    class_obj = course_crud.get_class(db, invite.class_id)
+    if not class_obj:
+        raise HTTPException(status_code=400, detail="class_not_found")
+
+    if not getattr(class_obj, "course_id", None):
+        # standalone class 지원 안 하면 이렇게 막아두면 됨
+        raise HTTPException(status_code=400, detail="class_not_bound_to_course")
+
+    course = course_crud.get_course(db, class_obj.course_id)
+    if not course:
+        raise HTTPException(status_code=400, detail="course_not_found")
+
+    org_id = course.org_id
+
+    # 3) Student 용 이메일/이름/연락처 결정
+    student_email = me.email
+    if not student_email:
+        raise HTTPException(status_code=400, detail="email_required")
+
+    profile = user_crud.get_profile(db, me.user_id)
+
+    student_full_name = (
+        (profile.full_name if profile else None)
+        or getattr(me, "full_name", None)
+        or student_email
+    )
+
+    primary_contact = (
+        profile.phone_number
+        if profile and getattr(profile, "phone_number", None)
+        else None
+    )
+
+    # 4) 학생 생성/조회 + 수강등록 멱등 처리
+    student, enrollment = student_crud.ensure_enrollment_for_invite(
+        db,
+        org_id=org_id,
+        class_id=invite.class_id,
+        invite_code_id=invite.id,
+        email=student_email,
+        full_name=student_full_name,
+        primary_contact=primary_contact,
+    )
+
+    # 5) 초대코드 사용 처리
+    course_crud.mark_invite_used(
+        db,
+        invite_id=invite.id,
+        student_id=student.id,
+    )
+
+    return enrollment
+
+

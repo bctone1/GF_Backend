@@ -262,7 +262,6 @@ def delete_class(db: Session, class_id: int) -> bool:
     db.commit()
     return res.rowcount > 0
 
-
 # ==============================
 # InviteCode
 # ==============================
@@ -296,7 +295,7 @@ def create_invite_code(
 ) -> InviteCode:
     """
     partner.invite_codes 생성.
-    - target_role 은 현재 'student' 만 허용 (CheckConstraint 와 동일)
+    - target_role 은 현재 'student' 만 허용
     - class_id 는 NOT NULL 이므로 None 이면 에러.
     """
     if target_role != "student":
@@ -320,3 +319,86 @@ def create_invite_code(
     db.commit()
     db.refresh(obj)
     return obj
+
+
+# ------------------------------
+# 초대코드 redeem 전용 헬퍼
+# ------------------------------
+def get_invite_for_redeem(db: Session, *, code: str) -> Optional[InviteCode]:
+    """
+    초대코드 입력 화면에서 사용할 수 있는 유효한 InviteCode 조회.
+
+    조건:
+    - code 일치
+    - status = 'active'
+    - (expires_at 가 있으면) 아직 만료 전
+    - (max_uses 가 있으면) used_count < max_uses
+    """
+    invite = get_invite_code(db, code)
+    if not invite:
+        return None
+
+    now = datetime.utcnow()
+
+    # 상태 체크
+    if getattr(invite, "status", None) != "active":
+        return None
+
+    # 만료일 체크
+    expires_at = getattr(invite, "expires_at", None)
+    if expires_at is not None and expires_at < now:
+        return None
+
+    # 사용 횟수 체크 (모델에 used_count 가 있다고 가정)
+    max_uses = getattr(invite, "max_uses", None)
+    used_count = getattr(invite, "used_count", None)
+    if max_uses is not None and used_count is not None and used_count >= max_uses:
+        return None
+
+    return invite
+
+
+def mark_invite_used(
+    db: Session,
+    *,
+    invite_id: int,
+    student_id: Optional[int] = None,
+) -> Optional[InviteCode]:
+    """
+    초대코드 사용 처리.
+    - used_count 증가
+    - used_at 또는 last_used_at 갱신
+    - student_id 기록 가능하면 기록
+    - max_uses 에 도달하면 status 를 'used' 로 변경 (또는 그대로 두고 싶으면 조정)
+    """
+    invite = db.get(InviteCode, invite_id)
+    if not invite:
+        return None
+
+    now = datetime.utcnow()
+
+    # used_count 증가 (필드가 있다고 가정)
+    if hasattr(invite, "used_count"):
+        invite.used_count = (invite.used_count or 0) + 1
+
+    # 사용 시각 기록 (모델 필드명에 맞춰 하나만 써도 됨)
+    if hasattr(invite, "used_at"):
+        invite.used_at = now
+    if hasattr(invite, "last_used_at"):
+        invite.last_used_at = now
+
+    # 마지막 사용 학생 기록
+    if student_id is not None and hasattr(invite, "last_used_by_student_id"):
+        invite.last_used_by_student_id = student_id
+
+    # max_uses 도달 시 status 변경
+    max_uses = getattr(invite, "max_uses", None)
+    used_count = getattr(invite, "used_count", None)
+    if max_uses is not None and used_count is not None and used_count >= max_uses:
+        # 단일용 코드라면 'used' 로, 여러 번 쓰는 코드면 유지하고 싶으면 이 부분 조정
+        invite.status = "used"
+
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite
