@@ -16,9 +16,10 @@ class Student(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     # Partner(강사) 기준 학생
+    # DB에는 partner.students.partner_id -> partner.partners(id) FK 있음
+    # ORM 쪽에서는 단순 정수 컬럼로만 둔다 (NoReferencedTableError 회피용)
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partner_users.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -34,17 +35,15 @@ class Student(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('active','inactive','archived')", name="chk_students_status"),
-        # partner 단위 status 조회
         Index("idx_students_partner_status", "partner_id", "status"),
-        # partner 단위 email 조회
         Index("idx_students_partner_email", "partner_id", "email"),
+        # partner 내 이메일 단일, NULL 허용
         Index(
             "uq_students_partner_email_notnull",
             "partner_id", "email",
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
         ),
-
         {"schema": "partner"},
     )
 

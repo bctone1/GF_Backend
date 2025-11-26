@@ -358,6 +358,7 @@ def create_partner_promotion_request(
 
     db.refresh(obj)
     return obj
+
 # ==============================
 # Class: 클래스 초대코드 redeem
 # ==============================
@@ -382,7 +383,7 @@ def redeem_invite_code(
 ):
     """
     클래스 초대코드(6자리)로:
-    - (로그인한 유저 정보 기준으로) 학생 생성/조회
+    - (로그인한 유저 정보 기준으로) 학생 생성/조회 (partner 스코프)
     - 수강 등록(enrollment) 생성 (멱등)
     - 초대코드 used 처리
     - 잘못된/만료 코드 처리
@@ -398,20 +399,10 @@ def redeem_invite_code(
     if not invite:
         raise HTTPException(status_code=400, detail="invalid_or_expired_code")
 
-    # 2-1) class / course / org_id 계산
+    # (옵션) class 존재 여부 정도만 체크
     class_obj = course_crud.get_class(db, invite.class_id)
     if not class_obj:
         raise HTTPException(status_code=400, detail="class_not_found")
-
-    if not getattr(class_obj, "course_id", None):
-        # standalone class 지원 안 하면 이렇게 막아두면 됨
-        raise HTTPException(status_code=400, detail="class_not_bound_to_course")
-
-    course = course_crud.get_course(db, class_obj.course_id)
-    if not course:
-        raise HTTPException(status_code=400, detail="course_not_found")
-
-    org_id = course.org_id
 
     # 3) Student 용 이메일/이름/연락처 결정
     student_email = me.email
@@ -433,9 +424,10 @@ def redeem_invite_code(
     )
 
     # 4) 학생 생성/조회 + 수강등록 멱등 처리
+    #    Student.partner_id = invite.partner_id (초대코드 발급한 강사 기준 스코프)
     student, enrollment = student_crud.ensure_enrollment_for_invite(
         db,
-        org_id=org_id,
+        partner_id=invite.partner_id,
         class_id=invite.class_id,
         invite_code_id=invite.id,
         email=student_email,
