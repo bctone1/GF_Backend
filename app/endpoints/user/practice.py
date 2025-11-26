@@ -535,7 +535,7 @@ def delete_model_comparison(
     db.commit()
     return None
 
-
+## LLM  창에 입력 들어올때 쓰는 엔드포인트
 @router.post(
     "/sessions/{session_id}/chat",
     response_model=PracticeTurnResponse,
