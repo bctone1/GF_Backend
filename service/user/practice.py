@@ -21,20 +21,11 @@ from schemas.user.practice import (
     PracticeResponseCreate,
     ModelComparisonCreate,
 )
+from core import config
 from langchain_service.llm.setup import get_llm
+
 import time
 
-
-MODEL_PROVIDER_MAP: dict[str, str] = {
-    # LG / EXAONE
-    "exaone-4.0": "lg",
-    # OpenAI
-    "gpt-4o-mini": "openai",
-    # Anthropic
-    "claude-3.7-haiku": "anthropic",
-    # Google / Gemini
-    "gemini-2.5-flash": "google",
-}
 
 # =========================================
 # 세션 내 primary 모델 변경
@@ -130,35 +121,29 @@ def _call_llm_for_model(
 ) -> tuple[str, Dict[str, Any] | None, int | None]:
     """
     하나의 모델에 대해 LLM 호출을 수행.
-
-    - 현재 지원 모델:
-        exaone-4.0           (lg)
-        gpt-4o-mini          (openai)
-        claude-3.7-haiku     (anthropic)
-        gemini-2.5-flash     (google)
-
-    - 실제 프로바이더별 클라이언트 생성은 get_llm() 내부에서 처리:
-        provider = MODEL_PROVIDER_MAP[model_name]
-        → get_llm(...) 가 provider + model_name 기준으로 올바른 LLM 객체를 반환하도록 구현
-
-    여기서는:
-      1) 지원하지 않는 model_name이면 에러
-      2) get_llm(...)으로 LLM 생성
-      3) invoke 호출 + latency 측정
-      4) usage_metadata 있으면 token_usage 추출
+    - 프로바이더/모델 정보는 config.PRACTICE_MODELS 에서 가져옴.
     """
-    provider = MODEL_PROVIDER_MAP.get(model_name)
-    if provider is None:
-        raise ValueError(f"unsupported model_name: {model_name}")
+    model_conf = config.PRACTICE_MODELS.get(model_name)
+    if model_conf is None or not model_conf.get("enabled", True):
+        raise ValueError(f"unsupported or disabled model_name: {model_name}")
 
-    # get_llm 시그니처는 프로젝트에 맞게 맞춰 쓰면 됨.
-    # 예: get_llm(provider=provider, model=model_name, streaming=False, callbacks=None)
-    # 지금 단계에서는 provider 인자를 안 쓰고 model_name만 넘겨도 됨.
+    provider = model_conf["provider"]
+    real_model_name = model_conf["model_name"]
+
+    # get_llm provider 여부에 따라 선택 (없으면 모델만 받아도됨)
+    # 1) provider 지원 버전
+    # llm = get_llm(
+    #     provider=provider,
+    #     model=real_model_name,
+    #     streaming=False,
+    #     callbacks=None,
+    # )
+
+    # 2) 아직 provider 인자 없이 model만 받는 버전:
     llm = get_llm(
-        model=model_name,
+        model=real_model_name,
         streaming=False,
         callbacks=None,
-        # provider=provider,  # get_llm에 provider 인자를 추가했다면 이렇게 넘기면 됨
     )
 
     start = time.perf_counter()

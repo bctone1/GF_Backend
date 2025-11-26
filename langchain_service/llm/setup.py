@@ -1,11 +1,25 @@
 # langchain_service/llm/setup.py
 import os
+from typing import Any, Optional
+
 from langchain_openai import ChatOpenAI
 import core.config as config
-from pydantic import SecretStr
+from pydantic import SecretStr  # 아직은 안씀 추후 사용
+
+# 선택적으로 Anthropic / Google 지원
+try:
+    from langchain_anthropic import ChatAnthropic
+except ImportError:  # 라이브러리 없으면 None으로 두고 런타임에 에러 안내
+    ChatAnthropic = None  # type: ignore
+
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except ImportError:
+    ChatGoogleGenerativeAI = None  # type: ignore
 
 
-def _pick_key(*candidates):
+
+def _pick_key(*candidates: Optional[str]) -> Optional[str]:
     for key in candidates:
         if key:
             return key
@@ -13,15 +27,31 @@ def _pick_key(*candidates):
 
 
 def get_llm(
-    provider: str = "openai",
+    provider: str | None = None,
     model: str | None = None,
     api_key: str | None = None,
     temperature: float = 0.7,
-    **kwargs,
+    **kwargs: Any,
 ):
     """
     LLM 인스턴스 생성기. streaming=True 전달 시 스트리밍 가능.
+
+    지원 provider 예시:
+      - "openai"        : gpt-4o-mini 등
+      - "lg" / "friendli" / "exaone" : exaone-4.0 (Friendli OpenAI 호환)
+      - "anthropic"     : claude-3.7-haiku 등
+      - "google"        : gemini-2.5-flash 등
     """
+    # 기본값은 config.LLM_PROVIDER (없으면 openai)
+    provider = (provider or getattr(config, "LLM_PROVIDER", "openai")).lower()
+
+    # 공통 default model (없을 때만 사용)
+    default_chat_model = getattr(config, "DEFAULT_CHAT_MODEL", "gpt-4o-mini")
+    default_llm_model = getattr(config, "LLM_MODEL", default_chat_model)
+
+    # -------------------------
+    # OpenAI 계열 (gpt-4o-mini 등)
+    # -------------------------
     if provider == "openai":
         key = _pick_key(
             api_key,
@@ -31,14 +61,19 @@ def get_llm(
         )
         if not key:
             raise RuntimeError("OPENAI_API 키가 설정되지 않았습니다.")
+
+        use_model = model or default_llm_model
         return ChatOpenAI(
-            model=model or config.DEFAULT_CHAT_MODEL,
+            model=use_model,
             api_key=key,
             temperature=temperature,
             **kwargs,
         )
 
-    elif provider in ("friendli", "lgai", "EXAONE"):
+    # -------------------------
+    # LG / Friendli / EXAONE (OpenAI 호환 엔드포인트)
+    # -------------------------
+    elif provider in ("friendli", "lg", "lgai", "exaone", "EXAONE"):
         key = _pick_key(
             api_key,
             getattr(config, "FRIENDLI_API", None),
@@ -47,24 +82,113 @@ def get_llm(
             os.getenv("FRIENDLI_TOKEN"),
         )
         if not key:
-            raise RuntimeError("Friendli API 키가 설정되지 않았습니다. FRIENDLI_API 또는 FRIENDLI_TOKEN을 설정하세요.")
+            raise RuntimeError(
+                "Friendli/EXAONE API 키가 설정되지 않았습니다. FRIENDLI_API 또는 FRIENDLI_TOKEN을 설정하세요."
+            )
+
+        # EXAONE은 Friendli OpenAI 호환 엔드포인트로 호출
+        base_url = getattr(config, "FRIENDLI_BASE_URL", None) or getattr(
+            config, "EXAONE_URL", None
+        )
+        use_model = model or default_llm_model  # 예: "exaone-4.0" 또는 endpoint_id
+
         return ChatOpenAI(
-            model=model or config.LLM_MODEL,   # endpoint_id
+            model=use_model,
             api_key=key,
-            base_url=config.FRIENDLI_BASE_URL,
+            base_url=base_url,
             temperature=temperature,
             **kwargs,
         )
 
+    # -------------------------
+    # Anthropic (Claude)
+    # -------------------------
+    elif provider in ("anthropic", "claude"):
+        if ChatAnthropic is None:
+            raise RuntimeError(
+                "Anthropic 사용을 위해서는 'langchain-anthropic' 패키지가 필요합니다."
+            )
+
+        key = _pick_key(
+            api_key,
+            getattr(config, "CLAUDE_API", None),
+            os.getenv("CLAUDE_API"),
+        )
+        if not key:
+            raise RuntimeError("CLAUDE_API(Anthropic) 키가 설정되지 않았습니다.")
+
+        # config.ANTHROPIC_MODELS가 있으면 첫 번째 모델을 기본값으로
+        anthropic_models = getattr(config, "ANTHROPIC_MODELS", "") or ""
+        default_anthropic_model = (
+            anthropic_models.split(",")[0].strip()
+            if anthropic_models
+            else "claude-3-5-sonnet-latest"
+        )
+        use_model = model or default_anthropic_model
+
+        return ChatAnthropic(
+            model=use_model,
+            api_key=key,
+            temperature=temperature,
+            **kwargs,
+        )
+
+    # -------------------------
+    # Google (Gemini)
+    # -------------------------
+    elif provider in ("google", "gemini"):
+        if ChatGoogleGenerativeAI is None:
+            raise RuntimeError(
+                "Google Gemini 사용을 위해서는 'langchain-google-genai' 패키지가 필요합니다."
+            )
+
+        key = _pick_key(
+            api_key,
+            getattr(config, "GOOGLE_API", None),
+            os.getenv("GOOGLE_API"),
+        )
+        if not key:
+            raise RuntimeError("GOOGLE_API(Gemini) 키가 설정되지 않았습니다.")
+
+        google_models = getattr(config, "GOOGLE_MODELS", "") or ""
+        default_google_model = (
+            google_models.split(",")[0].strip()
+            if google_models
+            else "gemini-2.5-flash"
+        )
+        use_model = model or default_google_model
+
+        return ChatGoogleGenerativeAI(
+            model=use_model,
+            api_key=key,
+            temperature=temperature,
+            **kwargs,
+        )
+
+    # -------------------------
+    # 미지원 provider
+    # -------------------------
     else:
         raise ValueError(f"지원되지 않는 제공자: {provider}")
 
 
 def get_backend_agent(
-    provider: str = "openai",
+    provider: str | None = None,
     model: str | None = None,
-    **kwargs,
+    **kwargs: Any,
 ):
+    """
+    백엔드용 Agent LLM.
+    - 기본적으로 get_llm()을 감싸되, 키 우선순위를 조금 다르게 가져갈 수 있음.
+    """
+    provider = (provider or getattr(config, "LLM_PROVIDER", "openai")).lower()
+
+    # 기본 backend 모델: 없으면 LLM_MODEL → DEFAULT_CHAT_MODEL 순서
+    default_chat_model = getattr(config, "DEFAULT_CHAT_MODEL", "gpt-4o-mini")
+    default_llm_model = getattr(config, "LLM_MODEL", default_chat_model)
+    use_model = model or default_llm_model
+
+    # OpenAI: EMBEDDING_API > OPENAI_API 순으로 키 선택
     if provider == "openai":
         key = _pick_key(
             getattr(config, "EMBEDDING_API", None),
@@ -73,22 +197,61 @@ def get_backend_agent(
         )
         if not key:
             raise RuntimeError("EMBEDDING_API/OPENAI_API 키가 설정되지 않았습니다.")
-        return ChatOpenAI(
-            model=model or config.FRIENDLI_MODELS,
+
+        return get_llm(
+            provider="openai",
+            model=use_model,
             api_key=key,
-            temperature=0.7,
             **kwargs,
         )
 
-    elif provider in ("friendli", "lgai"):
-        key = getattr(config, "FRIENDLI_API", None)
+    # Friendli / LG / EXAONE
+    elif provider in ("friendli", "lg", "lgai", "exaone", "EXAONE"):
+        key = _pick_key(
+            getattr(config, "FRIENDLI_API", None),
+            getattr(config, "FRIENDLI_TOKEN", None),
+            os.getenv("FRIENDLI_API"),
+            os.getenv("FRIENDLI_TOKEN"),
+        )
         if not key:
-            raise RuntimeError("FRIENDLI_API 키가 설정되지 않았습니다.")
-        return ChatOpenAI(
-            model=model or config.FRIENDLI_MODELS,
+            raise RuntimeError("FRIENDLI_API/FRIENDLI_TOKEN 키가 설정되지 않았습니다.")
+
+        return get_llm(
+            provider="friendli",
+            model=use_model,
             api_key=key,
-            base_url=config.FRIENDLI_BASE_URL,
-            temperature=0.7,
+            **kwargs,
+        )
+
+    # Anthropic
+    elif provider in ("anthropic", "claude"):
+        key = _pick_key(
+            getattr(config, "CLAUDE_API", None),
+            os.getenv("CLAUDE_API"),
+        )
+        if not key:
+            raise RuntimeError("CLAUDE_API(Anthropic) 키가 설정되지 않았습니다.")
+
+        return get_llm(
+            provider="anthropic",
+            model=use_model,
+            api_key=key,
+            **kwargs,
+        )
+
+    # Google (Gemini)
+    elif provider in ("google", "gemini"):
+        key = _pick_key(
+            getattr(config, "GOOGLE_API", None),
+            os.getenv("GOOGLE_API"),
+        )
+        if not key:
+            raise RuntimeError("GOOGLE_API(Gemini) 키가 설정되지 않았습니다.")
+
+        return get_llm(
+            provider="google",
+            model=use_model,
+            api_key=key,
             **kwargs,
         )
 

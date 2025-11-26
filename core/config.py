@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 import base64
+from typing import Literal, TypedDict
 
 # 0) .env 로드
 load_dotenv()
@@ -115,3 +116,40 @@ CLOVA_STT_PRICE_PER_UNIT_KRW = 1.6      # 15초당 4원
 FX_KRW_PER_USD = 1400                 # 원→달러 환산. 미사용 시 None
 
 DEFAULT_ORGANIZATION_ID = "1"
+
+# 13) 모델 프로바이더 매핑정의
+ProviderName = Literal["lg", "openai", "anthropic", "google"]
+class PracticeModelConfig(TypedDict):
+    provider: ProviderName
+    model_name: str          # 실제 API 모델명
+    display_name: str        # UI 표기용 (원하면)
+    enabled: bool            # 나중에 on/off 용도
+
+
+# 연습용 고정 모델 4개
+PRACTICE_MODELS: dict[str, PracticeModelConfig] = {
+    "exaone-4.0": {
+        "provider": "lg",
+        "model_name": "exaone-4.0",
+        "display_name": "EXAONE 4.0",
+        "enabled": True,
+    },
+    "gpt-4o-mini": {
+        "provider": "openai",
+        "model_name": "gpt-4o-mini",
+        "display_name": "GPT-4o mini",
+        "enabled": True,
+    },
+    "claude-3.7-haiku": {
+        "provider": "anthropic",
+        "model_name": "claude-3.7-haiku",
+        "display_name": "Claude 3.7 Haiku",
+        "enabled": True,
+    },
+    "gemini-2.5-flash": {
+        "provider": "google",
+        "model_name": "gemini-2.5-flash",
+        "display_name": "Gemini 2.5 Flash",
+        "enabled": True,
+    },
+}
