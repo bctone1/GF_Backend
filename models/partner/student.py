@@ -15,10 +15,10 @@ class Student(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # Org(기관) 기준 학생
-    org_id = Column(
+    # Partner(강사) 기준 학생
+    partner_id = Column(
         BigInteger,
-        ForeignKey("partner.org.id", ondelete="CASCADE"),
+        ForeignKey("partner.partner_users.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -34,18 +34,19 @@ class Student(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('active','inactive','archived')", name="chk_students_status"),
-        Index("idx_students_org_status", "org_id", "status"),
-        Index("idx_students_org_email", "org_id", "email"),
-        # org 내 이메일 단일, NULL 허용
+        # partner 단위 status 조회
+        Index("idx_students_partner_status", "partner_id", "status"),
+        # partner 단위 email 조회
+        Index("idx_students_partner_email", "partner_id", "email"),
         Index(
-            "uq_students_org_email_notnull",
-            "org_id", "email",
+            "uq_students_partner_email_notnull",
+            "partner_id", "email",
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
         ),
+
         {"schema": "partner"},
     )
-
 
 
 class Enrollment(Base):
