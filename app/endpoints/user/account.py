@@ -1,15 +1,12 @@
 # app/endpoints/user/account.py
 from __future__ import annotations
 
-from typing import Optional, Any
 from datetime import datetime, timedelta, timezone
 from random import randint
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel
 
 from core.deps import get_db, get_current_user
 from core.security import (
@@ -19,12 +16,9 @@ from core.security import (
 )
 
 from crud.user import account as user_crud
-from crud.partner import student as student_crud
-from crud.partner import course as course_crud
 from service.user import account_service
 
 from models.user.account import AppUser
-from models.supervisor.core import PartnerPromotionRequest
 
 from schemas.user.account import (
     LoginInput,
@@ -198,6 +192,7 @@ def update_my_account(
         new_password = data.pop("password")
         data["password_hash"] = hash_password(new_password)
 
+    # 클라이언트에서 민감 필드 변경 방지
     data.pop("status", None)
     data.pop("default_role", None)
     data.pop("is_partner", None)
@@ -315,49 +310,13 @@ def create_partner_promotion_request(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    if getattr(me, "is_partner", False):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="already_partner",
-        )
-
-    existing = (
-        db.execute(
-            select(PartnerPromotionRequest).where(
-                PartnerPromotionRequest.user_id == me.user_id,
-                PartnerPromotionRequest.status == "pending",
-            )
-        )
-        .scalars()
-        .first()
+    obj = account_service.create_partner_promotion_request(
+        db=db,
+        me=me,
+        payload=payload,
     )
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="already_pending_promotion_request",
-        )
+    return PartnerPromotionRequestResponse.model_validate(obj)
 
-    obj = PartnerPromotionRequest(
-        user_id=me.user_id,
-        name=payload.name,
-        email=payload.email,
-        org_name=payload.org_name,
-        edu_category=payload.edu_category,
-        target_role=payload.target_role,
-    )
-
-    db.add(obj)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="promotion_request_conflict",
-        )
-
-    db.refresh(obj)
-    return obj
 
 # ==============================
 # Class: 클래스 초대코드 redeem
@@ -381,67 +340,9 @@ def redeem_invite_code(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),  # 반드시 로그인 후 사용
 ):
-    """
-    클래스 초대코드(6자리)로:
-    - (로그인한 유저 정보 기준으로) 학생 생성/조회 (partner 스코프)
-    - 수강 등록(enrollment) 생성 (멱등)
-    - 초대코드 used 처리
-    - 잘못된/만료 코드 처리
-    - 동일 학생 중복 등록 방지
-    """
-    # 1) 코드 정규화
-    code = payload.code.strip().upper()
-    if len(code) != 6:
-        raise HTTPException(status_code=400, detail="invalid_code_format")
-
-    # 2) 초대코드 조회 + 유효성 검사
-    invite = course_crud.get_invite_for_redeem(db, code=code)
-    if not invite:
-        raise HTTPException(status_code=400, detail="invalid_or_expired_code")
-
-    # (옵션) class 존재 여부 정도만 체크
-    class_obj = course_crud.get_class(db, invite.class_id)
-    if not class_obj:
-        raise HTTPException(status_code=400, detail="class_not_found")
-
-    # 3) Student 용 이메일/이름/연락처 결정
-    student_email = me.email
-    if not student_email:
-        raise HTTPException(status_code=400, detail="email_required")
-
-    profile = user_crud.get_profile(db, me.user_id)
-
-    student_full_name = (
-        (profile.full_name if profile else None)
-        or getattr(me, "full_name", None)
-        or student_email
+    enrollment = account_service.redeem_class_invite_code(
+        db=db,
+        me=me,
+        raw_code=payload.code,
     )
-
-    primary_contact = (
-        profile.phone_number
-        if profile and getattr(profile, "phone_number", None)
-        else None
-    )
-
-    # 4) 학생 생성/조회 + 수강등록 멱등 처리
-    #    Student.partner_id = invite.partner_id (초대코드 발급한 강사 기준 스코프)
-    student, enrollment = student_crud.ensure_enrollment_for_invite(
-        db,
-        partner_id=invite.partner_id,
-        class_id=invite.class_id,
-        invite_code_id=invite.id,
-        email=student_email,
-        full_name=student_full_name,
-        primary_contact=primary_contact,
-    )
-
-    # 5) 초대코드 사용 처리
-    course_crud.mark_invite_used(
-        db,
-        invite_id=invite.id,
-        student_id=student.id,
-    )
-
-    return enrollment
-
-
+    return EnrollmentResponse.model_validate(enrollment)
