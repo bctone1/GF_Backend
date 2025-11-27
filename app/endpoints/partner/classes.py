@@ -16,7 +16,7 @@ from schemas.partner.classes import (
     InviteCodeResponse,
     InviteCodePage,
 )
-from crud.partner import course as crud_course
+
 from crud.partner import classes as crud_classes
 from service.partner import class_code as class_code_service
 from models.partner.course import Class  # partner_id 기준 리스트용
@@ -136,11 +136,11 @@ def update_class(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
-    obj = crud_course.get_class(db, class_id)
+    obj = crud_classes.get_class(db, class_id)
     if not obj or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    obj = crud_course.update_class(
+    obj = crud_classes.update_class(
         db,
         class_id=class_id,
         name=payload.name,
@@ -168,11 +168,11 @@ def delete_class(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
-    obj = crud_course.get_class(db, class_id)
+    obj = crud_classes.get_class(db, class_id)
     if not obj or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    ok = crud_course.delete_class(db, class_id)
+    ok = crud_classes.delete_class(db, class_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Class not found")
     return None
@@ -204,7 +204,7 @@ def list_class_invite_codes(
     - 권한: 현재 로그인한 partner 기준으로 class 소속 확인
     """
     # class 가 내 것인지 먼저 확인
-    klass = crud_course.get_class(db, class_id)
+    klass = crud_classes.get_class(db, class_id)
     if not klass or klass.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
