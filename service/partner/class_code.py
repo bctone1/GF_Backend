@@ -8,6 +8,7 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from crud.partner import course as course_crud
+from crud.partner import classes as classes_crud
 from models.partner.course import Class, InviteCode
 from schemas.partner.classes import ClassCreate
 from service.partner.invite import _generate_unique_code, InviteServiceError
@@ -38,7 +39,7 @@ def create_default_class_invite(
     code = _generate_unique_code(db)
 
     try:
-        invite = course_crud.create_invite_code(
+        invite = classes_crud.create_invite_code(
             db,
             partner_id=partner_id,
             code=code,
@@ -70,7 +71,7 @@ def create_class_with_default_invite(
     crud 레벨은 그대로 두고, 서비스에서 두 작업을 묶어준다.
     """
     # 1) 클래스 생성 (기존 crud 호출)
-    clazz = course_crud.create_class(
+    clazz = classes_crud.create_class(
         db,
         partner_id=partner_id,
         course_id=course_id,
