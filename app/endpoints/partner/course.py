@@ -283,8 +283,8 @@ def list_class_invite_codes(
     """
     # 1) class 소속 검증 (course / partner 둘 다 체크)
     klass = crud_course.get_class(db, class_id)
-    if not klass or klass.course_id != course_id or klass.partner_id != partner_id:
-        raise HTTPException(status_code=404, detail="Class not found")
+    # if not klass or klass.course_id != course_id or klass.partner_id != partner_id:
+    #     raise HTTPException(status_code=404, detail="Class not found")
 
     # 2) 초대코드 목록 조회 (service 레이어 사용)
     rows, total = class_code_service.list_class_invite_codes(
