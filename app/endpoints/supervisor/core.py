@@ -191,7 +191,7 @@ def bootstrap_roles(
 @router.post(
     "/users/{user_id}/roles/{role_name}",
     response_model=UserRoleAssignmentResponse,
-    summary="추후 기관 당",
+    summary="추후 기관 할당",
 )
 def assign_role_to_user(
     user_id: int,
