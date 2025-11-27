@@ -24,10 +24,11 @@ def get_course_by_course_key(db: Session, org_id: int, course_key: str) -> Optio
     )
     return db.execute(stmt).scalars().first()
 
+# crud/partner/course.py
 
 def list_courses(
     db: Session,
-    org_id: int,
+    org_id: Optional[int] = None,  # ← Optional 로 변경
     *,
     status: Optional[str] = None,
     search: Optional[str] = None,
@@ -35,14 +36,19 @@ def list_courses(
     offset: int = 0,
     order_desc: bool = True,
 ) -> Tuple[List[Course], int]:
-    conds = [Course.org_id == org_id]
+    conds = []
+    if org_id is not None:
+        conds.append(Course.org_id == org_id)
     if status:
         conds.append(Course.status == status)
     if search:
         like = f"%{search}%"
         conds.append(or_(Course.title.ilike(like), Course.course_key.ilike(like)))
 
-    base = select(Course).where(and_(*conds))
+    base = select(Course)
+    if conds:
+        base = base.where(and_(*conds))
+
     total = db.execute(
         select(func.count()).select_from(base.subquery())
     ).scalar() or 0
@@ -54,6 +60,7 @@ def list_courses(
 
     rows = db.execute(base.limit(limit).offset(offset)).scalars().all()
     return rows, total
+
 
 
 def create_course(

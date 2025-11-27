@@ -3,6 +3,7 @@ from fastapi import FastAPI
 
 # common
 # from app.endpoints.common.links import router as links
+from app.endpoints.common.course_public import router as common_course
 
 # supervisor
 from app.endpoints.supervisor.core import router as super_core
@@ -31,8 +32,9 @@ from app.endpoints.user.practice import router as practice
 
 
 def register_routers(app: FastAPI) -> None:
-
+    app.include_router(common_course, prefix="/course", tags=["유틸"])
     # app.include_router(links, prefix="/links", tags=["links"])
+
     # ==============================
     # Supervisor
     # ==============================

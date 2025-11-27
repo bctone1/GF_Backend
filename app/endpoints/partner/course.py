@@ -11,9 +11,10 @@ from schemas.partner.course import (
     CourseCreate,
     CourseUpdate,
     CourseResponse,
-    CoursePage,
+    CoursePage, CourseTitle,
 )
 from crud.partner import course as crud_course
+from models.partner.partner_core import Partner
 
 router = APIRouter()
 
@@ -28,10 +29,13 @@ def list_courses(
     search: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-    _=Depends(get_current_partner_user),
+    current_partner: Partner = Depends(get_current_partner_user),
 ):
+    org_id = current_partner.org_id
+
     rows, total = crud_course.list_courses(
         db=db,
+        org_id=org_id,
         status=status,
         search=search,
         limit=limit,

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional, List
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, BaseModel
 
 from schemas.base import ORMBase, Page
 from schemas.enums import CourseStatus
@@ -59,6 +59,11 @@ class CourseResponse(CourseBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CourseTitle(CourseBase):
+    # id: int
+    title: str
 
 
 class CoursePage(Page[CourseResponse]):

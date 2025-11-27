@@ -13,7 +13,7 @@ from core.config import DB, DB_USER, DB_PASSWORD, DB_SERVER, DB_PORT, DB_NAME
 
 # user/partner 인증에 사용
 from models.user.account import AppUser
-from models.partner.partner_core import Partner  # 파트너 권한 확인 (PartnerUser → Partner로 변경)
+from models.partner.partner_core import Partner
 
 # supervisor 인증·권한에 사용
 from models.supervisor.core import (
