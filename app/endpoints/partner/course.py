@@ -260,7 +260,7 @@ def delete_class(
 # ==============================
 @router.get(
     "/{course_id}/classes/{class_id}/invite-codes",
-    response_model=InviteCodePage,
+    response_model=InviteCodePage,summary="초대코드조회"
 )
 def list_class_invite_codes(
     partner_id: int,
