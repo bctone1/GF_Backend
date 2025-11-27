@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from models.base import Base
-
+from models.partner.partner_core import Partner
 
 # ========== partner.comparison_runs ==========
 class ComparisonRun(Base):
@@ -16,7 +16,7 @@ class ComparisonRun(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
     student_id = Column(BigInteger, ForeignKey("partner.students.id", ondelete="SET NULL"), nullable=True)
-    initiated_by = Column(BigInteger, ForeignKey("partner.partner.id", ondelete="SET NULL"), nullable=True)
+    initiated_by = Column(BigInteger, ForeignKey("partner.partners.id", ondelete="SET NULL"), nullable=True)
 
     status = Column(Text, nullable=False, server_default=text("'running'"))  # running|completed|failed|canceled
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
