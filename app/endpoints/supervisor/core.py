@@ -69,6 +69,7 @@ def get_partner_promotion_request(
 @router.post(
     "/promotions/partner-requests/{request_id}/approve",
     response_model=PartnerPromotionRequestResponse,
+    summary="강사 요청 승인",
 )
 def approve_partner_promotion_request(
     request_id: int,
@@ -96,6 +97,7 @@ def approve_partner_promotion_request(
 @router.post(
     "/promotions/partner-requests/{request_id}/reject",
     response_model=PartnerPromotionRequestResponse,
+    summary="강사 요청 거절",
 )
 def reject_partner_promotion_request(
     request_id: int,
@@ -115,7 +117,12 @@ def reject_partner_promotion_request(
 # ==============================
 # Supervisor Users
 # ==============================
-@router.post("/users", response_model=SupervisorUserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/users",
+    response_model=SupervisorUserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="슈바 생성(필요없을듯)",
+)
 def create_supervisor_user(
     data: SupervisorUserCreate,
     db: Session = Depends(get_db),
@@ -151,7 +158,12 @@ def get_supervisor_user_by_email(
 # ==============================
 # Roles
 # ==============================
-@router.post("/roles", response_model=UserRoleResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/roles",
+    response_model=UserRoleResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="역할 생성",
+)
 def create_role(
     data: UserRoleCreate,
     db: Session = Depends(get_db),
@@ -164,7 +176,11 @@ def create_role(
     return role
 
 
-@router.post("/roles/bootstrap", response_model=List[UserRoleResponse])
+@router.post(
+    "/roles/bootstrap",
+    response_model=List[UserRoleResponse],
+    summary="기본 역할 초기화",
+)
 def bootstrap_roles(
     db: Session = Depends(get_db),
     # _ = Depends(require_supervisor_admin),
@@ -172,7 +188,11 @@ def bootstrap_roles(
     return list(super_crud.bootstrap_default_roles(db))
 
 
-@router.post("/users/{user_id}/roles/{role_name}", response_model=UserRoleAssignmentResponse)
+@router.post(
+    "/users/{user_id}/roles/{role_name}",
+    response_model=UserRoleAssignmentResponse,
+    summary="추후 기관 당",
+)
 def assign_role_to_user(
     user_id: int,
     role_name: str,
