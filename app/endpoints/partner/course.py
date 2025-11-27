@@ -264,7 +264,7 @@ def delete_class(
 )
 def list_class_invite_codes(
     partner_id: int,
-    course_id: int,
+    # course_id: int,
     class_id: int,
     db: Session = Depends(get_db),
     active_only: Optional[bool] = Query(
