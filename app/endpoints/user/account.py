@@ -49,7 +49,11 @@ router = APIRouter()
 # ==============================
 # Auth: 이메일 코드 발송 / 인증
 # ==============================
-@router.post("/user/email/send-code", response_model=EmailCodeSendResponse)
+@router.post(
+    "/user/email/send-code",
+    response_model=EmailCodeSendResponse,
+    summary="가입 전 인증 코드 발송",
+)
 def send_email_code(
     payload: EmailCodeSendRequest,
 ):
@@ -96,7 +100,11 @@ def send_email_code(
     return EmailCodeSendResponse(email=email, verification_token=verification_token)
 
 
-@router.post("/user/email/verify-code", response_model=EmailCodeVerifyResponse)
+@router.post(
+    "/user/email/verify-code",
+    response_model=EmailCodeVerifyResponse,
+    summary="이메일 코드 인증",
+)
 def verify_email_code(
     payload: EmailCodeVerifyRequest,
 ):
@@ -136,7 +144,12 @@ def verify_email_code(
 # ==============================
 # Auth: signup / login
 # ==============================
-@router.post("/user/signup", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/user/signup",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="회원가입",
+)
 def user_signup(
     payload: UserCreate,
     db: Session = Depends(get_db),
@@ -148,7 +161,11 @@ def user_signup(
     return account_service.signup(db, payload)
 
 
-@router.post("/user/login", response_model=AuthTokens)
+@router.post(
+    "/user/login",
+    response_model=AuthTokens,
+    summary="이메일/비밀번호 로그인",
+)
 def user_login(
     payload: LoginInput,
     request: Request,
@@ -301,6 +318,7 @@ def list_my_login_sessions(
     "/partner-promotion-requests",
     response_model=PartnerPromotionRequestResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="강사 권한 요청",
 )
 def create_partner_promotion_request(
     payload: PartnerPromotionRequestCreate,
@@ -331,6 +349,7 @@ class InviteRedeemRequest(BaseModel):
     "/class/invites/redeem",
     response_model=EnrollmentResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="초대코드 수강 등록",
 )
 def redeem_invite_code(
     payload: InviteRedeemRequest,
