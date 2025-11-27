@@ -1,6 +1,6 @@
 # models/user/account.py
 from sqlalchemy import (
-    Column, BigInteger, Text, Boolean, DateTime, BigInteger, UniqueConstraint,
+    Column, BigInteger, Text, Boolean, DateTime, UniqueConstraint,
     ForeignKey, Index, CheckConstraint, text
 )
 from sqlalchemy.sql import func
@@ -17,8 +17,12 @@ class AppUser(Base):
     email = Column(CITEXT, nullable=False, unique=True)
     password_hash = Column(Text, nullable=False)
 
-    # 한 번 승격되면 true 로 유지되는 강사 여부 플래그
-    is_partner = Column(Boolean, nullable=False, server_default=text("false"))
+    # 강사(파트너) 엔터티 ID, 강사가 아니면 NULL
+    partner_id = Column(
+        BigInteger,
+        ForeignKey("partner.partners.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     status = Column(Text, nullable=False, server_default=text("'active'"))
     last_login_at = Column(DateTime(timezone=True), nullable=True)
@@ -31,7 +35,8 @@ class AppUser(Base):
 
     __table_args__ = (
         Index("idx_users_status_created", "status", "created_at"),
-        Index("idx_users_is_partner_created", "is_partner", "created_at"),
+        # 파트너(강사) 기준 조회/통계를 위한 인덱스
+        Index("idx_users_partner_created", "partner_id", "created_at"),
         {"schema": "user"},
     )
 

@@ -20,7 +20,7 @@ from models.supervisor.core import (
     PartnerPromotionRequest,
 )
 from models.user.account import AppUser, UserProfile
-from models.partner.partner_core import Org, PartnerUser
+from models.partner.partner_core import Org, Partner as PartnerUser
 
 # ==============================
 # helpers

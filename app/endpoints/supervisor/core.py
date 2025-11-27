@@ -29,7 +29,7 @@ router = APIRouter()
 # ==============================
 class PromotionDecision(BaseModel):
     """
-    partner 로 받을 시 승격
+    target_role 이 'partner' 이면 강사, 'assistant' 이면 조교 등으로 승격.
     """
     target_role: Optional[str] = None
 
@@ -78,8 +78,11 @@ def approve_partner_promotion_request(
 ):
     """
     승격 요청 승인
-    - is_partner = true
-    - partner/partner_user 생성(또는 재사용)
+
+    - Org 결정/생성
+    - partner.partners 에 Partner 엔터티 생성
+    - user.users.partner_id 에 Partner.id 세팅
+    - user.default_role 을 target_role 기준으로 업데이트
     - 요청 status = approved 로 변경
     """
     req = promotion_service.approve_partner_request(
@@ -109,7 +112,6 @@ def reject_partner_promotion_request(
     return req
 
 
-
 # ==============================
 # Supervisor Users
 # ==============================
@@ -119,9 +121,10 @@ def create_supervisor_user(
     db: Session = Depends(get_db),
 ):
     """
-    Create a new supervisor user
-    role : supervisor_admin
-    status : active
+    새 supervisor user 생성
+    기본값:
+    - role : supervisor_admin
+    - status : active
     """
     return super_crud.create_supervisor_user(
         db,
@@ -182,4 +185,3 @@ def assign_role_to_user(
         assigned_by=getattr("user_id", None),
     )
     return ura
-
