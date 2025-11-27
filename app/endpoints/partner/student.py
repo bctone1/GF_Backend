@@ -4,16 +4,24 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy import select, func
 
-from core.deps import get_db, get_current_partner_user
+from core.deps import get_db, get_current_partner_user, get_current_user
 from crud.partner import student as student_crud
 
 from schemas.partner.student import (
     StudentCreate, StudentUpdate, StudentResponse,
     EnrollmentCreate, EnrollmentUpdate, EnrollmentResponse,
 )
+from models.user.account import AppUser
+from models.partner.student import Student, Enrollment
+from models.partner.course import Class, Course
+from models.partner.partner_core import Org, Partner
+from schemas.enums import EnrollmentStatus
+from schemas.partner.student import StudentClassResponse, StudentClassPage
 
 router = APIRouter()
+
 
 
 # ==============================
@@ -294,3 +302,4 @@ def delete_enrollment(
     if not ok:
         raise HTTPException(status_code=404, detail="enrollment not found")
     return None
+

@@ -23,8 +23,6 @@ from app.endpoints.partner.session import router as partner_session
 # from app.endpoints.partner.analytics import router as partner_analytics
 
 
-
-
 # user
 from app.endpoints.user.account import router as account
 from app.endpoints.user.document import router as user_document
@@ -60,6 +58,6 @@ def register_routers(app: FastAPI) -> None:
     # ==============================
     # User
     # ==============================
-    app.include_router(account,           prefix="/user/account",                   tags=["user/account"])
+    app.include_router(account,           prefix="/user",                   tags=["user/account"])
     app.include_router(user_document,     prefix="/user",                           tags=["user/document"])
     app.include_router(practice,          prefix="/user/practice",                  tags=["user/practice"])

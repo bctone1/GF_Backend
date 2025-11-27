@@ -1,3 +1,4 @@
+# crud/partner/student.py
 from __future__ import annotations
 from typing import Optional, Sequence, Tuple
 from datetime import datetime, timezone
@@ -49,10 +50,12 @@ def create_student(
     status: str = "active",
     primary_contact: Optional[str] = None,
     notes: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> Student:
     """
     partner_id 기준 학생 생성.
     - partner_id + email (NOT NULL) 유니크
+    - partner_id + user_id (NOT NULL) 유니크
     """
     obj = Student(
         partner_id=partner_id,
@@ -61,14 +64,15 @@ def create_student(
         status=status,
         primary_contact=primary_contact,
         notes=notes,
+        user_id=user_id,
     )
     db.add(obj)
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        # uq_students_partner_email_notnull 위반 등
-        raise StudentConflict("duplicate email within partner") from e
+        # uq_students_partner_email_notnull / uq_students_partner_user_notnull 위반 등
+        raise StudentConflict("duplicate student within partner") from e
     db.refresh(obj)
     return obj
 
@@ -91,6 +95,26 @@ def get_student_by_email(
         .where(
             Student.partner_id == partner_id,
             func.lower(Student.email) == func.lower(email),
+        )
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_student_by_user(
+    db: Session,
+    *,
+    partner_id: int,
+    user_id: int,
+) -> Optional[Student]:
+    """
+    partner_id + user_id 로 단일 학생 조회.
+    """
+    stmt = (
+        select(Student)
+        .where(
+            Student.partner_id == partner_id,
+            Student.user_id == user_id,
         )
         .limit(1)
     )
@@ -125,6 +149,23 @@ def list_students(
     return db.execute(stmt).scalars().all()
 
 
+def list_students_for_user(
+    db: Session,
+    *,
+    user_id: int,
+) -> Sequence[Student]:
+    """
+    특정 AppUser(user_id)에 매핑된 모든 Student 를 반환.
+    (여러 파트너/기관에 소속된 경우 여러 레코드 가능)
+    """
+    stmt = (
+        select(Student)
+        .where(Student.user_id == user_id)
+        .order_by(Student.joined_at.desc())
+    )
+    return db.execute(stmt).scalars().all()
+
+
 def update_student(db: Session, student_id: int, **fields) -> Optional[Student]:
     stmt = (
         update(Student)
@@ -141,7 +182,8 @@ def update_student(db: Session, student_id: int, **fields) -> Optional[Student]:
         return row[0]
     except IntegrityError as e:
         db.rollback()
-        raise StudentConflict("email conflict within partner") from e
+        # email / user_id 유니크 충돌 등
+        raise StudentConflict("student conflict within partner") from e
 
 
 def deactivate_student(db: Session, student_id: int) -> Optional[Student]:
@@ -165,30 +207,59 @@ def ensure_student(
     email: Optional[str],
     full_name: str,
     primary_contact: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> Student:
     """
-    email이 있으면 partner_id + email 기준으로 멱등 생성/조회.
-    email 이 없으면 무조건 새 Student 생성.
+    학생 레코드 멱등 생성/조회 도우미.
+
+    우선순위:
+    1) user_id 가 있으면 partner_id + user_id 기준으로 먼저 조회
+    2) 없으면 (또는 1에서 못 찾으면) partner_id + email 기준으로 조회
+       - 이때 user_id 가 전달되었고, 기존 레코드에 user_id 가 비어있으면 매핑
+    3) 기존 레코드가 없으면 새 Student 생성
     """
-    if email:
-        found = get_student_by_email(db, partner_id=partner_id, email=email)
+    # 1) user_id 기준 조회 (로그인한 학생이 초대코드 redeem 하는 케이스 등)
+    if user_id is not None:
+        found = get_student_by_user(db, partner_id=partner_id, user_id=user_id)
         if found:
             changed: dict = {}
-            if not found.full_name and full_name:
+            if full_name and found.full_name != full_name:
                 changed["full_name"] = full_name
+            if email and not found.email:
+                # 이메일이 비어있던 경우 최초 세팅
+                changed["email"] = email
             if primary_contact and found.primary_contact != primary_contact:
                 changed["primary_contact"] = primary_contact
+
             if changed:
                 return update_student(db, found.id, **changed) or found
             return found
 
-    # email 이 없거나, 기존 학생이 없으면 새로 생성
+    # 2) email 기준 조회
+    if email:
+        found = get_student_by_email(db, partner_id=partner_id, email=email)
+        if found:
+            changed: dict = {}
+            # user_id 매핑이 아직 안 되어 있고, 이번에 user_id 가 들어온 경우 매핑
+            if user_id is not None and not found.user_id:
+                changed["user_id"] = user_id
+            if full_name and found.full_name != full_name:
+                changed["full_name"] = full_name
+            if primary_contact and found.primary_contact != primary_contact:
+                changed["primary_contact"] = primary_contact
+
+            if changed:
+                return update_student(db, found.id, **changed) or found
+            return found
+
+    # 3) email 이 없거나, 기존 학생이 없으면 새로 생성
     return create_student(
         db,
         partner_id=partner_id,
         full_name=full_name,
         email=email,
         primary_contact=primary_contact,
+        user_id=user_id,
     )
 
 
@@ -260,6 +331,41 @@ def list_enrollments_by_class(
     if status:
         stmt = stmt.where(Enrollment.status == status)
     return db.execute(stmt).scalars().all()
+
+def list_enrollments_for_user(
+    db: Session,
+    *,
+    user_id: int,
+    status_in: Optional[Sequence[str]] = None,  # ["active", "completed"] 같은 값
+    limit: int = 200,
+    offset: int = 0,
+) -> Sequence[Enrollment]:
+    """
+    AppUser(user_id) 기준으로 연결된 모든 Student → Enrollment 를 가져오는 헬퍼.
+    - /user/classes 엔드포인트의 2번 단계(Student ↔ Enrollment)에 해당.
+    """
+
+    # 1) current_user 에 매핑된 학생들 (여러 파트너/기관 소속일 수 있음)
+    student_ids_subq = (
+        select(Student.id)
+        .where(Student.user_id == user_id)
+        .subquery()
+    )
+
+    # 2) 그 학생들이 가진 수강 기록들
+    stmt = (
+        select(Enrollment)
+        .where(Enrollment.student_id.in_(select(student_ids_subq.c.id)))
+        .order_by(Enrollment.enrolled_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+
+    if status_in:
+        stmt = stmt.where(Enrollment.status.in_(status_in))
+
+    return db.execute(stmt).scalars().all()
+
 
 
 def list_enrollments_by_student(
@@ -348,8 +454,9 @@ def ensure_enrollment_by_email(
     primary_contact: Optional[str] = None,
 ) -> Tuple[Student, Enrollment]:
     """
-    1) partner_id + email 기준으로 Student 멱등 생성/조회
-    2) 해당 학생을 class_id에 멱등 수강등록
+    1) partner_id + email 기준으로 Student 멱등 생성/조회.
+    2) 해당 학생을 class_id에 멱등 수강등록.
+    (user_id 는 관여하지 않는, 파트너 수동 등록용 헬퍼)
     """
     student = ensure_student(
         db,
@@ -381,11 +488,12 @@ def ensure_enrollment_for_invite(
     email: Optional[str],
     full_name: str,
     primary_contact: Optional[str] = None,
+    user_id: Optional[int] = None,
 ) -> Tuple[Student, Enrollment]:
     """
     학생 초대코드 redeem 시에 사용하는 헬퍼.
 
-    1) partner_id + email 기준으로 Student 멱등 생성/조회
+    1) partner_id + user_id (있다면) 또는 partner_id + email 기준으로 Student 멱등 생성/조회
     2) 해당 학생을 class_id에 멱등 수강 등록
     3) Enrollment.invite_code_id 세팅 (기존 등록이 있으면 필요 시만 업데이트)
     """
@@ -396,6 +504,7 @@ def ensure_enrollment_for_invite(
         email=email,
         full_name=full_name,
         primary_contact=primary_contact,
+        user_id=user_id,
     )
 
     # 2) 기존 수강 여부 확인

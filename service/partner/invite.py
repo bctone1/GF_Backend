@@ -9,6 +9,7 @@ import secrets
 from sqlalchemy.orm import Session
 
 from crud.partner import course as course_crud
+from crud.partner import classes as classes_crud
 from crud.user import account as user_crud
 from models.partner.course import InviteCode
 from service.email import send_email, EmailSendError
@@ -33,7 +34,7 @@ def create_default_class_invite(
     """
     code = _generate_unique_code(db)
 
-    invite = course_crud.create_invite_code(
+    invite = classes_crud.create_invite_code(
         db,
         partner_id=partner_id,
         code=code,
@@ -92,7 +93,7 @@ def _generate_unique_code(db: Session, max_attempts: int = 5) -> str:
     """
     for _ in range(max_attempts):
         code = generate_invite_code()
-        if course_crud.get_invite_code(db, code) is None:
+        if classes_crud.get_invite_code(db, code) is None:
             return code
     raise InviteCodeGenerationError("failed to generate unique invite code")
 
@@ -233,7 +234,7 @@ def create_and_send_invite(
 
     code = _generate_unique_code(db)
     try:
-        invite = course_crud.create_invite_code(
+        invite = classes_crud.create_invite_code(
             db,
             partner_id=partner_id,
             code=code,
@@ -274,7 +275,7 @@ def resend_invite(
     """
     이미 생성된 invite_id를 기준으로 이메일 재발송
     """
-    invite = course_crud.get_invite_by_id(db, invite_id)
+    invite = classes_crud.get_invite_by_id(db, invite_id)
     if not invite or invite.partner_id != partner_id:
         raise InviteServiceError("invite not found")
 

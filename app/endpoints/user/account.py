@@ -3,9 +3,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from random import randint
+from typing import Optional, List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import select, func
 from pydantic import BaseModel
 
 from core.deps import get_db, get_current_user
@@ -19,6 +21,9 @@ from crud.user import account as user_crud
 from service.user import account_service
 
 from models.user.account import AppUser
+from models.partner.student import Student, Enrollment
+from models.partner.course import Class, Course
+from models.partner.partner_core import Org, Partner
 
 from schemas.user.account import (
     LoginInput,
@@ -40,17 +45,121 @@ from schemas.user.account import (
     PartnerPromotionRequestCreate,
     PartnerPromotionRequestResponse,
 )
-from schemas.partner.student import EnrollmentResponse
+from schemas.partner.student import EnrollmentResponse, StudentClassPage, StudentClassResponse
+from schemas.enums import EnrollmentStatus
 
 
 router = APIRouter()
 
 
 # ==============================
+# Me: 내 강의 리스트
+# ==============================
+@router.get(
+    "/classes",
+    response_model=StudentClassPage,
+    summary="내 강의 리스트",
+)
+def list_my_classes(
+    status: Optional[EnrollmentStatus] = Query(
+        None,
+        description="수강 상태 필터 (예: active | completed | inactive | dropped)",
+    ),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """
+    현재 로그인한 유저 기준 '내 강의' 리스트.
+
+    1) students.user_id == me.user_id 인 Student들을 모두 찾고
+    2) 해당 student_id들에 대한 Enrollment를 찾은 뒤
+    3) Class / Course / Org / Partner 를 조인해서 카드형 정보로 반환.
+    """
+
+    # 1) 현재 유저에 매핑된 학생들 (여러 기관/파트너 소속일 수 있음)
+    student_ids_subq = (
+        select(Student.id)
+        .where(Student.user_id == me.user_id)
+        .subquery()
+    )
+
+    # 학생 레코드가 아예 없으면 바로 빈 페이지 반환
+    total_students = db.execute(
+        select(func.count()).select_from(student_ids_subq)
+    ).scalar() or 0
+    if total_students == 0:
+        return StudentClassPage(
+            total=0,
+            items=[],
+            page=1,
+            size=limit,
+        )
+
+    # 2) Enrollment ↔ Class ↔ Course ↔ Org ↔ Partner 조인
+    base = (
+        select(Enrollment, Class, Course, Org, Partner)
+        .join(Class, Class.id == Enrollment.class_id)
+        .join(Student, Student.id == Enrollment.student_id)
+        .outerjoin(Course, Course.id == Class.course_id)
+        .outerjoin(Org, Org.id == Course.org_id)
+        .join(Partner, Partner.id == Class.partner_id)
+        .where(Enrollment.student_id.in_(select(student_ids_subq.c.id)))
+    )
+
+    # 기본: active + completed 만 노출
+    if status is None:
+        base = base.where(Enrollment.status.in_(["active", "completed"]))
+    else:
+        base = base.where(Enrollment.status == status.value)
+
+    # 3) total / page 계산
+    total = db.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar() or 0
+
+    rows = db.execute(
+        base.order_by(Enrollment.enrolled_at.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+
+    items: List[StudentClassResponse] = []
+    for enr, cls, course, org, partner in rows:
+        items.append(
+            StudentClassResponse(
+                enrollment_id=enr.id,
+                class_id=cls.id,
+                class_title=getattr(cls, "title", ""),
+                course_title=(course.title if course is not None else None),
+                org_name=(getattr(org, "name", None) if org is not None else None),
+                teacher_name=getattr(partner, "full_name", None),
+                enrollment_status=enr.status,
+                enrolled_at=enr.enrolled_at,
+                completed_at=enr.completed_at,
+                # NOTE: last_activity_at은 나중에 세션/활동 집계 테이블이 생기면 연동
+                last_activity_at=None,
+            )
+        )
+
+    page = offset // limit + 1 if limit > 0 else 1
+
+    return StudentClassPage(
+        total=total,
+        items=items,
+        page=page,
+        size=limit,
+    )
+
+
+
+
+# ==============================
 # Auth: 이메일 코드 발송 / 인증
 # ==============================
 @router.post(
-    "/user/email/send-code",
+    "/email/send-code",
     response_model=EmailCodeSendResponse,
     summary="가입 전 인증 코드 발송",
 )
@@ -101,7 +210,7 @@ def send_email_code(
 
 
 @router.post(
-    "/user/email/verify-code",
+    "/email/verify-code",
     response_model=EmailCodeVerifyResponse,
     summary="이메일 코드 인증",
 )
@@ -145,7 +254,7 @@ def verify_email_code(
 # Auth: signup / login
 # ==============================
 @router.post(
-    "/user/signup",
+    "/signup",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="회원가입",
@@ -162,7 +271,7 @@ def user_signup(
 
 
 @router.post(
-    "/user/login",
+    "/login",
     response_model=AuthTokens,
     summary="이메일/비밀번호 로그인",
 )
@@ -362,3 +471,4 @@ def redeem_invite_code(
         raw_code=payload.code,
     )
     return EnrollmentResponse.model_validate(enrollment)
+

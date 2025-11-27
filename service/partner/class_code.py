@@ -7,7 +7,6 @@ from typing import Optional
 import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
-from crud.partner import course as course_crud
 from crud.partner import classes as classes_crud
 from models.partner.course import Class, InviteCode
 from schemas.partner.classes import ClassCreate

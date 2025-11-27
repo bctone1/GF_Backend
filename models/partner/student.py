@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import CITEXT
 from models.base import Base
 
 
+
 # ========== partner.students ==========
 class Student(Base):
     __tablename__ = "students"
@@ -23,6 +24,13 @@ class Student(Base):
         nullable=False,
     )
 
+    # 이 Student가 매핑되는 AppUser (일반 유저) - 선택적
+    user_id = Column(
+        BigInteger,
+        ForeignKey("user.users.user_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     full_name = Column(Text, nullable=False)
     email = Column(CITEXT, nullable=True)
     status = Column(Text, nullable=False, server_default=text("'active'"))  # active|inactive|archived
@@ -35,18 +43,32 @@ class Student(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('active','inactive','archived')", name="chk_students_status"),
+
+        # 상태 필터용
         Index("idx_students_partner_status", "partner_id", "status"),
-        Index("idx_students_partner_email", "partner_id", "email"),
+
         # partner 내 이메일 단일, NULL 허용
+        Index("idx_students_partner_email", "partner_id", "email"),
         Index(
             "uq_students_partner_email_notnull",
             "partner_id", "email",
             unique=True,
             postgresql_where=text("email IS NOT NULL"),
         ),
+
+        # AppUser 매핑 검색용
+        Index("idx_students_user_id", "user_id"),
+
+        # 같은 파트너에서 같은 user_id로 중복 Student 생성 방지 (user_id NOT NULL인 경우만)
+        Index(
+            "uq_students_partner_user_notnull",
+            "partner_id", "user_id",
+            unique=True,
+            postgresql_where=text("user_id IS NOT NULL"),
+        ),
+
         {"schema": "partner"},
     )
-
 
 class Enrollment(Base):
     __tablename__ = "enrollments"

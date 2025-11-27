@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from crud.user import account as user_crud
 from crud.partner import student as student_crud
-from crud.partner import course as course_crud
+from crud.partner import course as classes_crud
+from crud.partner import classes as classes_crud
 
 from core.security import hash_password, verify_password, issue_tokens
 
@@ -227,12 +228,12 @@ def redeem_class_invite_code(
         raise HTTPException(status_code=400, detail="invalid_code_format")
 
     # 2) 초대코드 조회 + 유효성 검사
-    invite = course_crud.get_invite_for_redeem(db, code=code)
+    invite = classes_crud.get_invite_for_redeem(db, code=code)
     if not invite:
         raise HTTPException(status_code=400, detail="invalid_or_expired_code")
 
     # (옵션) class 존재 여부 정도만 체크
-    class_obj = course_crud.get_class(db, invite.class_id)
+    class_obj = classes_crud.get_class(db, invite.class_id)
     if not class_obj:
         raise HTTPException(status_code=400, detail="class_not_found")
 
@@ -265,10 +266,11 @@ def redeem_class_invite_code(
         email=student_email,
         full_name=student_full_name,
         primary_contact=primary_contact,
+        user_id=me.user_id,
     )
 
     # 5) 초대코드 사용 처리
-    course_crud.mark_invite_used(
+    classes_crud.mark_invite_used(
         db,
         invite_id=invite.id,
         student_id=student.id,
