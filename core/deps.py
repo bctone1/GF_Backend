@@ -125,7 +125,7 @@ def get_current_partner(
 
 
 def get_current_partner_user(
-    partner_id: int = Path(..., description="경로상의 파트너 ID"),
+    partner_id: int = Path(..., description="강사 ID"),
     db: Session = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
 ) -> Partner:

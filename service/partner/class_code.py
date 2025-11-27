@@ -6,7 +6,7 @@ from typing import Optional
 
 import logging
 from sqlalchemy.orm import Session
-
+from sqlalchemy import select, func
 from crud.partner import course as course_crud
 from models.partner.course import Class, InviteCode
 from schemas.partner.course import ClassCreate
@@ -103,3 +103,37 @@ def create_class_with_default_invite(
         # 여기서 raise 할지, 로그만 찍고 넘어갈지는 정책에 따라 결정
 
     return clazz
+
+def list_class_invite_codes(
+    db: Session,
+    class_id: int,
+    active_only: Optional[bool],
+    limit: int,
+    offset: int,
+) -> tuple[list[InviteCode], int]:
+    """
+    특정 class 에 연결된 초대코드 목록 조회.
+
+    - active_only=True 면 status='active' 만 필터링
+    - limit/offset 으로 페이지네이션
+    """
+    # 기본 쿼리: 해당 class 의 모든 코드
+    base_stmt = select(InviteCode).where(InviteCode.class_id == class_id)
+
+    if active_only is True:
+        base_stmt = base_stmt.where(InviteCode.status == "active")
+
+    # total count
+    count_stmt = select(func.count()).select_from(base_stmt.subquery())
+    total = db.execute(count_stmt).scalar_one()
+
+    # rows
+    stmt = (
+        base_stmt
+        .order_by(InviteCode.id.desc())  # 필요하면 created_at.desc() 등으로 변경
+        .limit(limit)
+        .offset(offset)
+    )
+    rows = db.execute(stmt).scalars().all()
+
+    return rows, total

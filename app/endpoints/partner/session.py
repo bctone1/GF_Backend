@@ -76,6 +76,7 @@ def get_ai_session(
     "",
     response_model=AiSessionResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="새 대화만들기(추후 자동요약해서 집어넣음)",
 )
 def create_ai_session(
     partner_id: int = Path(..., ge=1),
@@ -171,6 +172,7 @@ def list_session_messages(
     "/{session_id}/messages",
     response_model=SessionMessageResponse,
     status_code=status.HTTP_201_CREATED,
+    summary="질문 답변",
 )
 def create_session_message(
     partner_id: int = Path(..., ge=1),

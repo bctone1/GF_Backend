@@ -10,9 +10,10 @@ from core.deps import get_db, get_current_partner_user
 from schemas.partner.course import (
     CourseCreate, CourseUpdate, CourseResponse, CoursePage,
     ClassCreate, ClassUpdate, ClassResponse, ClassPage,
+    InviteCodeResponse, InviteCodePage,
 )
 from crud.partner import course as crud_course
-from service.partner import class_code as class_code_service  # ← 추가
+from service.partner import class_code as class_code_service
 
 router = APIRouter()
 
@@ -50,7 +51,12 @@ def list_courses(
     }
 
 
-@router.post("", response_model=CourseResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=CourseResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="코스 생성",
+)
 def create_course(
     org_id: int,
     payload: CourseCreate,
@@ -159,7 +165,12 @@ def list_classes(
     return {"total": total, "items": rows, "page": page, "size": size}
 
 
-@router.post("/{course_id}/classes", response_model=ClassResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{course_id}/classes",
+    response_model=ClassResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="강의생성/초대코드 발급",
+)
 def create_class(
     partner_id: int,
     course_id: int,
@@ -242,3 +253,54 @@ def delete_class(
     if not ok:
         raise HTTPException(status_code=404, detail="Class not found")
     return None
+
+
+# ==============================
+# Class Invite Codes (초대코드 조회)
+# ==============================
+@router.get(
+    "/{course_id}/classes/{class_id}/invite-codes",
+    response_model=InviteCodePage,
+)
+def list_class_invite_codes(
+    partner_id: int,
+    course_id: int,
+    class_id: int,
+    db: Session = Depends(get_db),
+    active_only: Optional[bool] = Query(
+        None,
+        description="True일 경우 활성(미만료) 코드만 필터링",
+    ),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    _=Depends(get_current_partner_user),
+):
+    """
+    특정 class 에 연결된 초대코드 목록 조회.
+
+    - URL: GET /partners/{partner_id}/courses/{course_id}/classes/{class_id}/invite-codes
+    - 권한: 현재 로그인한 partner 기준으로 class 소속 확인
+    """
+    # 1) class 소속 검증 (course / partner 둘 다 체크)
+    klass = crud_course.get_class(db, class_id)
+    if not klass or klass.course_id != course_id or klass.partner_id != partner_id:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    # 2) 초대코드 목록 조회 (service 레이어 사용)
+    rows, total = class_code_service.list_class_invite_codes(
+        db=db,
+        class_id=class_id,
+        active_only=active_only,
+        limit=limit,
+        offset=offset,
+    )
+
+    page = offset // limit + 1 if limit > 0 else 1
+    size = limit
+
+    return {
+        "total": total,
+        "items": rows,
+        "page": page,
+        "size": size,
+    }

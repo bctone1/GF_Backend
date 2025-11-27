@@ -98,13 +98,7 @@ class ClassBase(ORMBase):
 class ClassCreate(ClassBase):
     """
     partner_id, course_id 는 path / 컨텍스트에서 받기 때문에 body 에선 제외.
-    UI 기준으로 필수인 값(정원, 시작/종료일)을 Create 쪽에서만 필수로 강제하고 싶으면
-    아래처럼 override 하면 됨.
     """
-    # 예시: 강제 필수로 쓰고 싶으면 주석 해제해서 사용
-    # start_at: datetime
-    # end_at: datetime
-    # capacity: int
     pass
 
 
