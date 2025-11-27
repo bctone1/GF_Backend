@@ -12,7 +12,6 @@ from schemas.base import Page
 # ==============================
 # Org (partner.org)
 # ==============================
-
 class OrgBase(BaseModel):
     name: str
     code: str
@@ -53,11 +52,11 @@ class OrgPage(Page[OrgResponse]):
 
 
 # ==============================
-# PartnerUser (partner.partner)
-# Org(기관)에 속한 강사/어시
+# Partner (partner.partners)
+# Org(기관)에 속한 파트너(강사/어시스턴트)
 # ==============================
 
-class PartnerUserBase(BaseModel):
+class PartnerBase(BaseModel):
     org_id: int
     full_name: str
     email: EmailStr
@@ -66,17 +65,17 @@ class PartnerUserBase(BaseModel):
     is_active: bool = True
 
 
-class PartnerUserCreate(PartnerUserBase):
+class PartnerCreate(PartnerBase):
     """
-    강사/어시스턴트 생성용.
-    user_id는 이메일로 매핑하거나, 필요하면 별도 Create에서 받도록.
+    파트너(강사/어시스턴트) 생성용.
+    user_id는 필요한 경우에만 받는다.
     """
     user_id: Optional[int] = None
 
 
-class PartnerUserUpdate(BaseModel):
+class PartnerUpdate(BaseModel):
     """
-    강사/어시스턴트 수정용.
+    파트너(강사/어시스턴트) 수정용.
     """
     full_name: Optional[str] = None
     email: Optional[EmailStr] = None
@@ -85,7 +84,7 @@ class PartnerUserUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-class PartnerUserResponse(PartnerUserBase):
+class PartnerResponse(PartnerBase):
     id: int
     user_id: Optional[int] = None
     last_login_at: Optional[datetime] = None
@@ -95,5 +94,5 @@ class PartnerUserResponse(PartnerUserBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-class PartnerUserPage(Page[PartnerUserResponse]):
+class PartnerPage(Page[PartnerResponse]):
     model_config = ConfigDict(from_attributes=True)

@@ -29,9 +29,9 @@ class Org(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    # Org에 속한 강사/조교들
-    partner_users = relationship(
-        "PartnerUser",
+    # Org에 속한 파트너(강사/조교)들
+    partners = relationship(
+        "Partner",
         back_populates="org",
         passive_deletes=True,
     )
@@ -49,11 +49,12 @@ class Org(Base):
 
 
 # ========== partner.partner ==========
-class PartnerUser(Base):
+class Partner(Base):
     """
-    Org(기관)에 소속된 강사/어시스턴트.
+    Org(기관)에 소속된 파트너(강사/어시스턴트).
+    강사 번호(partner_id)는 이 테이블의 id.
     """
-    __tablename__ = "partner"
+    __tablename__ = "partners"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
@@ -64,6 +65,9 @@ class PartnerUser(Base):
         nullable=False,
     )
 
+    # FK → AppUser.user_id (user.users.user_id)
+    # 승격 시 이 user_id 기준으로 partner 레코드가 생성되고,
+    # AppUser.partner_id 가 이 id 를 가리키게 됨.
     user_id = Column(
         BigInteger,
         ForeignKey("user.users.user_id", ondelete="SET NULL"),
@@ -74,7 +78,7 @@ class PartnerUser(Base):
     email = Column(CITEXT, nullable=False)
     phone = Column(Text, nullable=True)
 
-    # partner = 강사, assistant = 운영자
+    # partner = 강사, assistant = 운영자(조교/매니저)
     role = Column(
         Text,
         nullable=False,
@@ -89,7 +93,7 @@ class PartnerUser(Base):
     # 소속 Org
     org = relationship(
         "Org",
-        back_populates="partner_users",
+        back_populates="partners",
         passive_deletes=True,
     )
 
@@ -118,12 +122,14 @@ class PartnerUser(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("org_id", "user_id", name="uq_partner_user_user"),
-        UniqueConstraint("org_id", "email", name="uq_partner_user_email"),
-        CheckConstraint("role IN ('partner','assistant')", name="chk_partner_role"),
-        Index("idx_partner_email", "org_id", "email"),
-        Index("idx_partner_active", "is_active"),
-        Index("idx_partner_role", "role"),
-        Index("idx_partner_last_login", "last_login_at"),
+        # 한 유저당 하나의 파트너 레코드만 허용 (원하면 유지)
+        UniqueConstraint("user_id", name="uq_partners_user_id"),
+        # 같은 Org 안에서는 이메일도 유일
+        UniqueConstraint("org_id", "email", name="uq_partners_org_email"),
+        CheckConstraint("role IN ('partner','assistant')", name="chk_partners_role"),
+        Index("idx_partners_email", "org_id", "email"),
+        Index("idx_partners_active", "is_active"),
+        Index("idx_partners_role", "role"),
+        Index("idx_partners_last_login", "last_login_at"),
         {"schema": "partner"},
     )

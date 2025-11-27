@@ -13,7 +13,7 @@ from core.config import DB, DB_USER, DB_PASSWORD, DB_SERVER, DB_PORT, DB_NAME
 
 # user/partner 인증에 사용
 from models.user.account import AppUser
-from models.partner.partner_core import PartnerUser  # 파트너 권한 확인
+from models.partner.partner_core import Partner  # 파트너 권한 확인 (PartnerUser → Partner로 변경)
 
 # supervisor 인증·권한에 사용
 from models.supervisor.core import (
@@ -78,6 +78,7 @@ def get_current_session_id(request: Request) -> Optional[int]:
     sid = request.headers.get("X-Session-Id")
     return int(sid) if sid and sid.isdigit() else None
 
+
 # ==============================
 # 파트너 권한 검사
 # ==============================
@@ -88,36 +89,54 @@ def _get_current_user_id(current_user: AppUser) -> int:
     return int(uid)
 
 
-def get_current_partner_user(
-    partner_id: int,
+def get_current_partner(
     db: Session = Depends(get_db),
     current_user: AppUser = Depends(get_current_user),
-) -> PartnerUser:
+) -> Partner:
     """
-    - 권한 계층: supervisor / org / partner / student / user
-    - 여기서는 단순히:
-        1) 현재 로그인한 AppUser의 user_id를 구하고
-        2) 해당 partner_id에 소속된 활성 PartnerUser 인지만 검사
-    - 별도의 partner_admin, partner_manager 같은 서브 롤 개념은 사용하지 않음.
+    현재 로그인한 유저가 파트너(강사)인지 확인하고,
+    연결된 Partner 엔터티를 반환.
+
+    - AppUser.partner_id 가 NULL 이면 강사 아님 → 403
+    - Partner.user_id == 현재 user_id && is_active = True 인지 검사
     """
     uid = _get_current_user_id(current_user)
+    partner_id = getattr(current_user, "partner_id", None)
+    if not partner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="not_a_partner",
+        )
 
     stmt = (
-        select(PartnerUser)
+        select(Partner)
         .where(
-            PartnerUser.id == partner_id,
-            PartnerUser.user_id == uid,
-            PartnerUser.is_active.is_(True),
+            Partner.id == partner_id,
+            Partner.user_id == uid,
+            Partner.is_active.is_(True),
         )
         .limit(1)
     )
-    pu = db.execute(stmt).scalars().first()
-    if not pu:
-        # 이 파트너에 소속된 강사가 아님
+    partner = db.execute(stmt).scalars().first()
+    if not partner:
+        # users.partner_id 와 partner.partners 불일치 or 비활성
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
-    return pu
+    return partner
 
 
+def get_current_partner_user(
+    partner_id: int = Path(..., description="경로상의 파트너 ID"),
+    db: Session = Depends(get_db),
+    current_user: AppUser = Depends(get_current_user),
+) -> Partner:
+    """
+
+    앞으로는 가능하면 get_current_partner()를 직접 쓰는 쪽으로 점진 전환 예정
+    """
+    partner = get_current_partner(db=db, current_user=current_user)
+    if partner.id != partner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+    return partner
 
 
 # ==============================

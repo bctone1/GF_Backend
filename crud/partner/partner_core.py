@@ -7,7 +7,7 @@ from sqlalchemy import select, update, delete, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from models.partner.partner_core import Org, PartnerUser   # Org, PartnerUser로 변경
+from models.partner.partner_core import Org, Partner
 from models.user.account import AppUser
 
 
@@ -24,15 +24,15 @@ class OrgConflict(OrgError):
     ...
 
 
-class PartnerUserError(OrgError):
+class PartnerError(OrgError):
     ...
 
 
-class PartnerUserNotFound(PartnerUserError):
+class PartnerNotFound(PartnerError):
     ...
 
 
-class PartnerUserConflict(PartnerUserError):
+class PartnerConflict(PartnerError):
     ...
 
 
@@ -139,37 +139,37 @@ def delete_org(db: Session, org_id: int) -> bool:
     return res.rowcount > 0
 
 
-# ========= PartnerUser CRUD =========
+# ========= Partner CRUD =========
 def _find_app_user_by_email(db: Session, email: str) -> Optional[AppUser]:
     stmt = select(AppUser).where(func.lower(AppUser.email) == func.lower(email)).limit(1)
     return db.execute(stmt).scalar_one_or_none()
 
 
-def get_partner_user(db: Session, partner_user_id: int) -> Optional[PartnerUser]:
-    return db.get(PartnerUser, partner_user_id)
+def get_partner(db: Session, partner_id: int) -> Optional[Partner]:
+    return db.get(Partner, partner_id)
 
 
-def get_partner_user_by_email(
+def get_partner_by_email(
     db: Session,
     *,
     org_id: int,
     email: str,
-) -> Optional[PartnerUser]:
+) -> Optional[Partner]:
     """
-    org_id = PartnerUser.partner_id (FK → partner.org.id)
+    특정 Org 내에서 이메일로 파트너(강사/어시) 조회.
     """
     stmt = (
-        select(PartnerUser)
+        select(Partner)
         .where(
-            PartnerUser.org_id == org_id,
-            func.lower(PartnerUser.email) == func.lower(email),
+            Partner.org_id == org_id,
+            func.lower(Partner.email) == func.lower(email),
         )
         .limit(1)
     )
     return db.execute(stmt).scalar_one_or_none()
 
 
-def list_partner_users(
+def list_partners(
     db: Session,
     *,
     org_id: int,
@@ -178,33 +178,33 @@ def list_partner_users(
     q: Optional[str] = None,
     limit: int = 200,
     offset: int = 0,
-) -> Sequence[PartnerUser]:
+) -> Sequence[Partner]:
     """
-    특정 Org에 속한 강사/어시 리스트.
-    org_id → PartnerUser.partner_id 로 매핑.
+    특정 Org에 속한 파트너(강사/어시) 리스트.
+    org_id → Partner.org_id.
     """
     stmt = (
-        select(PartnerUser)
-        .where(PartnerUser.org_id == org_id)
-        .order_by(PartnerUser.created_at.desc())
+        select(Partner)
+        .where(Partner.org_id == org_id)
+        .order_by(Partner.created_at.desc())
         .limit(limit)
         .offset(offset)
     )
     if role:
-        stmt = stmt.where(PartnerUser.role == role)
+        stmt = stmt.where(Partner.role == role)
     if is_active is not None:
-        stmt = stmt.where(PartnerUser.is_active.is_(is_active))
+        stmt = stmt.where(Partner.is_active.is_(is_active))
     if q:
         like = f"%{q}%"
         stmt = stmt.where(
-            PartnerUser.full_name.ilike(like)
-            | PartnerUser.email.ilike(like)
-            | (PartnerUser.phone.isnot(None) & PartnerUser.phone.ilike(like))
+            Partner.full_name.ilike(like)
+            | Partner.email.ilike(like)
+            | (Partner.phone.isnot(None) & Partner.phone.ilike(like))
         )
     return db.execute(stmt).scalars().all()
 
 
-def add_partner_user(
+def add_partner(
     db: Session,
     *,
     org_id: int,
@@ -214,12 +214,13 @@ def add_partner_user(
     phone: Optional[str] = None,
     is_active: bool = True,
     user_id: Optional[int] = None,  # user.users PK. 주어지지 않으면 email로 조회
-) -> PartnerUser:
+) -> Partner:
     """
-    Org에 속한 PartnerUser(강사/어시) 추가.
+    Org에 속한 Partner(강사/어시) 추가.
     - 이미 org_id + email 매핑이 있으면 그대로 반환 (멱등)
+    - AppUser가 존재하면 user_id와 users.partner_id 를 함께 세팅
     """
-    existing = get_partner_user_by_email(db, org_id=org_id, email=email)
+    existing = get_partner_by_email(db, org_id=org_id, email=email)
     if existing:
         return existing
 
@@ -228,8 +229,8 @@ def add_partner_user(
         app_user = _find_app_user_by_email(db, email)
         app_user_id = getattr(app_user, "user_id", None) if app_user else None
 
-    obj = PartnerUser(
-        partner_id=org_id,            # FK → partner.org.id
+    partner = Partner(
+        org_id=org_id,
         user_id=app_user_id,
         full_name=full_name or email,
         email=email,
@@ -237,48 +238,103 @@ def add_partner_user(
         role=role,
         is_active=is_active,
     )
-    db.add(obj)
+    db.add(partner)
+    try:
+        # 먼저 Partner 레코드 INSERT
+        db.flush()
+
+        # AppUser가 있으면 users.partner_id도 같이 연결
+        if app_user_id is not None:
+            user = db.get(AppUser, app_user_id)
+            if user:
+                user.partner_id = partner.id
+                db.add(user)
+
+        db.commit()
+    except IntegrityError as e:
+        db.rollback()
+        # email 유니크 / user_id 유니크 위반 등
+        raise PartnerConflict("duplicate mapping or email/user in this org") from e
+
+    db.refresh(partner)
+    return partner
+
+
+def update_partner(db: Session, partner_id: int, **fields) -> Optional[Partner]:
+    """
+    Partner 정보 수정.
+    user_id가 변경되는 경우 users.partner_id 일관성도 함께 맞춰줌.
+    """
+    partner = db.get(Partner, partner_id)
+    if not partner:
+        return None
+
+    # user_id는 특별 취급
+    new_user_id = fields.pop("user_id", None) if "user_id" in fields else None
+    old_user_id = partner.user_id
+
+    # 일반 필드 업데이트
+    for key, value in fields.items():
+        setattr(partner, key, value)
+
+    # user_id 변경 처리
+    if new_user_id is not None and new_user_id != old_user_id:
+        # 예전 유저의 partner_id 정리
+        if old_user_id is not None:
+            old_user = db.get(AppUser, old_user_id)
+            if old_user and old_user.partner_id == partner_id:
+                old_user.partner_id = None
+                db.add(old_user)
+
+        # 새 유저에 partner_id 세팅
+        if new_user_id is not None:
+            new_user = db.get(AppUser, new_user_id)
+            if new_user:
+                new_user.partner_id = partner_id
+                db.add(new_user)
+
+        partner.user_id = new_user_id
+
     try:
         db.commit()
     except IntegrityError as e:
         db.rollback()
-        # email 유니크 / (partner_id, user_id) 유니크 위반
-        raise PartnerUserConflict("duplicate mapping or email in this org") from e
-    db.refresh(obj)
-    return obj
+        raise PartnerConflict("email or mapping conflict") from e
+
+    db.refresh(partner)
+    return partner
 
 
-def update_partner_user(db: Session, partner_user_id: int, **fields) -> Optional[PartnerUser]:
-    stmt = (
-        update(PartnerUser)
-        .where(PartnerUser.id == partner_user_id)
-        .values(**fields)
-        .returning(PartnerUser)
-    )
+def deactivate_partner(db: Session, partner_id: int) -> Optional[Partner]:
+    return update_partner(db, partner_id, is_active=False)
+
+
+def change_partner_role(db: Session, partner_id: int, role: str) -> Optional[Partner]:
+    return update_partner(db, partner_id, role=role)
+
+
+def remove_partner(db: Session, partner_id: int) -> bool:
+    """
+    Partner 삭제 시, 연결된 AppUser.partner_id 도 정리.
+    """
+    partner = db.get(Partner, partner_id)
+    if not partner:
+        return False
+
+    if partner.user_id is not None:
+        user = db.get(AppUser, partner.user_id)
+        if user and user.partner_id == partner_id:
+            user.partner_id = None
+            db.add(user)
+
+    db.delete(partner)
     try:
-        row = db.execute(stmt).fetchone()
-        if not row:
-            db.rollback()
-            return None
         db.commit()
-        return row[0]
-    except IntegrityError as e:
+    except IntegrityError:
         db.rollback()
-        raise PartnerUserConflict("email or mapping conflict") from e
+        return False
 
-
-def deactivate_partner_user(db: Session, partner_user_id: int) -> Optional[PartnerUser]:
-    return update_partner_user(db, partner_user_id, is_active=False)
-
-
-def change_partner_user_role(db: Session, partner_user_id: int, role: str) -> Optional[PartnerUser]:
-    return update_partner_user(db, partner_user_id, role=role)
-
-
-def remove_partner_user(db: Session, partner_user_id: int) -> bool:
-    res = db.execute(delete(PartnerUser).where(PartnerUser.id == partner_user_id))
-    db.commit()
-    return res.rowcount > 0
+    return True
 
 
 # ========= Convenience =========
@@ -289,10 +345,10 @@ def ensure_org_and_admin(
     org_code: Optional[str],
     admin_email: str,
     admin_full_name: Optional[str] = None,
-) -> Tuple[Org, PartnerUser]:
+) -> Tuple[Org, Partner]:
     """
     Org(기관) 없으면 생성, 있으면 재사용.
-    해당 Org의 관리자(대표 강사 역할) 없으면 PartnerUser 생성.
+    해당 Org의 관리자(대표 강사 역할) 없으면 Partner 생성.
     """
     org: Optional[Org] = None
 
@@ -309,9 +365,9 @@ def ensure_org_and_admin(
         except OrgConflict:
             org = get_org_by_code(db, org_code or _slugify(org_name))
 
-    puser = get_partner_user_by_email(db, org_id=org.id, email=admin_email)
-    if not puser:
-        puser = add_partner_user(
+    partner = get_partner_by_email(db, org_id=org.id, email=admin_email)
+    if not partner:
+        partner = add_partner(
             db,
             org_id=org.id,
             email=admin_email,
@@ -320,4 +376,4 @@ def ensure_org_and_admin(
             is_active=True,
         )
 
-    return org, puser
+    return org, partner
