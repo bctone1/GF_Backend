@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import List, Optional, Tuple
 
 from sqlalchemy import select, update, delete, func, and_, or_, desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from models.partner.course import Course, Class, InviteCode  # ← InviteCode 추가
 
@@ -141,9 +141,13 @@ def delete_course(db: Session, course_id: int) -> bool:
 # ==============================
 # Class
 # ==============================
-def get_class(db: Session, class_id: int) -> Optional[Class]:
-    return db.get(Class, class_id)
-
+def get_class(db: Session, class_id: int) -> Class | None:
+    stmt = (
+        select(Class)
+        .options(selectinload(Class.invite_codes))  # 초대코드 같이 로드
+        .where(Class.id == class_id)
+    )
+    return db.execute(stmt).scalars().first()
 
 def list_classes(
     db: Session,

@@ -129,6 +129,7 @@ class ClassResponse(ClassBase):
     course_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
+    invite_codes: List[InviteCodeResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -167,12 +168,13 @@ class InviteCodeUpdate(ORMBase):
 
 class InviteCodeResponse(InviteCodeBase):
     id: int
-    partner_id: int
-    class_id: int  # class-only, NOT NULL
+    code: str
+    status: str
+    expires_at: datetime | None = None
+    max_uses: int | None = None
     used_count: int
-    created_by: Optional[int] = None
-    created_at: datetime
-    status: InviteStatus  # 응답에서는 항상 값 존재
+    partner_id: int
+    class_id: int
 
     model_config = ConfigDict(from_attributes=True)
 

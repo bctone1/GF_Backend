@@ -204,6 +204,8 @@ def get_class(
     obj = crud_course.get_class(db, class_id)
     if not obj or obj.course_id != course_id or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
+
+    # 여기서 그냥 obj 리턴하면, obj.invite_codes까지 포함해서 ClassResponse로 변환됨
     return obj
 
 
