@@ -54,7 +54,8 @@ def list_ai_sessions(
     return {"items": items, "total": total, "page": page, "size": size}
 
 
-@router.get("/{session_id}", response_model=AiSessionResponse)
+@router.get("/{session_id}", response_model=AiSessionResponse,
+            summary="세션타이틀 불러오기")
 def get_ai_session(
     partner_id: int = Path(..., ge=1),
     session_id: int = Path(..., ge=1),
@@ -76,7 +77,7 @@ def get_ai_session(
     "",
     response_model=AiSessionResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="새 대화만들기(추후 자동요약해서 집어넣음)",
+    summary="새 대화",
 )
 def create_ai_session(
     partner_id: int = Path(..., ge=1),
@@ -86,7 +87,8 @@ def create_ai_session(
 ):
     """
     세션 생성.
-    - 일반적으로 코스/클래스 단위로 실습 세션을 열 때 사용.
+    추후에 AI가 자동 요약해서 title 작성하는걸로 변경 예정
+    - 프로젝트 코스 클래스와 연관되어 있음. 모델명 표기도 고려해야함(추후)
     """
     data = payload.model_dump(exclude_unset=True)
     # 추후수정: class_id / student_id 가 partner_id 소속인지 검증하는 로직 추가 가능

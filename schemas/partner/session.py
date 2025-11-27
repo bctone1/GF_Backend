@@ -60,7 +60,7 @@ class AiSessionResponse(MoneyBase):
     total_tokens: int
     total_cost: Decimal
     initiated_by: Optional[int] = None
-    # 선택: 메시지 동시 반환 시 사용
+    # 일단 다 불러오고, 필요 없는 기능 추후 제거
     messages: Optional[List["SessionMessageResponse"]] = None  # noqa: F821
 
 

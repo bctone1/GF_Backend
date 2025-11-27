@@ -1,0 +1,283 @@
+# crud/partner/classes.py
+from __future__ import annotations
+
+from datetime import datetime
+from typing import List, Optional, Tuple
+
+from sqlalchemy import select, delete, func, and_, desc
+from sqlalchemy.orm import Session, selectinload
+
+from models.partner.course import Class, InviteCode
+
+
+# ==============================
+# Class
+# ==============================
+def get_class(db: Session, class_id: int) -> Class | None:
+    stmt = (
+        select(Class)
+        .options(selectinload(Class.invite_codes))  # 초대코드 같이 로드
+        .where(Class.id == class_id)
+    )
+    return db.execute(stmt).scalars().first()
+
+
+def list_classes(
+    db: Session,
+    course_id: int,
+    *,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+    order_desc: bool = True,
+) -> Tuple[List[Class], int]:
+    """
+    특정 course 에 속한 class 목록.
+    (course 에 속하지 않는 class 는 별도 쿼리 필요)
+    """
+    conds = [Class.course_id == course_id]
+    if status:
+        conds.append(Class.status == status)
+
+    base = select(Class).where(and_(*conds))
+    total = db.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar() or 0
+
+    base = base.order_by(desc(Class.created_at) if order_desc else Class.created_at)
+    rows = db.execute(base.limit(limit).offset(offset)).scalars().all()
+    return rows, total
+
+
+# 필요하면 여기에서 partner_id 기준 조회용 함수도 추가 예정
+# def list_classes_by_partner(...): ...
+
+
+def create_class(
+    db: Session,
+    *,
+    partner_id: int,
+    course_id: Optional[int] = None,
+    name: str,
+    description: Optional[str] = None,
+    status: Optional[str] = None,
+    start_at: Optional[datetime] = None,
+    end_at: Optional[datetime] = None,
+    capacity: Optional[int] = None,
+    timezone: Optional[str] = None,
+    location: Optional[str] = None,
+    online_url: Optional[str] = None,
+    invite_only: Optional[bool] = None,
+) -> Class:
+    """
+    - partner_id: 이 class 를 여는 강사(PartnerUser.id) (필수)
+    - course_id: course 에 소속되면 지정, 아니면 None
+    """
+    obj = Class(
+        partner_id=partner_id,
+        course_id=course_id,
+        name=name,
+        description=description,
+        status=status or "planned",
+        start_at=start_at,
+        end_at=end_at,
+        capacity=capacity,
+        timezone=timezone or "UTC",
+        location=location,
+        online_url=online_url,
+        invite_only=invite_only if invite_only is not None else False,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def update_class(
+    db: Session,
+    class_id: int,
+    *,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    status: Optional[str] = None,
+    start_at: Optional[datetime] = None,
+    end_at: Optional[datetime] = None,
+    capacity: Optional[int] = None,
+    timezone: Optional[str] = None,
+    location: Optional[str] = None,
+    online_url: Optional[str] = None,
+    invite_only: Optional[bool] = None,
+) -> Optional[Class]:
+    obj = db.get(Class, class_id)
+    if not obj:
+        return None
+
+    if name is not None:
+        obj.name = name
+    if description is not None:
+        obj.description = description
+    if status is not None:
+        obj.status = status
+    if start_at is not None:
+        obj.start_at = start_at
+    if end_at is not None:
+        obj.end_at = end_at
+    if capacity is not None:
+        obj.capacity = capacity
+    if timezone is not None:
+        obj.timezone = timezone
+    if location is not None:
+        obj.location = location
+    if online_url is not None:
+        obj.online_url = online_url
+    if invite_only is not None:
+        obj.invite_only = invite_only
+
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def delete_class(db: Session, class_id: int) -> bool:
+    res = db.execute(delete(Class).where(Class.id == class_id))
+    db.commit()
+    return res.rowcount > 0
+
+
+# ==============================
+# InviteCode
+# ==============================
+def get_invite_code(db: Session, code: str) -> Optional[InviteCode]:
+    """
+    초대코드 문자열로 단일 InviteCode 조회.
+    code 는 유니크 제약이 있으므로 0 또는 1개만 존재.
+    """
+    stmt = select(InviteCode).where(InviteCode.code == code)
+    return db.execute(stmt).scalars().first()
+
+
+def get_invite_by_id(db: Session, invite_id: int) -> Optional[InviteCode]:
+    """
+    PK 기준 InviteCode 조회.
+    """
+    return db.get(InviteCode, invite_id)
+
+
+def create_invite_code(
+    db: Session,
+    *,
+    partner_id: int,
+    code: str,
+    target_role: str,
+    class_id: Optional[int],
+    expires_at: Optional[datetime],
+    max_uses: Optional[int],
+    status: str,
+    created_by: Optional[int],
+) -> InviteCode:
+    """
+    partner.invite_codes 생성.
+    - target_role 은 현재 'student' 만 허용
+    - class_id 는 NOT NULL 이므로 None 이면 에러.
+    """
+    if target_role != "student":
+        raise ValueError("InviteCode.target_role 은 'student'만 허용됩니다.")
+    if class_id is None:
+        raise ValueError("class 기반 초대코드이므로 class_id 는 필수입니다.")
+    if status not in ("active", "expired", "disabled"):
+        raise ValueError("InviteCode.status 값이 올바르지 않습니다.")
+
+    obj = InviteCode(
+        partner_id=partner_id,
+        class_id=class_id,
+        code=code,
+        target_role=target_role,
+        expires_at=expires_at,
+        max_uses=max_uses,
+        status=status,
+        created_by=created_by,
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+def get_invite_for_redeem(db: Session, *, code: str) -> Optional[InviteCode]:
+    """
+    초대코드 입력 화면에서 사용할 수 있는 유효한 InviteCode 조회.
+
+    조건:
+    - code 일치
+    - status = 'active'
+    - (expires_at 가 있으면) 아직 만료 전
+    - (max_uses 가 있으면) used_count < max_uses
+    """
+    invite = get_invite_code(db, code)
+    if not invite:
+        return None
+
+    now = datetime.utcnow()
+
+    # 상태 체크
+    if getattr(invite, "status", None) != "active":
+        return None
+
+    # 만료일 체크
+    expires_at = getattr(invite, "expires_at", None)
+    if expires_at is not None and expires_at < now:
+        return None
+
+    # 사용 횟수 체크 (모델에 used_count 가 있다고 가정)
+    max_uses = getattr(invite, "max_uses", None)
+    used_count = getattr(invite, "used_count", None)
+    if max_uses is not None and used_count is not None and used_count >= max_uses:
+        return None
+
+    return invite
+
+
+def mark_invite_used(
+    db: Session,
+    *,
+    invite_id: int,
+    student_id: Optional[int] = None,
+) -> Optional[InviteCode]:
+    """
+    초대코드 사용 처리.
+    - used_count 증가
+    - used_at 또는 last_used_at 갱신
+    - student_id 기록 가능하면 기록
+    - max_uses 에 도달하면 status 를 'used' 로 변경 (또는 그대로 두고 싶으면 조정)
+    """
+    invite = db.get(InviteCode, invite_id)
+    if not invite:
+        return None
+
+    now = datetime.utcnow()
+
+    # used_count 증가 (필드가 있다고 가정)
+    if hasattr(invite, "used_count"):
+        invite.used_count = (invite.used_count or 0) + 1
+
+    # 사용 시각 기록 (모델 필드명에 맞춰 하나만 써도 됨)
+    if hasattr(invite, "used_at"):
+        invite.used_at = now
+    if hasattr(invite, "last_used_at"):
+        invite.last_used_at = now
+
+    # 마지막 사용 학생 기록
+    if student_id is not None and hasattr(invite, "last_used_by_student_id"):
+        invite.last_used_by_student_id = student_id
+
+    # max_uses 도달 시 status 변경
+    max_uses = getattr(invite, "max_uses", None)
+    used_count = getattr(invite, "used_count", None)
+    if max_uses is not None and used_count is not None and used_count >= max_uses:
+        # 단일용 코드라면 'used' 로, 여러 번 쓰는 코드면 유지하고 싶으면 이 부분 조정
+        invite.status = "used"
+
+    db.add(invite)
+    db.commit()
+    db.refresh(invite)
+    return invite

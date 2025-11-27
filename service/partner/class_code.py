@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from crud.partner import course as course_crud
 from models.partner.course import Class, InviteCode
-from schemas.partner.course import ClassCreate
+from schemas.partner.classes import ClassCreate
 from service.partner.invite import _generate_unique_code, InviteServiceError
 
 logger = logging.getLogger(__name__)
