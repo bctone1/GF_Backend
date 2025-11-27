@@ -32,7 +32,7 @@ from app.endpoints.user.practice import router as practice
 
 
 def register_routers(app: FastAPI) -> None:
-    app.include_router(common_course, prefix="partner/course", tags=["유틸"])
+    app.include_router(common_course, prefix="/course", tags=["유틸"])
     # app.include_router(links, prefix="/links", tags=["links"])
 
     # ==============================
