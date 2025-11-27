@@ -17,6 +17,7 @@ from schemas.partner.classes import (
     InviteCodePage,
 )
 from crud.partner import course as crud_course
+from crud.partner import classes as crud_classes
 from service.partner import class_code as class_code_service
 from models.partner.course import Class  # partner_id 기준 리스트용
 
@@ -115,7 +116,7 @@ def get_class(
     db: Session = Depends(get_db),
     _=Depends(get_current_partner_user),
 ):
-    obj = crud_course.get_class(db, class_id)
+    obj = crud_classes.get_class(db, class_id)
     if not obj or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
