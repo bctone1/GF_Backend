@@ -143,11 +143,8 @@ def user_signup(
 ):
     """
     기본 사용자 회원가입.
-    - 공개 회원가입에서는 is_partner 는 무시
+    - 항상 일반 member 로 생성 (partner_id / 역할 승격은 별도 플로우에서 처리)
     """
-    if hasattr(payload, "is_partner"):
-        payload.is_partner = None
-
     return account_service.signup(db, payload)
 
 
@@ -195,7 +192,7 @@ def update_my_account(
     # 클라이언트에서 민감 필드 변경 방지
     data.pop("status", None)
     data.pop("default_role", None)
-    data.pop("is_partner", None)
+    data.pop("partner_id", None)
 
     updated = user_crud.update_user(db, user=me, data=data)
     return UserResponse.model_validate(updated)

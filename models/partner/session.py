@@ -7,6 +7,7 @@ from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from pgvector.sqlalchemy import Vector
+
 from models.base import Base
 
 
@@ -21,7 +22,7 @@ class AiSession(Base):
         ForeignKey("partner.students.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # 분반 컨텍스트(선택사항임, 널 트루)
+    # 분반 컨텍스트(선택사항, 널 허용)
     class_id = Column(
         BigInteger,
         ForeignKey("partner.classes.id", ondelete="SET NULL"),
@@ -39,9 +40,10 @@ class AiSession(Base):
     total_tokens = Column(Integer, nullable=False, server_default=text("0"))
     total_cost = Column(Numeric(14, 4), nullable=False, server_default=text("0"))
 
+    # 세션을 시작한 파트너(강사) id - partners.id 참조
     initiated_by = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="SET NULL"),
+        ForeignKey("partner.partners.id", ondelete="SET NULL"),
         nullable=True,
     )
 

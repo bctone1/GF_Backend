@@ -54,8 +54,7 @@ class UserCreate(ORMBase):
     full_name: Optional[str] = None          # 프로필 초기값에 사용 가능
     status: Optional[str] = None             # 서버 기본값 'active' 사용 가능
     default_role: Optional[str] = None       # 서버 기본값 'member' 사용 가능
-    # 일반 회원가입에서는 사용하지 않고, supervisor/관리자 API에서만 의미 있게 쓸 수 있음
-    is_partner: Optional[bool] = None        # 서버 기본값 false 사용
+    # 일반 회원가입에서는 status/default_role 무시, supervisor/관리자 API에서만 의미 있게 사용
 
 
 class UserUpdate(ORMBase):
@@ -64,7 +63,7 @@ class UserUpdate(ORMBase):
     password: Optional[str] = None
     status: Optional[str] = None
     default_role: Optional[str] = None
-    is_partner: Optional[bool] = None        # 승격/해지 로직에서만 사용
+    # partner_id 변경은 엔드포인트에서 막음 (user/account.py)
 
 
 class UserResponse(ORMBase):
@@ -72,7 +71,8 @@ class UserResponse(ORMBase):
     email: EmailStr
     status: str
     default_role: str
-    is_partner: bool                         # 한 번 승격되면 true 유지
+    # 강사(파트너)로 승격되면 partner_id 가 채워짐, 아니면 None
+    partner_id: Optional[int] = None
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

@@ -7,6 +7,7 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
+
 from models.base import Base
 from models.partner.catalog import ModelCatalog
 
@@ -72,6 +73,7 @@ class Course(Base):
         {"schema": "partner"},
     )
 
+
 # ========== partner.classes ==========
 class Class(Base):
     __tablename__ = "classes"
@@ -80,10 +82,10 @@ class Class(Base):
 
     description = Column(Text)
 
-    # 1 class : 1 partner(강사) = PartnerUser.id
+    # 1 class : 1 partner(강사) = Partner.id
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="CASCADE"),  # ← 여기
+        ForeignKey("partner.partners.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -106,11 +108,12 @@ class Class(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
+    # course ↔ class
     course = relationship("Course", back_populates="classes", passive_deletes=True)
 
-    # 클래스 → 담당 파트너(강사, PartnerUser)
+    # 클래스 → 담당 파트너(강사, Partner)
     partner = relationship(
-        "PartnerUser",
+        "Partner",
         back_populates="classes",
         foreign_keys=[partner_id],
         passive_deletes=True,
@@ -144,10 +147,10 @@ class InviteCode(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 이 초대코드를 소유하는 파트너(강사, PartnerUser)
+    # 이 초대코드를 소유하는 파트너(강사, Partner)
     partner_id = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="CASCADE"),  # ← 여기
+        ForeignKey("partner.partners.id", ondelete="CASCADE"),
         nullable=False,
     )
 
@@ -166,10 +169,10 @@ class InviteCode(Base):
     used_count = Column(Integer, nullable=False, server_default=text("0"))
     status = Column(Text, nullable=False, server_default=text("'active'"))
 
-    # 실제 생성한 PartnerUser (강사/assistant)
+    # 실제 생성한 Partner (강사)
     created_by = Column(
         BigInteger,
-        ForeignKey("partner.partner.id", ondelete="SET NULL"),  # ← 여기
+        ForeignKey("partner.partners.id", ondelete="SET NULL"),
     )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -181,17 +184,17 @@ class InviteCode(Base):
         passive_deletes=True,
     )
 
-    # 이 초대코드를 소유하는 강사(PartnerUser)
+    # 이 초대코드를 소유하는 강사(Partner)
     partner = relationship(
-        "PartnerUser",
+        "Partner",
         foreign_keys=[partner_id],
         back_populates="invite_codes",
         passive_deletes=True,
     )
 
-    # 초대코드를 실제 생성한 PartnerUser
+    # 초대코드를 실제 생성한 Partner
     creator = relationship(
-        "PartnerUser",
+        "Partner",
         foreign_keys=[created_by],
         back_populates="created_invite_codes",
         passive_deletes=True,
