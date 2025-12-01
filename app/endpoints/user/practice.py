@@ -41,15 +41,14 @@ from schemas.user.practice import (
     ModelComparisonCreate,
     ModelComparisonUpdate,
     ModelComparisonResponse,
+    PracticeTurnRequest,
+    PracticeTurnResponse,
 )
-from schemas.user.practice import PracticeTurnRequest, PracticeTurnResponse
-
 from service.user.practice import (
     set_primary_model_for_session,
-    run_practice_turn,  # 추후 LLM 연동 시 사용
-    # create_model_comparison_from_metrics,  # 메트릭 기반 비교 생성 시 사용
+    run_practice_turn,
+    # create_model_comparison_from_metrics,
 )
-
 
 router = APIRouter()
 
@@ -128,6 +127,7 @@ def list_my_practice_sessions(
     response_model=PracticeSessionResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session",
+    summary="세션 생성",
 )
 def create_practice_session(
     data: PracticeSessionCreate,
@@ -212,6 +212,7 @@ def list_practice_session_models(
     response_model=PracticeSessionModelResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session_model",
+    summary="세션에 모델 추가",
 )
 def create_practice_session_model(
     session_id: int = Path(..., ge=1),
@@ -311,6 +312,7 @@ def list_practice_responses_by_model(
     response_model=PracticeResponseResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_response",
+    summary="실습 응답 생성",
 )
 def create_practice_response(
     session_model_id: int = Path(..., ge=1),
@@ -325,10 +327,6 @@ def create_practice_response(
     resp = practice_response_crud.create(db, data_in)
     db.commit()
     return PracticeResponseResponse.model_validate(resp)
-
-    # NOTE:
-    # - 실제 LLM 호출 + token_usage/latency 계산은
-    #   service.user.practice.run_practice_turn 을 사용해 별도 /chat 엔드포인트로 빼는 방식 추천
 
 
 @router.get(
@@ -480,6 +478,7 @@ def list_model_comparisons_for_session(
     response_model=ModelComparisonResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_model_comparison",
+    summary="모델 비교 생성",
 )
 def create_model_comparison(
     session_id: int = Path(..., ge=1),
@@ -493,10 +492,6 @@ def create_model_comparison(
     comp = model_comparison_crud.create(db, data_in)
     db.commit()
     return ModelComparisonResponse.model_validate(comp)
-
-    # NOTE:
-    # - 메트릭 기반 비교 생성은 service.user.practice.create_model_comparison_from_metrics
-    #   를 사용하는 별도 엔드포인트로 빼는 방식 추천
 
 
 @router.patch(
@@ -535,12 +530,16 @@ def delete_model_comparison(
     db.commit()
     return None
 
-## LLM  창에 입력 들어올때 쓰는 엔드포인트
+
+# =========================================
+# LLM /chat 엔드포인트
+# =========================================
 @router.post(
     "/sessions/{session_id}/chat",
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_turn_for_session",
+    summary="LLM 실습 턴 실행",
 )
 def run_practice_turn_endpoint(
     session_id: int = Path(..., ge=1),
@@ -563,7 +562,7 @@ def run_practice_turn_endpoint(
                 )
             models.append(model)
     else:
-        # 지정 없으면 세션에 등록된 모든 모델에 병렬 호출
+        # 지정 없을시 세션에 등록된 모든 모델에 순차 호출
         models = practice_session_model_crud.list_by_session(db, session_id=session_id)
 
     if not models:
@@ -580,4 +579,4 @@ def run_practice_turn_endpoint(
         user=me,
     )
     db.commit()
-    return PracticeTurnResponse.model_validate(turn_result)
+    return turn_result

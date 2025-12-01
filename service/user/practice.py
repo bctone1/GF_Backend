@@ -20,10 +20,15 @@ from crud.user.practice import (
 from schemas.user.practice import (
     PracticeResponseCreate,
     ModelComparisonCreate,
+    PracticeSessionCreate,
+    PracticeSessionModelCreate,
+    PracticeSessionUpdate,
+    PracticeTurnModelResult,
+    PracticeTurnResponse,
 )
 from core import config
 from langchain_service.llm.setup import get_llm
-
+from langchain_service.llm.runner import generate_session_title_llm, _run_qa
 import time
 
 
@@ -130,16 +135,7 @@ def _call_llm_for_model(
     provider = model_conf["provider"]
     real_model_name = model_conf["model_name"]
 
-    # get_llm provider 여부에 따라 선택 (없으면 모델만 받아도됨)
-    # 1) provider 지원 버전
-    # llm = get_llm(
-    #     provider=provider,
-    #     model=real_model_name,
-    #     streaming=False,
-    #     callbacks=None,
-    # )
-
-    # 2) 아직 provider 인자 없이 model만 받는 버전:
+    # provider 인자가 필요한 버전이면 provider도 넘겨주면 됨
     llm = get_llm(
         model=real_model_name,
         streaming=False,
@@ -167,65 +163,146 @@ def _call_llm_for_model(
 
 
 # =========================================
-# 멀티 모델 Practice 턴 실행
+# 첫 턴에서 세션 생성 + 자동 타이틀
+# =========================================
+def create_session_with_first_turn(
+    db: Session,
+    *,
+    user: AppUser,
+    model_name: str,
+    prompt_text: str,
+    knowledge_id: int | None = None,
+) -> tuple[PracticeSession, PracticeResponse]:
+    # 1) 세션 생성
+    session = practice_session_crud.create(
+        db,
+        PracticeSessionCreate(
+            user_id=user.user_id,
+            title=None,
+            notes=None,
+        ),
+    )
+
+    # 2) 세션-모델 연결
+    session_model = practice_session_model_crud.create(
+        db,
+        PracticeSessionModelCreate(
+            session_id=session.session_id,
+            model_name=model_name,
+            is_primary=True,
+        ),
+    )
+
+    # 3) LLM 호출 (RAG or 일반 QA)
+    qa = _run_qa(
+        db,
+        question=prompt_text,
+        knowledge_id=knowledge_id,
+        top_k=3,
+        session_id=None,  # 필요하면 세션 연동
+    )
+
+    # 4) 응답 저장
+    response = practice_response_crud.create(
+        db,
+        PracticeResponseCreate(
+            session_model_id=session_model.session_model_id,
+            prompt_text=prompt_text,
+            response_text=qa.answer,
+            token_usage=None,   # 나중에 runner에서 토큰정보 넘겨받으면 채우기
+            latency_ms=None,
+        ),
+    )
+
+    # 5) 제목 자동 생성 + 업데이트
+    title = generate_session_title_llm(prompt_text, qa.answer)
+    session = practice_session_crud.update(
+        db,
+        session_id=session.session_id,
+        data=PracticeSessionUpdate(title=title),
+    )
+
+    return session, response
+
+
+# =========================================
+# 멀티 모델 Practice 턴 실행 (/sessions/{session_id}/chat)
 # =========================================
 def run_practice_turn(
     *,
     db: Session,
     session: PracticeSession,
-    models: List[PracticeSessionModel],
+    models: list[PracticeSessionModel],
     prompt_text: str,
     user: AppUser,
-) -> Dict[str, Any]:
+) -> PracticeTurnResponse:
     """
-    하나의 prompt_text 를 받아 주어진 여러 PracticeSessionModel 에 순차 호출하고
-    PracticeResponse 를 생성한 뒤, /chat 응답 스키마(PracticeTurnResponse)에 맞는 dict 를 리턴.
-
-    NOTE (crud.user.practice.PracticeResponseCRUD):
-    - 세션/모델 검증은 엔드포인트 + 상위 로직에서 수행
-    - 여기서는 LLM 호출 + token_usage/latency 계산
-    - practice_response_crud.create() 를 통해 영구 저장
+    - 각 모델에 LLM 호출
+    - PracticeResponse 레코드 생성
+    - 세션에 title 없으면 자동 생성하여 업데이트
     """
     if session.user_id != user.user_id:
         raise PermissionError("session not owned by user")
 
-    results: List[Dict[str, Any]] = []
+    results: list[PracticeTurnModelResult] = []
 
     for m in models:
-        # 안전 검증: 모델이 해당 세션에 속하는지 확인
         if m.session_id != session.session_id:
             raise ValueError("session_model does not belong to given session")
 
+        # 1) LLM 호출
         response_text, token_usage, latency_ms = _call_llm_for_model(
             model_name=m.model_name,
             prompt_text=prompt_text,
         )
 
-        # DB에 PracticeResponse 생성 (CRUD NOTE 반영)
-        resp_in = PracticeResponseCreate(
-            session_model_id=m.session_model_id,
-            prompt_text=prompt_text,
-            response_text=response_text,
-            token_usage=token_usage,
-            latency_ms=latency_ms,
+        # 2) 응답 저장
+        resp = practice_response_crud.create(
+            db,
+            PracticeResponseCreate(
+                session_model_id=m.session_model_id,
+                prompt_text=prompt_text,
+                response_text=response_text,
+                token_usage=token_usage,
+                latency_ms=latency_ms,
+            ),
         )
-        resp: PracticeResponse = practice_response_crud.create(db, resp_in)
 
+        # 3) 응답 DTO 생성
         results.append(
-            {
-                "session_model_id": m.session_model_id,
-                "model_name": m.model_name,
-                "response_id": resp.response_id,
-                "prompt_text": resp.prompt_text,
-                "response_text": resp.response_text,
-                "latency_ms": resp.latency_ms,
-                "token_usage": resp.token_usage,
-                "created_at": resp.created_at,
-            }
+            PracticeTurnModelResult(
+                session_model_id=m.session_model_id,
+                model_name=m.model_name,
+                response_id=resp.response_id,
+                prompt_text=resp.prompt_text,
+                response_text=resp.response_text,
+                token_usage=resp.token_usage,
+                latency_ms=resp.latency_ms,
+                created_at=resp.created_at,
+                is_primary=m.is_primary,
+            )
         )
 
-    return {
-        "session_id": session.session_id,
-        "prompt_text": prompt_text,
-        "results": results,
-    }
+    # 4) 세션 제목이 아직 없으면 → 첫 턴 기준으로 자동 생성
+    if not session.title and results:
+        primary = next((r for r in results if r.is_primary), results[0])
+        title = generate_session_title_llm(
+            question=prompt_text,
+            answer=primary.response_text,
+            max_chars=30,
+        )
+
+        practice_session_crud.update(
+            db,
+            session_id=session.session_id,
+            data=PracticeSessionUpdate(title=title),
+        )
+        session.title = title  # in-memory 도 같이 반영
+
+    # 5) 클라이언트로 돌려줄 DTO
+    return PracticeTurnResponse(
+        session_id=session.session_id,
+        session_title=session.title,
+        prompt_text=prompt_text,
+        results=results,
+    )

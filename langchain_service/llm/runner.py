@@ -31,6 +31,8 @@ except Exception:
     except Exception:
         get_openai_callback = None
 
+from langchain_core.messages import SystemMessage, HumanMessage
+
 log = logging.getLogger("api_cost")
 
 MAX_CTX_CHARS = 12000  # qa_chain 기본값과 동일
@@ -280,6 +282,37 @@ def _run_qa(
         answer=str(raw or ""),
         question=question,
         session_id=session_id,
-        sources=sources,    # TODO: _build_sources 구현되면 실제 컨텍스트 들어감
+        sources=sources,    # NOTE: _build_sources 구현되면 실제 컨텍스트 들어감
         documents=sources,  # 호환성 유지용 (기존 필드명)
     )
+
+
+def generate_session_title_llm(
+    question: str,
+    answer: str,
+    *,
+    max_chars: int = 20,
+) -> str:
+    """
+    질문/응답 한 턴을 보고 세션 제목을 한 줄로 만들어주는 LLM 헬퍼.
+    - 도메인 객체(DB)는 전혀 모르게 두고, 텍스트만 다룸.
+    """
+    llm = get_llm(temperature=0.2, streaming=False)
+
+    system = (
+        "너는 사용자의 대화 세션 제목을 지어주는 도우미야. "
+        f"대화 내용을 보고 핵심 주제를 {max_chars}자 이내 한국어로 한 줄 제목으로 만들어라. "
+        "따옴표나 불필요한 기호 없이 제목만 출력해라."
+    )
+    content = f"사용자 질문: {question}\n모델 답변: {answer}"
+
+    res = llm.invoke([
+        SystemMessage(content=system),
+        HumanMessage(content=content),
+    ])
+
+    title = (res.content or "").strip().splitlines()[0]
+    if len(title) > max_chars:
+        title = title[:max_chars]
+    return title
+

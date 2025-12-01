@@ -4,7 +4,6 @@ from typing import Optional, Any, Dict
 from pydantic import ConfigDict
 from schemas.base import ORMBase
 
-
 # =========================================
 # user.practice_sessions
 # =========================================
@@ -166,7 +165,7 @@ class PracticeTurnRequest(ORMBase):
     session_model_ids: Optional[list[int]] = None
 
 
-class SingleModelTurnResult(ORMBase):
+class PracticeTurnModelResult(ORMBase):
     """
     한 모델에 대해 한 번 실행한 결과
     """
@@ -182,6 +181,7 @@ class SingleModelTurnResult(ORMBase):
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
     created_at: datetime
+    is_primary: Optional[bool] = None  # 필요 없으면 제거
 
 
 class PracticeTurnResponse(ORMBase):
@@ -191,5 +191,6 @@ class PracticeTurnResponse(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     session_id: int
+    session_title: Optional[str] = None  # 자동 요약 타이틀
     prompt_text: str
-    results: list[SingleModelTurnResult]
+    results: list[PracticeTurnModelResult]
