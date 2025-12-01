@@ -14,7 +14,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from core.deps import get_db, get_current_user
-from core import config  # ✅ 기본 LLM/연습 모델 설정을 읽기 위함
+from core import config  # 기본 LLM/연습 모델 설정을 읽기 위함
 from models.user.account import AppUser
 
 from crud.user.practice import (
@@ -187,6 +187,11 @@ def run_practice_turn_endpoint(
     - `prompt_text` (필수): 이번 턴에서 보낼 사용자 질문 텍스트
     - `session_model_ids` : 이번 턴에 호출할 세션-모델 ID 목록 널값 하면 자동 디폴트 실행됨
     - `document_ids` : 참고할 지식베이스 문서 ID 목록
+    - 한 session 안에 practice_session_models가 여러 개 붙을 수 있음
+    - /sessions/{session_id}/chat 호출할 때:
+        session_model_ids 비워두면 → 그 세션에 등록된 모든 모델한테 동시에 질문 보냄
+        session_model_ids 배열 채우면 → 거기에 있는 모델들만 호출
+        results[] 배열에 모델별 응답이 각각 한 칸씩 들어옴
 
     [응답 구조]
 
@@ -243,7 +248,7 @@ def run_practice_turn_endpoint(
             if conf.get("enabled", True) and conf.get("default", False):
                 default_model_names.append(name)
 
-        # 2순위: enabled=True 인 첫 번째 모델
+        # 2순위: enabled=True 인 첫 번째 모델(아마도 gpt)
         if not default_model_names:
             for name, conf in practice_models.items():
                 if isinstance(conf, dict) and conf.get("enabled", True):
@@ -299,7 +304,7 @@ def run_practice_turn_endpoint(
     turn_result = run_practice_turn(
         db=db,
         session=session,
-        models=models,
+        models=models,    # 다중 LLM 모델 할때 여기서 모델 여러개 받음
         prompt_text=body.prompt_text,
         user=me,
         document_ids=body.document_ids,
@@ -413,6 +418,15 @@ def update_practice_session_model(
 
     # 1) is_primary 변경 요청이 포함된 경우 → service에서 처리
     if data.is_primary is True:
+        # 먼저 model_name 같은 일반 필드부터 업데이트
+        if data.model_name is not None:
+            practice_session_model_crud.update(
+                db,
+                session_model_id=session_model_id,
+                data=PracticeSessionModelUpdate(model_name=data.model_name),
+            )
+
+        # 그다음 primary 토글
         target = set_primary_model_for_session(
             db,
             me=me,
@@ -421,22 +435,6 @@ def update_practice_session_model(
         )
         db.commit()
         return PracticeSessionModelResponse.model_validate(target)
-
-    # 2) 일반 업데이트 (model_name 등)
-    updated = practice_session_model_crud.update(
-        db,
-        session_model_id=session_model_id,
-        data=data,
-    )
-    db.commit()
-
-    if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="model not found",
-        )
-
-    return PracticeSessionModelResponse.model_validate(updated)
 
 
 @router.delete(
@@ -547,83 +545,6 @@ def delete_practice_response(
 
 
 # =========================================
-# Practice Ratings
-# =========================================
-@router.get(
-    "/responses/{response_id}/ratings",
-    response_model=List[PracticeRatingResponse],
-    operation_id="list_practice_ratings_for_response",
-)
-def list_practice_ratings_for_response(
-    response_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _resp, _model, _session = _ensure_my_response(db, response_id, me)
-    ratings = practice_rating_crud.list_by_response(db, response_id=response_id)
-    return [PracticeRatingResponse.model_validate(r) for r in ratings]
-
-
-@router.put(
-    "/responses/{response_id}/rating",
-    response_model=PracticeRatingResponse,
-    operation_id="upsert_my_practice_rating",
-)
-def upsert_my_practice_rating(
-    response_id: int = Path(..., ge=1),
-    body: PracticeRatingCreate = ...,
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _resp, _model, _session = _ensure_my_response(db, response_id, me)
-
-    data_in = PracticeRatingCreate(
-        response_id=response_id,
-        user_id=me.user_id,
-        score=body.score,
-        feedback=body.feedback,
-    )
-    rating = practice_rating_crud.upsert(db, data_in)
-    db.commit()
-    return PracticeRatingResponse.model_validate(rating)
-
-
-@router.patch(
-    "/ratings/{rating_id}",
-    response_model=PracticeRatingResponse,
-    operation_id="update_my_practice_rating",
-)
-def update_my_practice_rating(
-    rating_id: int = Path(..., ge=1),
-    body: PracticeRatingUpdate = ...,
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    rating = _ensure_my_rating(db, rating_id, me)
-    updated = practice_rating_crud.update(db, rating_id=rating_id, data=body)
-    db.commit()
-    if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="rating not found")
-    return PracticeRatingResponse.model_validate(updated)
-
-
-@router.delete(
-    "/ratings/{rating_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    operation_id="delete_my_practice_rating",
-)
-def delete_my_practice_rating(
-    rating_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ = _ensure_my_rating(db, rating_id, me)
-    practice_rating_crud.delete(db, rating_id=rating_id)
-    db.commit()
-    return None
-
-
-# =========================================
 # Model Comparisons
 # =========================================
 @router.get(
@@ -699,3 +620,78 @@ def delete_model_comparison(
     return None
 
 
+# =========================================
+# Practice Ratings
+# =========================================
+@router.get(
+    "/responses/{response_id}/ratings",
+    response_model=List[PracticeRatingResponse],
+    operation_id="list_practice_ratings_for_response",
+)
+def list_practice_ratings_for_response(
+    response_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _resp, _model, _session = _ensure_my_response(db, response_id, me)
+    ratings = practice_rating_crud.list_by_response(db, response_id=response_id)
+    return [PracticeRatingResponse.model_validate(r) for r in ratings]
+
+
+@router.put(
+    "/responses/{response_id}/rating",
+    response_model=PracticeRatingResponse,
+    operation_id="upsert_my_practice_rating",
+)
+def upsert_my_practice_rating(
+    response_id: int = Path(..., ge=1),
+    body: PracticeRatingCreate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _resp, _model, _session = _ensure_my_response(db, response_id, me)
+
+    data_in = PracticeRatingCreate(
+        response_id=response_id,
+        user_id=me.user_id,
+        score=body.score,
+        feedback=body.feedback,
+    )
+    rating = practice_rating_crud.upsert(db, data_in)
+    db.commit()
+    return PracticeRatingResponse.model_validate(rating)
+
+
+@router.patch(
+    "/ratings/{rating_id}",
+    response_model=PracticeRatingResponse,
+    operation_id="update_my_practice_rating",
+)
+def update_my_practice_rating(
+    rating_id: int = Path(..., ge=1),
+    body: PracticeRatingUpdate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    rating = _ensure_my_rating(db, rating_id, me)
+    updated = practice_rating_crud.update(db, rating_id=rating_id, data=body)
+    db.commit()
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="rating not found")
+    return PracticeRatingResponse.model_validate(updated)
+
+
+@router.delete(
+    "/ratings/{rating_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="delete_my_practice_rating",
+)
+def delete_my_practice_rating(
+    rating_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = _ensure_my_rating(db, rating_id, me)
+    practice_rating_crud.delete(db, rating_id=rating_id)
+    db.commit()
+    return None

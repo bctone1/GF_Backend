@@ -137,10 +137,10 @@ PRACTICE_MODELS = {
     },
     "claude-3.7-haiku": {
         "provider": "anthropic",
-        "model_name": "claude-3.7-haiku",
+        "model_name": "claude-3-haiku-20240307",
         "display_name": "Claude 3.7 Haiku",
         "enabled": True,
-        "default": True,
+        "default": False,
     },
     "gemini-2.5-flash": {
         "provider": "google",

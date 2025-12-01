@@ -230,11 +230,11 @@ def _call_llm_for_model(
     if model_conf is None or not model_conf.get("enabled", True):
         raise ValueError(f"unsupported or disabled model_name: {model_name}")
 
-    provider = model_conf["provider"]
+    provider = model_conf.get("provider", "openai")
     real_model_name = model_conf["model_name"]
 
-    # provider 인자가 필요한 버전이면 provider도 넘겨주면 됨
     llm = get_llm(
+        provider=provider,
         model=real_model_name,
         streaming=False,
         callbacks=None,

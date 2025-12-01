@@ -38,20 +38,38 @@ def get_llm(
 
     지원 provider 예시:
       - "openai"        : gpt-4o-mini 등
-      - "lg" / "friendli" / "exaone" : exaone-4.0 (Friendli OpenAI 호환)
-      - "anthropic"     : claude-3.7-haiku 등
-      - "google"        : gemini-2.5-flash 등
+      - "friendli" / "lg" / "exaone" : exaone-4.0 (Friendli OpenAI 호환)
+      - "anthropic"     : claude-3-* 계열
+      - "google"        : gemini-* 계열
     """
-    # 기본값은 config.LLM_PROVIDER (없으면 openai)
-    provider = (provider or getattr(config, "LLM_PROVIDER", "openai")).lower()
-
-    # 공통 default model (없을 때만 사용)
+    # 1) 기본 모델 결정
     default_chat_model = getattr(config, "DEFAULT_CHAT_MODEL", "gpt-4o-mini")
     default_llm_model = getattr(config, "LLM_MODEL", default_chat_model)
+    resolved_model = model or default_llm_model
 
-    # -------------------------
-    # OpenAI 계열 (gpt-4o-mini 등)
-    # -------------------------
+    # 2) provider 자동 추론 (명시 안 한 경우)
+    if not provider:
+        # 2-1) PRACTICE_MODELS 에 설정된 provider 우선
+        practice_models = getattr(config, "PRACTICE_MODELS", {}) or {}
+        conf = practice_models.get(resolved_model)
+        if isinstance(conf, dict) and conf.get("provider"):
+            provider = str(conf["provider"]).lower()
+        else:
+            # 2-2) 모델 이름으로 휴리스틱
+            lm = resolved_model.lower()
+            if lm.startswith("claude"):
+                provider = "anthropic"
+            elif lm.startswith("gemini"):
+                provider = "google"
+            elif "exaone" in lm or "friendli" in lm or lm.startswith("lg"):
+                provider = "friendli"
+            else:
+                provider = getattr(config, "LLM_PROVIDER", "openai")
+
+    provider = provider.lower()
+
+    # 3) provider별 분기
+    # ------------------------- OpenAI -------------------------
     if provider == "openai":
         key = _pick_key(
             api_key,
@@ -62,17 +80,14 @@ def get_llm(
         if not key:
             raise RuntimeError("OPENAI_API 키가 설정되지 않았습니다.")
 
-        use_model = model or default_llm_model
         return ChatOpenAI(
-            model=use_model,
+            model=resolved_model,
             api_key=key,
             temperature=temperature,
             **kwargs,
         )
 
-    # -------------------------
-    # LG / Friendli / EXAONE (OpenAI 호환 엔드포인트)
-    # -------------------------
+    # ------------------------- Friendli / EXAONE -------------------------
     elif provider in ("friendli", "lg", "lgai", "exaone", "EXAONE"):
         key = _pick_key(
             api_key,
@@ -83,26 +98,23 @@ def get_llm(
         )
         if not key:
             raise RuntimeError(
-                "Friendli/EXAONE API 키가 설정되지 않았습니다. FRIENDLI_API 또는 FRIENDLI_TOKEN을 설정하세요."
+                "Friendli/EXAONE API 키가 설정되지 않았습니다. "
+                "FRIENDLI_API 또는 FRIENDLI_TOKEN을 설정하세요."
             )
 
-        # EXAONE은 Friendli OpenAI 호환 엔드포인트로 호출
         base_url = getattr(config, "FRIENDLI_BASE_URL", None) or getattr(
             config, "EXAONE_URL", None
         )
-        use_model = model or default_llm_model  # 예: "exaone-4.0" 또는 endpoint_id
 
         return ChatOpenAI(
-            model=use_model,
+            model=resolved_model,
             api_key=key,
             base_url=base_url,
             temperature=temperature,
             **kwargs,
         )
 
-    # -------------------------
-    # Anthropic (Claude)
-    # -------------------------
+    # ------------------------- Anthropic (Claude) -------------------------
     elif provider in ("anthropic", "claude"):
         if ChatAnthropic is None:
             raise RuntimeError(
@@ -117,13 +129,13 @@ def get_llm(
         if not key:
             raise RuntimeError("CLAUDE_API(Anthropic) 키가 설정되지 않았습니다.")
 
-        # config.ANTHROPIC_MODELS가 있으면 첫 번째 모델을 기본값으로
         anthropic_models = getattr(config, "ANTHROPIC_MODELS", "") or ""
         default_anthropic_model = (
             anthropic_models.split(",")[0].strip()
             if anthropic_models
             else "claude-3-5-sonnet-latest"
         )
+        # model 인자를 직접 넘기면 그걸 우선 사용
         use_model = model or default_anthropic_model
 
         return ChatAnthropic(
@@ -133,9 +145,7 @@ def get_llm(
             **kwargs,
         )
 
-    # -------------------------
-    # Google (Gemini)
-    # -------------------------
+    # ------------------------- Google (Gemini) -------------------------
     elif provider in ("google", "gemini"):
         if ChatGoogleGenerativeAI is None:
             raise RuntimeError(
@@ -165,9 +175,7 @@ def get_llm(
             **kwargs,
         )
 
-    # -------------------------
-    # 미지원 provider
-    # -------------------------
+    # ------------------------- 기타 미지원 -------------------------
     else:
         raise ValueError(f"지원되지 않는 제공자: {provider}")
 
