@@ -163,7 +163,7 @@ class PracticeTurnRequest(ORMBase):
 
     prompt_text: str
     session_model_ids: Optional[list[int]] = None
-
+    document_ids: Optional[list[int]] = None  # 내가 선택한 문서들
 
 class PracticeTurnModelResult(ORMBase):
     """

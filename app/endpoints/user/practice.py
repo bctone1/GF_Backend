@@ -154,20 +154,66 @@ def run_practice_turn_endpoint(
     session_id: int = Path(
         ...,
         ge=0,
-        description="0이면 새 세션을 생성해서 첫 턴을 실행하고, 1 이상이면 해당 세션에서 이어서 대화합니다.",
+        description="0이면 자동으로 새 세션을 생성 실행, 1 이상이면 해당 세션에서 이어서 대화",
     ),
     body: PracticeTurnRequest = ...,
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
     """
-    session_id 사용 규칙:
-    - 0  : 새 practice_session을 생성하고 기본 모델들을 붙인 뒤 첫 턴을 실행
-    - >0 : 기존 세션에 등록된 모델(또는 session_model_ids로 지정한 모델)로 턴 실행
+   [요청 시나리오]
+
+    1. **새 대화 시작**
+       - `session_id = 0` 으로 호출
+       - 서버가 새로운 practice_session 을 만들고,
+         설정된 기본 모델들(`PRACTICE_MODELS` 중 enabled/default)로 세션을 초기화한 뒤
+         각 모델에 한 번씩 질문을 보내서 첫 응답을 생성
+       - 응답에 포함된 `session_id` 를 이후 턴에서 그대로 재사용
+
+    2. **기존 대화 이어서 하기**
+       - 이전에 받은 `session_id` 로 호출 (`/sessions/{session_id}/chat`)
+       - `session_model_ids` 를 비워 두면: 해당 세션에 등록된 **모든 모델**에게 질문을 보냄
+       - `session_model_ids` 에 ID 배열을 넣으면: 그 ID에 해당하는 모델들만 호출합니다.
+
+    3. **지식베이스(RAG) 기반으로 질문하기**
+       - `document_ids` 에 사용자가 업로드한 문서 ID 배열을 넘기면,
+         서버가 해당 문서들의 벡터 임베딩을 이용해
+         질문과 가장 관련도 높은 청크들(top-k)을 찾아 **프롬프트 앞에 컨텍스트로 붙인 뒤**
+         각 LLM에 전달
+       - 아무 값도 안 넘기면 일반 LLM 채팅처럼 동작
+
+    [요청 바디]
+
+    - `prompt_text` (필수): 이번 턴에서 보낼 사용자 질문 텍스트
+    - `session_model_ids` : 이번 턴에 호출할 세션-모델 ID 목록 널값 하면 자동 디폴트 실행됨
+    - `document_ids` : 참고할 지식베이스 문서 ID 목록
+
+    [응답 구조]
+
+    - `session_id` : 현재 대화 세션 ID
+    - `session_title` : 세션 제목 (첫 턴에서 자동 생성, 이후 유지)
+    - `prompt_text` : 이번 턴에서 보낸 질문 텍스트
+    - `results[]` : **모델별 응답 리스트** (밑에건 아직 구현중)
+        - `session_model_id` : 세션 내 모델 식별자
+        - `model_name` : 논리 모델 이름 (예: `gpt-4o-mini`, `claude-3.7-haiku`)
+        - `response_id` : 저장된 응답 ID
+        - `response_text` : 해당 모델의 답변 텍스트
+        - `token_usage` : 토큰 사용량 정보(있을 때만 값 존재)
+        - `latency_ms` : 해당 모델 응답까지 걸린 시간(ms)
+        - `created_at` : 응답 생성 시각
+        - `is_primary` : 대표 모델 여부 (자동 제목 생성 등에 사용)config에서 함
+
+    [프로세스]
+    - 새 대화 시작:
+      - `POST /user/practice/sessions/0/chat` 한 번 호출 → `session_id` 저장
+    - 이후 턴:
+      - 같은 `session_id` 로 계속 `/chat` 호출
+    - 화면 구성:
+      - `results` 배열을 기반으로 **모델별 컬럼**을 만들어
+        각 모델의 답변/레이턴시/토큰 사용량을 나란히 비교해서 보여줌(구현중)
     """
-    # -----------------------------
+
     # 1) session_id == 0 → 새 세션 + 기본 모델 자동 생성
-    # -----------------------------
     if session_id == 0:
         # 새 세션 생성일 때는 session_model_ids 지정을 막아둠 (아직 존재하지 않는 id이므로)
         if body.session_model_ids:
@@ -225,10 +271,8 @@ def run_practice_turn_endpoint(
             models.append(m)
             is_first = False
 
+    # 2) session_id > 0 → 기존 세션에 대해 턴 실행
     else:
-        # -----------------------------
-        # 2) session_id > 0 → 기존 세션에 대해 턴 실행
-        # -----------------------------
         session = _ensure_my_session(db, session_id, me)
 
         # 어떤 모델들에 보낼지 결정
@@ -258,6 +302,7 @@ def run_practice_turn_endpoint(
         models=models,
         prompt_text=body.prompt_text,
         user=me,
+        document_ids=body.document_ids,
     )
     db.commit()
     return turn_result

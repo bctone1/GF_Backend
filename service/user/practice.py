@@ -17,6 +17,11 @@ from crud.user.practice import (
     practice_response_crud,
     model_comparison_crud,
 )
+from crud.user.document import (
+    document_crud,
+    document_chunk_crud,
+)
+
 from schemas.user.practice import (
     PracticeResponseCreate,
     ModelComparisonCreate,
@@ -29,7 +34,100 @@ from schemas.user.practice import (
 from core import config
 from langchain_service.llm.setup import get_llm
 from langchain_service.llm.runner import generate_session_title_llm, _run_qa
+from langchain_service.embedding.get_vector import texts_to_vectors
 import time
+
+
+# =========================================
+# 질문 → 벡터 임베딩 헬퍼
+# =========================================
+def _embed_question_to_vector(question: str) -> list[float]:
+    """
+    질문 텍스트를 pgvector용 벡터(list[float])로 변환.
+    인제스트 때와 동일한 임베딩 모델(texts_to_vectors) 사용.
+    """
+    cleaned = (question or "").strip()
+    if not cleaned:
+        return []
+
+    vectors = texts_to_vectors([cleaned])  # 인제스트 때랑 동일한 함수
+    if not vectors:
+        return []
+
+    return vectors[0]
+
+
+# =========================================
+# 지식베이스 컨텍스트 빌더 (벡터 top-k 기반)
+# =========================================
+def _build_context_from_documents(
+    db: Session,
+    user: AppUser,
+    document_ids: List[int],
+    question: str,
+    max_chunks: int = 10,
+) -> str:
+    """
+    선택한 document_ids 기준으로:
+    - 내 소유 문서인지 검증
+    - 질문을 임베딩해서 pgvector 코사인 거리 기반 top-k 청크 검색
+    - 상위 청크들을 하나의 컨텍스트 텍스트로 합침
+    """
+    if not document_ids:
+        return ""
+
+    # 1) 문서 소유권 체크
+    valid_docs = []
+    for doc_id in document_ids:
+        doc = document_crud.get(db, knowledge_id=doc_id)
+        if not doc or doc.owner_id != user.user_id:
+            # 내 문서가 아니면 스킵 (원하면 여기서 HTTPException으로 바꿀 수도 있음)
+            continue
+        valid_docs.append(doc)
+
+    if not valid_docs:
+        return ""
+
+    # 2) 질문을 벡터로 임베딩
+    query_vector = _embed_question_to_vector(question)
+
+    # 3) 각 문서별로 벡터 검색(top-k) 실행
+    chunks: List = []
+    # 문서 수에 따라 per-doc top_k 분배 (최소 1개는 보장)
+    per_doc_top_k = max(1, max_chunks // len(valid_docs))
+
+    for doc in valid_docs:
+        doc_chunks = document_chunk_crud.search_by_vector(
+            db,
+            query_vector=query_vector,
+            knowledge_id=doc.knowledge_id,
+            top_k=per_doc_top_k,
+        )
+        chunks.extend(doc_chunks)
+
+    # 혹시 너무 많이 모이면 max_chunks까지만 사용
+    chunks = chunks[:max_chunks]
+
+    # 4) 컨텐츠 텍스트 합치기
+    texts: List[str] = []
+    for c in chunks:
+        # DocumentChunk 모델의 텍스트 필드명에 맞게 사용 (여기는 chunk_text)
+        chunk_text = getattr(c, "chunk_text", None)
+        if chunk_text:
+            texts.append(chunk_text)
+
+    if not texts:
+        return ""
+
+    context_body = "\n\n".join(texts)
+
+    # 최종 컨텍스트 프롬프트
+    return (
+        "다음은 사용자가 업로드한 참고 문서 중에서, "
+        "질문과 가장 관련도가 높은 일부 발췌 내용입니다.\n\n"
+        f"{context_body}\n\n"
+        "위 내용을 참고해서 아래 질문에 답변해 주세요."
+    )
 
 
 # =========================================
@@ -163,7 +261,7 @@ def _call_llm_for_model(
 
 
 # =========================================
-# 첫 턴에서 세션 생성 + 자동 타이틀
+# 첫 턴에서 세션 생성 + 자동 타이틀 (단일 모델 + knowledge_id 기반 RAG)
 # =========================================
 def create_session_with_first_turn(
     db: Session,
@@ -232,31 +330,52 @@ def run_practice_turn(
     *,
     db: Session,
     session: PracticeSession,
-    models: list[PracticeSessionModel],
+    models: List[PracticeSessionModel],
     prompt_text: str,
     user: AppUser,
+    document_ids: Optional[List[int]] = None,
 ) -> PracticeTurnResponse:
     """
-    - 각 모델에 LLM 호출
+    - 선택된 지식베이스의 벡터 top-k 청크를 컨텍스트로 붙여서
+      각 모델에 LLM 호출
     - PracticeResponse 레코드 생성
     - 세션에 title 없으면 자동 생성하여 업데이트
     """
     if session.user_id != user.user_id:
         raise PermissionError("session not owned by user")
 
-    results: list[PracticeTurnModelResult] = []
+    # 0) 지식베이스 컨텍스트 구성
+    context_text = ""
+    if document_ids:
+        context_text = _build_context_from_documents(
+            db=db,
+            user=user,
+            document_ids=document_ids,
+            question=prompt_text,
+        )
+
+    results: List[PracticeTurnModelResult] = []
 
     for m in models:
         if m.session_id != session.session_id:
             raise ValueError("session_model does not belong to given session")
 
-        # 1) LLM 호출
+        # 1) 실제 LLM에 보낼 프롬프트 만들기
+        if context_text:
+            full_prompt = (
+                f"{context_text}\n\n"
+                f"질문: {prompt_text}"
+            )
+        else:
+            full_prompt = prompt_text
+
+        # 2) LLM 호출
         response_text, token_usage, latency_ms = _call_llm_for_model(
             model_name=m.model_name,
-            prompt_text=prompt_text,
+            prompt_text=full_prompt,
         )
 
-        # 2) 응답 저장
+        # 3) 응답 저장 (DB에는 원래 질문만 저장)
         resp = practice_response_crud.create(
             db,
             PracticeResponseCreate(
@@ -268,7 +387,7 @@ def run_practice_turn(
             ),
         )
 
-        # 3) 응답 DTO 생성
+        # 4) 응답 DTO 생성
         results.append(
             PracticeTurnModelResult(
                 session_model_id=m.session_model_id,
@@ -283,7 +402,7 @@ def run_practice_turn(
             )
         )
 
-    # 4) 세션 제목이 아직 없으면 → 첫 턴 기준으로 자동 생성
+    # 5) 세션 제목이 아직 없으면 → 첫 턴 기준으로 자동 생성
     if not session.title and results:
         primary = next((r for r in results if r.is_primary), results[0])
         title = generate_session_title_llm(
@@ -299,7 +418,7 @@ def run_practice_turn(
         )
         session.title = title  # in-memory 도 같이 반영
 
-    # 5) 클라이언트로 돌려줄 DTO
+    # 6) 클라이언트로 돌려줄 DTO
     return PracticeTurnResponse(
         session_id=session.session_id,
         session_title=session.title,

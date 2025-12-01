@@ -35,6 +35,7 @@ from schemas.user.document import (
     DocumentProcessingJobCreate,
     DocumentProcessingJobUpdate,
     DocumentPageCreate,
+    DocumentChunkCreate,
 )
 
 from crud.supervisor import api_usage
@@ -195,34 +196,25 @@ class DocumentIngestService:
     # -----------------------
     # 7) 청크 저장
     # -----------------------
+
     def store_chunks(
-        self,
-        knowledge_id: int,
-        chunks: List[str],
-        vectors: List[List[float]],
+            self,
+            knowledge_id: int,
+            chunks: List[str],
+            vectors: List[List[float]],
     ) -> None:
-        """
-        현재는 page_id 매핑 없이 저장.
-        (추후 page_no → page_id 매핑 로직을 추가하면 page_id도 채울 수 있음.)
-        """
-        # DocumentChunkCRUD.bulk_create 는 DocumentChunk 인스턴스를 받도록 설계해둔 상태라면
-        # 여기서 models.user.document.DocumentChunk 를 직접 생성해도 되고,
-        # 단건 insert 루프를 돌려도 된다. 우선은 단순 루프로 처리.
-        from models.user.document import DocumentChunk  # 지연 import
+        items: list[tuple[DocumentChunkCreate, List[float]]] = []
 
-        chunk_models: List[DocumentChunk] = []
         for idx, (text, vec) in enumerate(zip(chunks, vectors), start=1):
-            chunk_models.append(
-                DocumentChunk(
-                    knowledge_id=knowledge_id,
-                    page_id=None,          # page 매핑 필요 시 추후 확장
-                    chunk_index=idx,
-                    chunk_text=text,
-                    vector_memory=vec,     # pgvector에 그대로 들어감
-                )
+            schema_obj = DocumentChunkCreate(
+                knowledge_id=knowledge_id,
+                page_id=None,
+                chunk_index=idx,
+                chunk_text=text,
             )
+            items.append((schema_obj, vec))
 
-        document_chunk_crud.bulk_create(self.db, chunk_models)
+        document_chunk_crud.bulk_create(self.db, items)
 
     # -----------------------
     # 8) Document 상태 / chunk_count / cost 업데이트
