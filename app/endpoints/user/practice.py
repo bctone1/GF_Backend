@@ -14,6 +14,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from core.deps import get_db, get_current_user
+from core import config  # ✅ 기본 LLM/연습 모델 설정을 읽기 위함
 from models.user.account import AppUser
 
 from crud.user.practice import (
@@ -539,31 +540,103 @@ def delete_model_comparison(
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_turn_for_session",
-    summary="LLM 실습 턴 실행",
+    summary="실제 LLM 실습 턴 실행(if 0, 새 세션 생성)",
 )
 def run_practice_turn_endpoint(
-    session_id: int = Path(..., ge=1),
+    session_id: int = Path(
+        ...,
+        ge=0,
+        description="0이면 새 세션을 생성해서 첫 턴을 실행하고, 1 이상이면 해당 세션에서 이어서 대화합니다.",
+    ),
     body: PracticeTurnRequest = ...,
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    # 세션 소유권 체크
-    session = _ensure_my_session(db, session_id, me)
+    """
+    session_id 사용 규칙:
+    - 0  : 새 practice_session을 생성하고 기본 모델들을 붙인 뒤 첫 턴을 실행
+    - >0 : 기존 세션에 등록된 모델(또는 session_model_ids로 지정한 모델)로 턴 실행
+    """
+    # -----------------------------
+    # 1) session_id == 0 → 새 세션 + 기본 모델 자동 생성
+    # -----------------------------
+    if session_id == 0:
+        # 새 세션 생성일 때는 session_model_ids 지정을 막아둠 (아직 존재하지 않는 id이므로)
+        if body.session_model_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="session_id=0 일 때는 session_model_ids 를 지정할 수 없습니다.",
+            )
 
-    # 어떤 모델들에 보낼지 결정
-    if body.session_model_ids:
+        # 새 practice_session 생성
+        session = practice_session_crud.create(
+            db,
+            PracticeSessionCreate(
+                user_id=me.user_id,
+                title=None,
+                notes=None,
+            ),
+        )
+
+        # 기본 연습 모델 목록 결정 (config.PRACTICE_MODELS 기준)
+        practice_models = getattr(config, "PRACTICE_MODELS", {}) or {}
+        default_model_names: list[str] = []
+
+        # 1순위: enabled=True 이면서 default=True 인 모델들
+        for name, conf in practice_models.items():
+            if not isinstance(conf, dict):
+                continue
+            if conf.get("enabled", True) and conf.get("default", False):
+                default_model_names.append(name)
+
+        # 2순위: enabled=True 인 첫 번째 모델
+        if not default_model_names:
+            for name, conf in practice_models.items():
+                if isinstance(conf, dict) and conf.get("enabled", True):
+                    default_model_names.append(name)
+                    break
+
+        if not default_model_names:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="사용 가능한 연습 모델이 설정되어 있지 않습니다. PRACTICE_MODELS를 확인하세요.",
+            )
+
+        # 세션에 기본 모델들 생성 (첫 번째만 is_primary=True)
         models: list[PracticeSessionModel] = []
-        for sm_id in body.session_model_ids:
-            model, model_session = _ensure_my_session_model(db, sm_id, me)
-            if model_session.session_id != session_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="session_model does not belong to this session",
-                )
-            models.append(model)
+        is_first = True
+        for name in default_model_names:
+            m = practice_session_model_crud.create(
+                db,
+                PracticeSessionModelCreate(
+                    session_id=session.session_id,
+                    model_name=name,
+                    is_primary=is_first,
+                ),
+            )
+            models.append(m)
+            is_first = False
+
     else:
-        # 지정 없을시 세션에 등록된 모든 모델에 순차 호출
-        models = practice_session_model_crud.list_by_session(db, session_id=session_id)
+        # -----------------------------
+        # 2) session_id > 0 → 기존 세션에 대해 턴 실행
+        # -----------------------------
+        session = _ensure_my_session(db, session_id, me)
+
+        # 어떤 모델들에 보낼지 결정
+        if body.session_model_ids:
+            models = []
+            for sm_id in body.session_model_ids:
+                model, model_session = _ensure_my_session_model(db, sm_id, me)
+                if model_session.session_id != session.session_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="session_model does not belong to this session",
+                    )
+                models.append(model)
+        else:
+            # 지정 없을시 세션에 등록된 모든 모델에 순차 호출
+            models = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
 
     if not models:
         raise HTTPException(
