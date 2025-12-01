@@ -126,31 +126,34 @@ class PracticeModelConfig(TypedDict):
     enabled: bool            # 나중에 on/off 용도
 
 
-# 연습용 고정 모델 4개
-PRACTICE_MODELS: dict[str, PracticeModelConfig] = {
+# 실습용 고정 모델 4개
+PRACTICE_MODELS = {
     "gpt-4o-mini": {
         "provider": "openai",
         "model_name": "gpt-4o-mini",
         "display_name": "GPT-4o mini",
         "enabled": True,
+        "default": True,
     },
-
     "claude-3.7-haiku": {
         "provider": "anthropic",
         "model_name": "claude-3.7-haiku",
         "display_name": "Claude 3.7 Haiku",
         "enabled": True,
+        "default": True,
     },
     "gemini-2.5-flash": {
         "provider": "google",
         "model_name": "gemini-2.5-flash",
         "display_name": "Gemini 2.5 Flash",
         "enabled": False,
+        "default": False,
     },
     "exaone-4.0": {
         "provider": "lg",
         "model_name": "exaone-4.0",
         "display_name": "EXAONE 4.0",
         "enabled": False,
+        "default": False,
     },
 }
