@@ -1,30 +1,31 @@
 # models/partner/course.py
 from sqlalchemy import (
-    Column, BigInteger, Integer, Text, Boolean,
-    Date, DateTime, ForeignKey, UniqueConstraint,
-    CheckConstraint, Index, text
+    Column,
+    BigInteger,
+    Integer,
+    Text,
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    UniqueConstraint,
+    CheckConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 
 from models.base import Base
-from models.partner.catalog import ModelCatalog
+# from models.partner.catalog import ModelCatalog  # 관계는 문자열로 참조하므로 필수는 아님
+
 
 # ========== partner.courses ==========
 class Course(Base):
     __tablename__ = "courses"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    # LLM 관련
-    primary_model_id = Column(
-        BigInteger,
-        ForeignKey("partner.model_catalog.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    allowed_model_ids = Column(JSONB, nullable=False, server_default="'[]'::jsonb")
-    # allowed_model_ids = [1, 2, 3]  # 전부 model_catalog.id
 
     # 이 코스를 운영하는 org (교육기관)
     org_id = Column(
@@ -35,12 +36,20 @@ class Course(Base):
 
     title = Column(Text, nullable=False)
     course_key = Column(Text, nullable=False)  # org 내에서 unique
-    status = Column(Text, nullable=False, server_default=text("'draft'"))  # draft|active|archived
+    status = Column(
+        Text,
+        nullable=False,
+        server_default=text("'draft'"),  # draft | active | archived
+    )
     start_date = Column(Date)
     end_date = Column(Date)
     description = Column(Text)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -49,13 +58,9 @@ class Course(Base):
     )
 
     # org ↔ course
-    org = relationship("Org", back_populates="courses", passive_deletes=True)
-
-    # course ↔ model_catalog (primary_model)
-    primary_model = relationship(
-        "ModelCatalog",
-        back_populates="primary_for_courses",
-        foreign_keys=[primary_model_id],
+    org = relationship(
+        "Org",
+        back_populates="courses",
         passive_deletes=True,
     )
 
@@ -67,8 +72,15 @@ class Course(Base):
     )
 
     __table_args__ = (
-        UniqueConstraint("org_id", "course_key", name="uq_courses_org_course_key"),
-        CheckConstraint("status IN ('draft','active','archived')", name="chk_courses_status"),
+        UniqueConstraint(
+            "org_id",
+            "course_key",
+            name="uq_courses_org_course_key",
+        ),
+        CheckConstraint(
+            "status IN ('draft','active','archived')",
+            name="chk_courses_status",
+        ),
         Index("idx_courses_org_status", "org_id", "status"),
         {"schema": "partner"},
     )
@@ -89,6 +101,7 @@ class Class(Base):
         nullable=False,
     )
 
+    # 옵션: 특정 course에 속할 수도, 독립 class일 수도 있음
     course_id = Column(
         BigInteger,
         ForeignKey("partner.courses.id", ondelete="SET NULL"),
@@ -96,26 +109,73 @@ class Class(Base):
     )
 
     name = Column(Text, nullable=False)
-    status = Column(Text, nullable=False, server_default=text("'planned'"))
+    status = Column(
+        Text,
+        nullable=False,
+        server_default=text("'planned'"),  # planned | ongoing | ended
+    )
     start_at = Column(DateTime(timezone=True))
     end_at = Column(DateTime(timezone=True))
     capacity = Column(Integer)
     timezone = Column(Text, nullable=False, server_default=text("'UTC'"))
     location = Column(Text)
     online_url = Column(Text)
-    invite_only = Column(Boolean, nullable=False, server_default=text("false"))
+    invite_only = Column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    # ==========================
+    # LLM 관련 (강의실 단위)
+    # ==========================
+    # 이 강의실에서 기본으로 사용할 LLM 모델
+    primary_model_id = Column(
+        BigInteger,
+        ForeignKey("partner.model_catalog.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # 이 강의실에서 허용되는 모델 목록 (model_catalog.id 리스트)
+    # 예: [1, 2, 3]
+    allowed_model_ids = Column(
+        JSONB,
+        nullable=False,
+        server_default="'[]'::jsonb",
+    )
+
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     # course ↔ class
-    course = relationship("Course", back_populates="classes", passive_deletes=True)
+    course = relationship(
+        "Course",
+        back_populates="classes",
+        passive_deletes=True,
+    )
 
     # 클래스 → 담당 파트너(강사, Partner)
     partner = relationship(
         "Partner",
         back_populates="classes",
         foreign_keys=[partner_id],
+        passive_deletes=True,
+    )
+
+    # 클래스 → 기본 LLM 모델
+    primary_model = relationship(
+        "ModelCatalog",
+        back_populates="primary_for_classes",
+        foreign_keys=[primary_model_id],
         passive_deletes=True,
     )
 
@@ -134,9 +194,13 @@ class Class(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("status IN ('planned','ongoing','ended')", name="chk_classes_status"),
+        CheckConstraint(
+            "status IN ('planned','ongoing','ended')",
+            name="chk_classes_status",
+        ),
         Index("idx_classes_course_status", "course_id", "status"),
         Index("idx_classes_partner_status", "partner_id", "status"),
+        Index("idx_classes_primary_model", "primary_model_id"),
         {"schema": "partner"},
     )
 
@@ -162,12 +226,24 @@ class InviteCode(Base):
     )
 
     code = Column(Text, nullable=False)
-    target_role = Column(Text, nullable=False, server_default=text("'student'"))
+    target_role = Column(
+        Text,
+        nullable=False,
+        server_default=text("'student'"),
+    )
 
     expires_at = Column(DateTime(timezone=True))
     max_uses = Column(Integer)  # NULL = unlimited
-    used_count = Column(Integer, nullable=False, server_default=text("0"))
-    status = Column(Text, nullable=False, server_default=text("'active'"))
+    used_count = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    status = Column(
+        Text,
+        nullable=False,
+        server_default=text("'active'"),
+    )
 
     # 실제 생성한 Partner (강사)
     created_by = Column(
@@ -175,7 +251,11 @@ class InviteCode(Base):
         ForeignKey("partner.partners.id", ondelete="SET NULL"),
     )
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
     # class 관계
     clazz = relationship(
@@ -202,7 +282,10 @@ class InviteCode(Base):
 
     __table_args__ = (
         UniqueConstraint("code", name="uq_invite_codes_code"),
-        CheckConstraint("used_count >= 0", name="chk_invite_codes_used_nonnegative"),
+        CheckConstraint(
+            "used_count >= 0",
+            name="chk_invite_codes_used_nonnegative",
+        ),
         CheckConstraint(
             "(max_uses IS NULL) OR (used_count <= max_uses)",
             name="chk_invite_codes_used_le_max",

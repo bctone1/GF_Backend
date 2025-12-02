@@ -17,18 +17,21 @@ def get_course(db: Session, course_id: int) -> Optional[Course]:
     return db.get(Course, course_id)
 
 
-def get_course_by_course_key(db: Session, org_id: int, course_key: str) -> Optional[Course]:
+def get_course_by_course_key(
+    db: Session,
+    org_id: int,
+    course_key: str,
+) -> Optional[Course]:
     stmt = select(Course).where(
         Course.org_id == org_id,
         Course.course_key == course_key,
     )
     return db.execute(stmt).scalars().first()
 
-# crud/partner/course.py
 
 def list_courses(
     db: Session,
-    org_id: Optional[int] = None,  # ← Optional 로 변경
+    org_id: Optional[int] = None,
     *,
     status: Optional[str] = None,
     search: Optional[str] = None,
@@ -36,6 +39,9 @@ def list_courses(
     offset: int = 0,
     order_desc: bool = True,
 ) -> Tuple[List[Course], int]:
+    """
+    org_id가 None이면 전체 코스 조회.
+    """
     conds = []
     if org_id is not None:
         conds.append(Course.org_id == org_id)
@@ -43,24 +49,33 @@ def list_courses(
         conds.append(Course.status == status)
     if search:
         like = f"%{search}%"
-        conds.append(or_(Course.title.ilike(like), Course.course_key.ilike(like)))
+        conds.append(
+            or_(
+                Course.title.ilike(like),
+                Course.course_key.ilike(like),
+            )
+        )
 
     base = select(Course)
     if conds:
         base = base.where(and_(*conds))
 
-    total = db.execute(
-        select(func.count()).select_from(base.subquery())
-    ).scalar() or 0
+    total = (
+        db.execute(
+            select(func.count()).select_from(base.subquery())
+        ).scalar()
+        or 0
+    )
 
     if order_desc:
         base = base.order_by(desc(Course.created_at))
     else:
         base = base.order_by(Course.created_at)
 
-    rows = db.execute(base.limit(limit).offset(offset)).scalars().all()
+    rows = db.execute(
+        base.limit(limit).offset(offset)
+    ).scalars().all()
     return rows, total
-
 
 
 def create_course(
@@ -73,16 +88,11 @@ def create_course(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     description: Optional[str] = None,
-    primary_model_id: Optional[int] = None,
-    allowed_model_ids: Optional[List[int]] = None,
 ) -> Course:
     """
-    allowed_model_ids 가 None 이면 DB 기본값([]::jsonb) 사용.
+    Course는 이제 LLM 설정을 가지지 않는다.
+    (LLM은 Class 단위에서 설정)
     """
-    extra: dict = {}
-    if allowed_model_ids is not None:
-        extra["allowed_model_ids"] = allowed_model_ids
-
     obj = Course(
         org_id=org_id,
         title=title,
@@ -91,8 +101,6 @@ def create_course(
         start_date=start_date,
         end_date=end_date,
         description=description,
-        primary_model_id=primary_model_id,
-        **extra,
     )
     db.add(obj)
     db.commit()
@@ -110,9 +118,10 @@ def update_course(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     description: Optional[str] = None,
-    primary_model_id: Optional[int] = None,
-    allowed_model_ids: Optional[List[int]] = None,
 ) -> Optional[Course]:
+    """
+    Course에는 더 이상 primary_model_id / allowed_model_ids 없음.
+    """
     obj = db.get(Course, course_id)
     if not obj:
         return None
@@ -129,10 +138,6 @@ def update_course(
         obj.end_date = end_date
     if description is not None:
         obj.description = description
-    if primary_model_id is not None:
-        obj.primary_model_id = primary_model_id
-    if allowed_model_ids is not None:
-        obj.allowed_model_ids = allowed_model_ids
 
     db.commit()
     db.refresh(obj)
@@ -143,4 +148,3 @@ def delete_course(db: Session, course_id: int) -> bool:
     res = db.execute(delete(Course).where(Course.id == course_id))
     db.commit()
     return res.rowcount > 0
-

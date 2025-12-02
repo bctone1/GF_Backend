@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 
 from core.deps import get_db, get_current_partner_user
@@ -11,7 +11,7 @@ from schemas.partner.course import (
     CourseCreate,
     CourseUpdate,
     CourseResponse,
-    CoursePage, CourseTitle,
+    CoursePage,
 )
 from crud.partner import course as crud_course
 from models.partner.partner_core import Partner
@@ -19,10 +19,21 @@ from models.partner.partner_core import Partner
 router = APIRouter()
 
 
+def _require_org_id(current_partner: Partner) -> int:
+    org_id = getattr(current_partner, "org_id", None)
+    if org_id is None:
+        raise HTTPException(status_code=400, detail="org_id not found for current partner")
+    return org_id
+
+
 # ==============================
 # Course CRUD
 # ==============================
-@router.get("", response_model=CoursePage, summary="모든코스 조회")
+@router.get(
+    "",
+    response_model=CoursePage,
+    summary="모든 코스 조회",
+)
 def list_courses(
     db: Session = Depends(get_db),
     status: Optional[str] = Query(None),
@@ -31,7 +42,7 @@ def list_courses(
     offset: int = Query(0, ge=0),
     current_partner: Partner = Depends(get_current_partner_user),
 ):
-    org_id = current_partner.org_id
+    org_id = _require_org_id(current_partner)
 
     rows, total = crud_course.list_courses(
         db=db,
@@ -45,9 +56,10 @@ def list_courses(
     page = offset // limit + 1 if limit > 0 else 1
     size = limit
 
+    items = [CourseResponse.model_validate(r) for r in rows]
     return {
         "total": total,
-        "items": rows,
+        "items": items,
         "page": page,
         "size": size,
     }
@@ -60,11 +72,12 @@ def list_courses(
     summary="코스 생성",
 )
 def create_course(
-    org_id: int,
     payload: CourseCreate,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_user),
+    current_partner: Partner = Depends(get_current_partner_user),
 ):
+    org_id = _require_org_id(current_partner)
+
     obj = crud_course.create_course(
         db,
         org_id=org_id,
@@ -74,34 +87,41 @@ def create_course(
         start_date=payload.start_date,
         end_date=payload.end_date,
         description=payload.description,
-        # LLM 설정
-        primary_model_id=getattr(payload, "primary_model_id", None),
-        allowed_model_ids=getattr(payload, "allowed_model_ids", None),
     )
-    return obj
+    return CourseResponse.model_validate(obj)
 
 
-@router.get("/{course_id}", response_model=CourseResponse)
+@router.get(
+    "/{course_id}",
+    response_model=CourseResponse,
+    summary="코스 상세 조회",
+)
 def get_course(
-    org_id: int,
-    course_id: int,
+    course_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_user),
+    current_partner: Partner = Depends(get_current_partner_user),
 ):
+    org_id = _require_org_id(current_partner)
+
     obj = crud_course.get_course(db, course_id)
     if not obj or obj.org_id != org_id:
         raise HTTPException(status_code=404, detail="Course not found")
-    return obj
+    return CourseResponse.model_validate(obj)
 
 
-@router.patch("/{course_id}", response_model=CourseResponse)
+@router.patch(
+    "/{course_id}",
+    response_model=CourseResponse,
+    summary="코스 수정",
+)
 def update_course(
-    org_id: int,
-    course_id: int,
-    payload: CourseUpdate,
+    course_id: int = Path(..., ge=1),
+    payload: CourseUpdate = ...,
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_user),
+    current_partner: Partner = Depends(get_current_partner_user),
 ):
+    org_id = _require_org_id(current_partner)
+
     obj = crud_course.get_course(db, course_id)
     if not obj or obj.org_id != org_id:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -115,19 +135,24 @@ def update_course(
         start_date=payload.start_date,
         end_date=payload.end_date,
         description=payload.description,
-        primary_model_id=getattr(payload, "primary_model_id", None),
-        allowed_model_ids=getattr(payload, "allowed_model_ids", None),
     )
-    return obj
+    if not obj:
+        raise HTTPException(status_code=404, detail="Course not found")
+    return CourseResponse.model_validate(obj)
 
 
-@router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{course_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="코스 삭제",
+)
 def delete_course(
-    org_id: int,
-    course_id: int,
+    course_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
-    _=Depends(get_current_partner_user),
+    current_partner: Partner = Depends(get_current_partner_user),
 ):
+    org_id = _require_org_id(current_partner)
+
     obj = crud_course.get_course(db, course_id)
     if not obj or obj.org_id != org_id:
         raise HTTPException(status_code=404, detail="Course not found")
