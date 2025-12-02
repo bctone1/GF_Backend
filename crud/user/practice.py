@@ -1,8 +1,7 @@
 # crud/user/practice.py
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
-
+from typing import Optional, Sequence, Tuple, Any, Mapping, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
 
@@ -149,35 +148,42 @@ class PracticeSessionModelCRUD:
         )
         return db.scalars(stmt).all()
 
+
     def update(
         self,
         db: Session,
+        *,
         session_model_id: int,
-        data: PracticeSessionModelUpdate,
-    ) -> Optional[PracticeSessionModel]:
-        values = {
-            k: v
-            for k, v in data.model_dump(exclude_unset=True).items()
-        }
-        if not values:
-            return self.get(db, session_model_id)
+        data: Union[PracticeSessionModelUpdate, Mapping[str, Any]],
+    ) -> PracticeSessionModel | None:
+        """
+        PracticeSessionModel 업데이트.
+        - data: Pydantic 스키마든 dict든 둘 다 허용.
+        """
 
-        stmt = (
-            update(PracticeSessionModel)
-            .where(PracticeSessionModel.session_model_id == session_model_id)
-            .values(**values)
-        )
-        db.execute(stmt)
-        db.flush()
-        return self.get(db, session_model_id)
+        # 1) data를 dict로 정규화
+        if hasattr(data, "model_dump"):
+            update_data = data.model_dump(exclude_unset=True)
+        else:
+            update_data = dict(data)
 
-    def delete(self, db: Session, session_model_id: int) -> None:
-        stmt = delete(PracticeSessionModel).where(
-            PracticeSessionModel.session_model_id == session_model_id
-        )
-        db.execute(stmt)
-        db.flush()
+        if not update_data:
+            # 변경할 게 없으면 현재 상태만 리턴
+            return db.get(PracticeSessionModel, session_model_id)
 
+        # 2) 대상 객체 조회
+        obj = db.get(PracticeSessionModel, session_model_id)
+        if obj is None:
+            return None
+
+        # 3) 필드 적용
+        for k, v in update_data.items():
+            setattr(obj, k, v)
+
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        return obj
     # NOTE (service/user/practice.py):
     # - 세션 내 primary 모델 변경 시
     #   1) 기존 is_primary=true 모두 false로 초기화

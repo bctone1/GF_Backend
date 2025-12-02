@@ -1,7 +1,7 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Any
 
 from fastapi import (
     APIRouter,
@@ -416,25 +416,44 @@ def update_practice_session_model(
 ):
     model, _session = _ensure_my_session_model(db, session_model_id, me)
 
-    # 1) is_primary 변경 요청이 포함된 경우 → service에서 처리
+    # 1) is_primary=True 인 경우: primary 토글 흐름
     if data.is_primary is True:
-        # 먼저 model_name 같은 일반 필드부터 업데이트
+        update_data: dict[str, Any] = {}
         if data.model_name is not None:
-            practice_session_model_crud.update(
+            update_data["model_name"] = data.model_name
+
+        if update_data:
+            model = practice_session_model_crud.update(
                 db,
                 session_model_id=session_model_id,
-                data=PracticeSessionModelUpdate(model_name=data.model_name),
+                data=update_data,
             )
 
-        # 그다음 primary 토글
         target = set_primary_model_for_session(
             db,
             me=me,
             session_id=model.session_id,
             target_session_model_id=session_model_id,
         )
-        db.commit()
+        # set_primary_model_for_session 안에서 commit을 안 한다면 여기서 commit
+        # db.commit()
         return PracticeSessionModelResponse.model_validate(target)
+
+    # 2) is_primary=False 또는 안 온 경우: 일반 필드만 수정
+    update_data = data.model_dump(exclude_unset=True)
+    update_data.pop("is_primary", None)
+
+    if update_data:
+        model = practice_session_model_crud.update(
+            db,
+            session_model_id=session_model_id,
+            data=update_data,
+        )
+        # CRUD에서 commit 한다면 여기서는 안 해도 됨
+        # db.commit()
+
+    return PracticeSessionModelResponse.model_validate(model)
+
 
 
 @router.delete(
