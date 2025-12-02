@@ -84,6 +84,8 @@ def create_class_with_default_invite(
         location=data.location,
         online_url=data.online_url,
         invite_only=data.invite_only,
+        primary_model_id=data.primary_model_id,
+        allowed_model_ids=data.allowed_model_ids,
     )
 
     # 2) 기본 초대코드 1개 생성

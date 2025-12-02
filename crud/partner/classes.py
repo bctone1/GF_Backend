@@ -8,7 +8,7 @@ from sqlalchemy import select, delete, func, and_, desc
 from sqlalchemy.orm import Session, selectinload
 
 from models.partner.course import Class, InviteCode
-from models.partner.catalog import ModelCatalog  # ← 추가: 모델 카탈로그 참조
+from models.partner.catalog import ModelCatalog
 
 
 # ==============================
@@ -19,9 +19,10 @@ def _validate_models_for_class(
     *,
     primary_model_id: Optional[int],
     allowed_model_ids: Optional[List[int]],
-) -> tuple[Optional[int], Optional[List[int]]]:
+) -> tuple[Optional[int], List[int]]:
     """
     Class 에 설정할 LLM 모델들을 검증하고 정규화한다.
+
     규칙:
     - primary_model_id / allowed_model_ids 에 있는 모든 id 는
       반드시 partner.model_catalog 에 존재해야 함.
@@ -29,9 +30,9 @@ def _validate_models_for_class(
       allowed_model_ids[0] 를 primary 로 자동 설정.
     - primary_model_id 가 allowed_model_ids 안에 없으면 자동으로 포함시킴.
     """
-    # 둘 다 비어 있으면 그대로 허용 (모델 없는 Class 도 허용하는 케이스)
+    # 아무 설정도 안 한 경우: 그냥 비워둠
     if primary_model_id is None and not allowed_model_ids:
-        return primary_model_id, allowed_model_ids
+        return None, []
 
     # 리스트 정리
     allowed_list: List[int] = list(allowed_model_ids or [])
@@ -99,7 +100,11 @@ def list_classes(
     if status:
         conds.append(Class.status == status)
 
-    base = select(Class).where(and_(*conds))
+    base = (
+        select(Class)
+        .options(selectinload(Class.invite_codes))  # 목록에서도 초대코드 같이 로드 (필요 없으면 제거해도 됨)
+        .where(and_(*conds))
+    )
     total = db.execute(
         select(func.count()).select_from(base.subquery())
     ).scalar() or 0
@@ -132,7 +137,7 @@ def create_class(
     - partner_id: 이 class 를 여는 강사(Partner.id) (필수)
     - course_id: course 에 소속되면 지정, 아니면 None
     - primary_model_id: 기본으로 사용할 LLM (partner.model_catalog.id)
-    - allowed_model_ids: 허용 모델 목록 (JSONB; None 이면 DB 기본값 [] 사용)
+    - allowed_model_ids: 허용 모델 목록 (JSONB; None 이면 [] 사용)
 
     모델 관련 규칙:
     - primary_model_id / allowed_model_ids 는 모두 model_catalog 에 존재해야 함.
@@ -141,15 +146,11 @@ def create_class(
     - primary_model_id 는 항상 allowed_model_ids 안에 포함되도록 정규화.
     """
     # ---- LLM 모델 검증/정규화 ----
-    primary_model_id, allowed_model_ids = _validate_models_for_class(
+    primary_model_id, normalized_allowed = _validate_models_for_class(
         db,
         primary_model_id=primary_model_id,
         allowed_model_ids=allowed_model_ids,
     )
-
-    extra: dict = {}
-    if allowed_model_ids is not None:
-        extra["allowed_model_ids"] = allowed_model_ids
 
     obj = Class(
         partner_id=partner_id,
@@ -165,7 +166,7 @@ def create_class(
         online_url=online_url,
         invite_only=invite_only if invite_only is not None else False,
         primary_model_id=primary_model_id,
-        **extra,
+        allowed_model_ids=normalized_allowed,  # JSONB 컬럼에 리스트로 저장
     )
     db.add(obj)
     db.commit()
