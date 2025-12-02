@@ -131,7 +131,7 @@ def list_my_classes(
             StudentClassResponse(
                 enrollment_id=enr.id,
                 class_id=cls.id,
-                class_title=getattr(cls, "title", ""),
+                class_title=getattr(cls, "name", ""),
                 course_title=(course.title if course is not None else None),
                 org_name=(getattr(org, "name", None) if org is not None else None),
                 teacher_name=getattr(partner, "full_name", None),

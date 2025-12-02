@@ -46,6 +46,7 @@ router = APIRouter()
     "/document",
     response_model=Page[DocumentResponse],
     operation_id="list_my_document",
+    summary="내문서 리스트"
 )
 def list_my_document(
     page: int = Query(1, ge=1),
@@ -78,6 +79,11 @@ def create_document(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    문서 레코딩용(메타데이터 기록) 추후에 API등 연결시 구글 드라이브라던가..
+    혹은 다른 팀원(프로젝트 할때나)
+    지금은 굳이 안씀(예약엔드포인트)
+    """
     # owner_id는 토큰 기준으로 강제
     data_for_create = data.model_copy(update={"owner_id": me.user_id})
     doc = document_crud.create(db, data_for_create)
