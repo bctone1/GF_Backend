@@ -141,7 +141,7 @@ class Class(Base):
     allowed_model_ids = Column(
         JSONB,
         nullable=False,
-        server_default="'[]'::jsonb",
+        server_default=text("'[]'::jsonb"),
     )
 
     created_at = Column(

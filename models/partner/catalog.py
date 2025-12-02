@@ -93,42 +93,25 @@ class ModelCatalog(Base):
     )
 
 
-# ========= partner.provider_credentials =========
 class ProviderCredential(Base):
-    """
-    Org 단위 LLM Provider 자격 증명.
-    - org_id 기준으로 관리 (Org 하나에 provider별 자격증명 1개)
-    """
     __tablename__ = "provider_credentials"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # FK → partner.org.id (기관 기준)
-    org_id = Column(
+    # org_id 말고 partner_id
+    partner_id = Column(
         BigInteger,
-        ForeignKey("partner.org.id", ondelete="CASCADE"),
+        ForeignKey("partner.partners.id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # 예: openai, anthropic, google, upstage 등
-    provider = Column(Text, nullable=False)
-
-    # 키 식별용 라벨 (예: "메인 키", "연구실용 키")
+    provider = Column(Text, nullable=False)                 # 예: openai, anthropic, google
     credential_label = Column(Text)
-
-    # 암호화 저장 (원문 API 키 금지)
     api_key_encrypted = Column(Text, nullable=False)
-
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
     last_validated_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-
-    # 관계: OrgLlmSetting에서 참조
     org_settings = relationship(
         "OrgLlmSetting",
         back_populates="provider_credential",
@@ -137,25 +120,15 @@ class ProviderCredential(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "org_id",
-            "provider",
-            name="uq_provider_credentials_org_provider",
+            "partner_id", "provider",
+            name="uq_provider_credentials_partner_provider",
         ),
-        Index(
-            "idx_provider_credentials_org_provider",
-            "org_id",
-            "provider",
-        ),
-        Index(
-            "idx_provider_credentials_active",
-            "is_active",
-        ),
-        Index(
-            "idx_provider_credentials_validated",
-            "last_validated_at",
-        ),
+        Index("idx_provider_credentials_partner_provider", "partner_id", "provider"),
+        Index("idx_provider_credentials_active", "is_active"),
+        Index("idx_provider_credentials_validated", "last_validated_at"),
         {"schema": "partner"},
     )
+
 
 
 # ========= partner.org_llm_settings =========

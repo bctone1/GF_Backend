@@ -149,7 +149,7 @@ PRACTICE_MODELS = {
         "enabled": False,
         "default": False,
     },
-    "exaone-4.1": {
+    "exaone-4.0": {
         "provider": "lg",
         "model_name": "exaone-4.0",
         "display_name": "EXAONE 4.0",

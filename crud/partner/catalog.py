@@ -23,7 +23,6 @@ from schemas.partner.catalog import (
     OrgLlmSettingUpdate,
 )
 
-
 # ==============================
 # 공통: 페이지네이션 유틸
 # ==============================
@@ -46,15 +45,11 @@ class ProviderCredentialCRUD:
     def get(self, db: Session, id: int) -> Optional[ProviderCredential]:
         return db.get(self.model, id)
 
-    def get_by_org_provider(
-        self,
-        db: Session,
-        *,
-        org_id: int,
-        provider: str,
+    def get_by_partner_provider(
+        self, db: Session, *, partner_id: int, provider: str
     ) -> Optional[ProviderCredential]:
         stmt = select(self.model).where(
-            self.model.org_id == org_id,
+            self.model.partner_id == partner_id,
             self.model.provider == provider,
         )
         return db.execute(stmt).scalar_one_or_none()
@@ -63,7 +58,7 @@ class ProviderCredentialCRUD:
         self,
         db: Session,
         *,
-        org_id: Optional[int] = None,
+        partner_id: Optional[int] = None,
         provider: Optional[str] = None,
         is_active: Optional[bool] = None,
         page: int = 1,
@@ -71,8 +66,8 @@ class ProviderCredentialCRUD:
     ) -> Tuple[List[ProviderCredential], int]:
         stmt = select(self.model)
         conds = []
-        if org_id is not None:
-            conds.append(self.model.org_id == org_id)
+        if partner_id is not None:
+            conds.append(self.model.partner_id == partner_id)
         if provider is not None:
             conds.append(self.model.provider == provider)
         if is_active is not None:
@@ -80,7 +75,7 @@ class ProviderCredentialCRUD:
         if conds:
             stmt = stmt.where(and_(*conds))
         stmt = stmt.order_by(
-            self.model.org_id.asc(),
+            self.model.partner_id.asc(),
             self.model.provider.asc(),
             self.model.id.asc(),
         )
@@ -93,7 +88,7 @@ class ProviderCredentialCRUD:
         data: ProviderCredentialCreate,
     ) -> ProviderCredential:
         obj = self.model(
-            org_id=data.org_id,
+            partner_id=data.partner_id,
             provider=data.provider,
             credential_label=data.credential_label,
             api_key_encrypted=data.api_key_encrypted,
@@ -106,10 +101,11 @@ class ProviderCredentialCRUD:
             db.commit()
         except IntegrityError:
             db.rollback()
-            # 유니크 제약 충돌 가능: (org_id, provider)
+            # (partner_id, provider) 유니크 충돌
             raise
         db.refresh(obj)
         return obj
+
 
     def update(
         self,

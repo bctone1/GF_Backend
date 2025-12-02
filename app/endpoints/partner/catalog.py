@@ -202,27 +202,23 @@ def upsert_org_llm_setting(
 # ==============================
 # Provider Credentials (org 단위 자격증명)
 # ==============================
-@router.get(
-    "/provider-credentials",
-    response_model=ProviderCredentialPage,
-)
+@router.get("/provider-credentials", response_model=ProviderCredentialPage)
 def list_provider_credentials(
     partner_id: int = Path(..., ge=1),
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
-    provider: Optional[str] = Query(
-        None,
-        description="openai, anthropic, google, upstage 등",
-    ),
+    provider: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
-    me=Depends(get_current_partner_user),
+    me = Depends(get_current_partner_user),
 ):
-    org_id = _require_org_id(me)
+    # 내 파트너 ID만 조회 가능하게
+    if me.id != partner_id:
+        raise HTTPException(status_code=403, detail="forbidden")
 
     rows, total = provider_credential.list(
         db,
-        org_id=org_id,
+        partner_id=partner_id,
         provider=provider,
         is_active=is_active,
         page=page,
@@ -230,6 +226,7 @@ def list_provider_credentials(
     )
     items = [ProviderCredentialResponse.model_validate(r) for r in rows]
     return {"items": items, "total": total, "page": page, "size": size}
+
 
 
 @router.post(
