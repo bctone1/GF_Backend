@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Literal, List
 
-from pydantic import BaseModel, EmailStr, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict, Field
 
 from schemas.base import ORMBase, Page
 from schemas.enums import ClassStatus
@@ -38,11 +38,20 @@ class ClassBase(ORMBase):
     online_url: Optional[str] = None
     invite_only: bool = False
 
+    # ==========================
+    # LLM 설정 (강의실 단위)
+    # ==========================
+    # 이 강의실에서 기본으로 사용할 LLM 모델 (partner.model_catalog.id)
+    primary_model_id: Optional[int] = None
+    # 이 강의실에서 허용되는 모델 목록 (model_catalog.id 리스트)
+    allowed_model_ids: List[int] = Field(default_factory=list)
+
 
 class ClassCreate(ClassBase):
     """
     partner_id, course_id 는 path / 컨텍스트에서 받기 때문에 body 에선 제외.
     """
+    # 여기서는 별도 필드 추가 없이 ClassBase 그대로 사용
     pass
 
 
@@ -62,6 +71,13 @@ class ClassUpdate(ORMBase):
     location: Optional[str] = None
     online_url: Optional[str] = None
     invite_only: Optional[bool] = None
+
+    # 코스 소속 변경 가능 (독립 class ↔ course 소속)
+    course_id: Optional[int] = None
+
+    # LLM 설정
+    primary_model_id: Optional[int] = None
+    allowed_model_ids: Optional[List[int]] = None
 
 
 # ==============================

@@ -27,7 +27,6 @@ router = APIRouter()
 # ==============================
 # Class CRUD (1 class : 1 partner)
 # ==============================
-
 @router.get(
     "",
     response_model=ClassPage,
@@ -55,9 +54,12 @@ def list_classes_for_partner(
         conds.append(Class.status == status)
 
     base = select(Class).where(and_(*conds))
-    total = db.execute(
-        select(func.count()).select_from(base.subquery())
-    ).scalar() or 0
+    total = (
+        db.execute(
+            select(func.count()).select_from(base.subquery())
+        ).scalar()
+        or 0
+    )
 
     base = base.order_by(desc(Class.created_at))
     rows = db.execute(base.limit(limit).offset(offset)).scalars().all()
@@ -65,9 +67,11 @@ def list_classes_for_partner(
     page = offset // limit + 1 if limit > 0 else 1
     size = limit
 
+    items = [ClassResponse.model_validate(r) for r in rows]
+
     return {
         "total": total,
-        "items": rows,
+        "items": items,
         "page": page,
         "size": size,
     }
@@ -91,8 +95,9 @@ def create_class(
 ):
     """
     class 생성 + 기본 초대코드 1개 자동 생성.
-    - Class.partner_id = path 의 partner_id (PartnerUser.id)
+    - Class.partner_id = path 의 partner_id (Partner.id)
     - course_id 는 Query 로 받아서 course 소속 여부만 결정
+    - payload 안의 primary_model_id / allowed_model_ids 로 LLM 설정
     - 기본 초대코드는 student 초대용으로 1개 발급
     """
     obj = class_code_service.create_class_with_default_invite(
@@ -102,7 +107,7 @@ def create_class(
         data=payload,
         created_by_partner_user_id=partner_id,
     )
-    return obj
+    return ClassResponse.model_validate(obj)
 
 
 @router.get(
@@ -120,8 +125,7 @@ def get_class(
     if not obj or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    # obj.invite_codes 까지 포함해서 ClassResponse로 변환됨
-    return obj
+    return ClassResponse.model_validate(obj)
 
 
 @router.patch(
@@ -144,7 +148,7 @@ def update_class(
         db,
         class_id=class_id,
         name=payload.name,
-        description=getattr(payload, "description", None),
+        description=payload.description,
         status=payload.status,
         start_at=payload.start_at,
         end_at=payload.end_at,
@@ -153,8 +157,15 @@ def update_class(
         location=payload.location,
         online_url=payload.online_url,
         invite_only=payload.invite_only,
+        course_id=payload.course_id,
+        # LLM 설정
+        primary_model_id=payload.primary_model_id,
+        allowed_model_ids=payload.allowed_model_ids,
     )
-    return obj
+    if not obj:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    return ClassResponse.model_validate(obj)
 
 
 @router.delete(
@@ -219,9 +230,11 @@ def list_class_invite_codes(
     page = offset // limit + 1 if limit > 0 else 1
     size = limit
 
+    items = [InviteCodeResponse.model_validate(r) for r in rows]
+
     return {
         "total": total,
-        "items": rows,
+        "items": items,
         "page": page,
         "size": size,
     }

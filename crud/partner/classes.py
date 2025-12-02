@@ -68,11 +68,20 @@ def create_class(
     location: Optional[str] = None,
     online_url: Optional[str] = None,
     invite_only: Optional[bool] = None,
+    # LLM 설정
+    primary_model_id: Optional[int] = None,
+    allowed_model_ids: Optional[List[int]] = None,
 ) -> Class:
     """
-    - partner_id: 이 class 를 여는 강사(PartnerUser.id) (필수)
+    - partner_id: 이 class 를 여는 강사(Partner.id) (필수)
     - course_id: course 에 소속되면 지정, 아니면 None
+    - primary_model_id: 기본으로 사용할 LLM (partner.model_catalog.id)
+    - allowed_model_ids: 허용 모델 목록 (JSONB; None 이면 DB 기본값 [] 사용)
     """
+    extra: dict = {}
+    if allowed_model_ids is not None:
+        extra["allowed_model_ids"] = allowed_model_ids
+
     obj = Class(
         partner_id=partner_id,
         course_id=course_id,
@@ -86,6 +95,8 @@ def create_class(
         location=location,
         online_url=online_url,
         invite_only=invite_only if invite_only is not None else False,
+        primary_model_id=primary_model_id,
+        **extra,
     )
     db.add(obj)
     db.commit()
@@ -107,6 +118,10 @@ def update_class(
     location: Optional[str] = None,
     online_url: Optional[str] = None,
     invite_only: Optional[bool] = None,
+    course_id: Optional[int] = None,
+    # LLM 설정
+    primary_model_id: Optional[int] = None,
+    allowed_model_ids: Optional[List[int]] = None,
 ) -> Optional[Class]:
     obj = db.get(Class, class_id)
     if not obj:
@@ -132,6 +147,14 @@ def update_class(
         obj.online_url = online_url
     if invite_only is not None:
         obj.invite_only = invite_only
+    if course_id is not None:
+        obj.course_id = course_id
+
+    # LLM 설정
+    if primary_model_id is not None:
+        obj.primary_model_id = primary_model_id
+    if allowed_model_ids is not None:
+        obj.allowed_model_ids = allowed_model_ids
 
     db.commit()
     db.refresh(obj)
@@ -228,7 +251,7 @@ def get_invite_for_redeem(db: Session, *, code: str) -> Optional[InviteCode]:
     if expires_at is not None and expires_at < now:
         return None
 
-    # 사용 횟수 체크 (모델에 used_count 가 있다고 가정)
+    # 사용 횟수 체크
     max_uses = getattr(invite, "max_uses", None)
     used_count = getattr(invite, "used_count", None)
     if max_uses is not None and used_count is not None and used_count >= max_uses:
@@ -248,7 +271,8 @@ def mark_invite_used(
     - used_count 증가
     - used_at 또는 last_used_at 갱신
     - student_id 기록 가능하면 기록
-    - max_uses 에 도달하면 status 를 'used' 로 변경 (또는 그대로 두고 싶으면 조정)
+    - max_uses 에 도달하면 status 를 'disabled' 로 변경
+      (DB 제약: active | expired | disabled)
     """
     invite = db.get(InviteCode, invite_id)
     if not invite:
@@ -256,11 +280,11 @@ def mark_invite_used(
 
     now = datetime.utcnow()
 
-    # used_count 증가 (필드가 있다고 가정)
+    # used_count 증가
     if hasattr(invite, "used_count"):
         invite.used_count = (invite.used_count or 0) + 1
 
-    # 사용 시각 기록 (모델 필드명에 맞춰 하나만 써도 됨)
+    # 사용 시각 기록
     if hasattr(invite, "used_at"):
         invite.used_at = now
     if hasattr(invite, "last_used_at"):
@@ -274,8 +298,7 @@ def mark_invite_used(
     max_uses = getattr(invite, "max_uses", None)
     used_count = getattr(invite, "used_count", None)
     if max_uses is not None and used_count is not None and used_count >= max_uses:
-        # 단일용 코드라면 'used' 로, 여러 번 쓰는 코드면 유지하고 싶으면 이 부분 조정
-        invite.status = "used"
+        invite.status = "disabled"
 
     db.add(invite)
     db.commit()

@@ -18,7 +18,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
 
 from models.base import Base
-# from models.partner.catalog import ModelCatalog  # 관계는 문자열로 참조하므로 필수는 아님
+from models.partner.catalog import ModelCatalog  # 관계는 문자열로 참조하므로 필수는 아님
 
 
 # ========== partner.courses ==========
