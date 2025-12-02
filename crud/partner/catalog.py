@@ -1,5 +1,6 @@
 # crud/partner/catalog.py
 from __future__ import annotations
+
 from typing import Optional, Tuple, List
 from datetime import datetime
 
@@ -30,7 +31,9 @@ def _paginate(stmt, db: Session, page: int, size: int):
     page = max(page or 1, 1)
     size = min(max(size or 50, 1), 200)
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    rows = db.execute(stmt.limit(size).offset((page - 1) * size)).scalars().all()
+    rows = db.execute(
+        stmt.limit(size).offset((page - 1) * size)
+    ).scalars().all()
     return rows, total
 
 
@@ -43,11 +46,15 @@ class ProviderCredentialCRUD:
     def get(self, db: Session, id: int) -> Optional[ProviderCredential]:
         return db.get(self.model, id)
 
-    def get_by_partner_provider(
-        self, db: Session, *, partner_id: int, provider: str
+    def get_by_org_provider(
+        self,
+        db: Session,
+        *,
+        org_id: int,
+        provider: str,
     ) -> Optional[ProviderCredential]:
         stmt = select(self.model).where(
-            self.model.partner_id == partner_id,
+            self.model.org_id == org_id,
             self.model.provider == provider,
         )
         return db.execute(stmt).scalar_one_or_none()
@@ -56,7 +63,7 @@ class ProviderCredentialCRUD:
         self,
         db: Session,
         *,
-        partner_id: Optional[int] = None,
+        org_id: Optional[int] = None,
         provider: Optional[str] = None,
         is_active: Optional[bool] = None,
         page: int = 1,
@@ -64,15 +71,19 @@ class ProviderCredentialCRUD:
     ) -> Tuple[List[ProviderCredential], int]:
         stmt = select(self.model)
         conds = []
-        if partner_id is not None:
-            conds.append(self.model.partner_id == partner_id)
+        if org_id is not None:
+            conds.append(self.model.org_id == org_id)
         if provider is not None:
             conds.append(self.model.provider == provider)
         if is_active is not None:
             conds.append(self.model.is_active == is_active)
         if conds:
             stmt = stmt.where(and_(*conds))
-        stmt = stmt.order_by(self.model.partner_id.asc(), self.model.provider.asc(), self.model.id.asc())
+        stmt = stmt.order_by(
+            self.model.org_id.asc(),
+            self.model.provider.asc(),
+            self.model.id.asc(),
+        )
         return _paginate(stmt, db, page, size)
 
     def create(
@@ -82,7 +93,7 @@ class ProviderCredentialCRUD:
         data: ProviderCredentialCreate,
     ) -> ProviderCredential:
         obj = self.model(
-            partner_id=data.partner_id,
+            org_id=data.org_id,
             provider=data.provider,
             credential_label=data.credential_label,
             api_key_encrypted=data.api_key_encrypted,
@@ -95,7 +106,7 @@ class ProviderCredentialCRUD:
             db.commit()
         except IntegrityError:
             db.rollback()
-            # 유니크 제약 충돌 가능: (partner_id, provider)
+            # 유니크 제약 충돌 가능: (org_id, provider)
             raise
         db.refresh(obj)
         return obj
@@ -127,7 +138,13 @@ class ProviderCredentialCRUD:
         db.commit()
         return self.get(db, id)
 
-    def mark_validated(self, db: Session, *, id: int, at: Optional[datetime] = None) -> None:
+    def mark_validated(
+        self,
+        db: Session,
+        *,
+        id: int,
+        at: Optional[datetime] = None,
+    ) -> None:
         at = at or func.now()
         stmt = (
             update(self.model)
@@ -152,7 +169,11 @@ class ModelCatalogCRUD:
         return db.get(self.model, id)
 
     def get_by_provider_model(
-        self, db: Session, *, provider: str, model_name: str
+        self,
+        db: Session,
+        *,
+        provider: str,
+        model_name: str,
     ) -> Optional[ModelCatalog]:
         stmt = select(self.model).where(
             self.model.provider == provider,
@@ -183,7 +204,10 @@ class ModelCatalogCRUD:
             conds.append(self.model.model_name.ilike(f"%{q}%"))
         if conds:
             stmt = stmt.where(and_(*conds))
-        stmt = stmt.order_by(self.model.provider.asc(), self.model.model_name.asc())
+        stmt = stmt.order_by(
+            self.model.provider.asc(),
+            self.model.model_name.asc(),
+        )
         return _paginate(stmt, db, page, size)
 
     def create(
@@ -252,12 +276,12 @@ class ModelCatalogCRUD:
         db.execute(delete(self.model).where(self.model.id == id))
         db.commit()
 
-    # 파트너가 실제 선택 가능(키 보유 + 모델 활성)한 모델 목록
-    def list_available_for_partner(
+    # Org가 실제 선택 가능(키 보유 + 모델 활성)한 모델 목록
+    def list_available_for_org(
         self,
         db: Session,
         *,
-        partner_id: int,
+        org_id: int,
         modality: Optional[str] = "chat",
         only_active: bool = True,
         page: int = 1,
@@ -268,13 +292,20 @@ class ModelCatalogCRUD:
         stmt = (
             select(mc)
             .join(pc, pc.provider == mc.provider)
-            .where(pc.partner_id == partner_id)
+            .where(pc.org_id == org_id)
         )
         if modality:
             stmt = stmt.where(mc.modality == modality)
         if only_active:
-            stmt = stmt.where(mc.is_active.is_(True), pc.is_active.is_(True))
-        stmt = stmt.order_by(mc.provider.asc(), mc.model_name.asc(), mc.id.asc())
+            stmt = stmt.where(
+                mc.is_active.is_(True),
+                pc.is_active.is_(True),
+            )
+        stmt = stmt.order_by(
+            mc.provider.asc(),
+            mc.model_name.asc(),
+            mc.id.asc(),
+        )
         return _paginate(stmt, db, page, size)
 
 
@@ -287,8 +318,13 @@ class OrgLlmSettingCRUD:
     def get(self, db: Session, id: int) -> Optional[OrgLlmSetting]:
         return db.get(self.model, id)
 
-    def get_by_partner(self, db: Session, *, partner_id: int) -> Optional[OrgLlmSetting]:
-        stmt = select(self.model).where(self.model.partner_id == partner_id)
+    def get_by_org(
+        self,
+        db: Session,
+        *,
+        org_id: int,
+    ) -> Optional[OrgLlmSetting]:
+        stmt = select(self.model).where(self.model.org_id == org_id)
         return db.execute(stmt).scalar_one_or_none()
 
     def create(
@@ -298,7 +334,7 @@ class OrgLlmSettingCRUD:
         data: OrgLlmSettingCreate,
     ) -> OrgLlmSetting:
         obj = self.model(
-            partner_id=data.partner_id,
+            org_id=data.org_id,
             default_chat_model=data.default_chat_model,
             provider_credential_id=data.provider_credential_id,
             updated_by=data.updated_by,
@@ -315,24 +351,24 @@ class OrgLlmSettingCRUD:
             db.commit()
         except IntegrityError:
             db.rollback()
-            # 유니크 제약: partner_id 당 1행
+            # 유니크 제약: org_id 당 1행
             raise
         db.refresh(obj)
         return obj
 
-    def upsert_by_partner(
+    def upsert_by_org(
         self,
         db: Session,
         *,
-        partner_id: int,
+        org_id: int,
         data: OrgLlmSettingUpdate,
     ) -> OrgLlmSetting:
-        cur = self.get_by_partner(db, partner_id=partner_id)
+        cur = self.get_by_org(db, org_id=org_id)
         if cur is None:
             # 기본값이 없으면 gpt-4o-mini 로 세팅
             default_chat_model = data.default_chat_model or "gpt-4o-mini"
             create_data = OrgLlmSettingCreate(
-                partner_id=partner_id,
+                org_id=org_id,
                 default_chat_model=default_chat_model,
                 enable_parallel_mode=data.enable_parallel_mode,
                 daily_message_limit=data.daily_message_limit,

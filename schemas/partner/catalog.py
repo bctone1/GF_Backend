@@ -1,16 +1,20 @@
 # schemas/partner/catalog.py
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any, Optional, Literal
 
 from pydantic import ConfigDict
+
 from schemas.base import ORMBase, Page
+
 
 # ==============================
 # provider_credentials
 # ==============================
 class ProviderCredentialCreate(ORMBase):
-    partner_id: int
+    # FK → partner.org.id
+    org_id: int
     provider: str
     credential_label: Optional[str] = None
     api_key_encrypted: str
@@ -28,7 +32,7 @@ class ProviderCredentialUpdate(ORMBase):
 
 class ProviderCredentialResponse(ORMBase):
     id: int
-    partner_id: int
+    org_id: int
     provider: str
     credential_label: Optional[str] = None
     is_active: bool
@@ -44,6 +48,7 @@ ProviderCredentialPage = Page[ProviderCredentialResponse]
 # model_catalog
 # ==============================
 ModelModality = Literal["chat", "embedding", "stt", "image", "tts", "rerank"]
+
 
 class ModelCatalogCreate(ORMBase):
     provider: str
@@ -84,13 +89,15 @@ ModelCatalogPage = Page[ModelCatalogResponse]
 # org_llm_settings
 # ==============================
 class OrgLlmSettingCreate(ORMBase):
-    partner_id: int
+    # FK → partner.org.id
+    org_id: int
     default_chat_model: str
     enable_parallel_mode: Optional[bool] = None  # DB default false
     daily_message_limit: Optional[int] = None
     token_alert_threshold: Optional[int] = None
     provider_credential_id: Optional[int] = None
-    updated_by: Optional[int] = None  # partner.org.id, 서버에서 채우기 가능
+    # updated_by: partner.org.id (또는 추후 user_id 로 변경 가능)
+    updated_by: Optional[int] = None
 
 
 class OrgLlmSettingUpdate(ORMBase):
@@ -106,7 +113,7 @@ class OrgLlmSettingUpdate(ORMBase):
 
 class OrgLlmSettingResponse(ORMBase):
     id: int
-    partner_id: int
+    org_id: int
     default_chat_model: str
     enable_parallel_mode: bool
     daily_message_limit: Optional[int] = None
