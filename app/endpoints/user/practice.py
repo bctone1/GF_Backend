@@ -293,14 +293,13 @@ def run_practice_turn_endpoint(
 
         # 세션이 특정 class 에 묶여 있어야 하고, 요청한 class_id 와 일치해야 함
         if session.class_id is None:
-            # 기존 데이터라 class_id 가 비어 있는 세션이면 바로 바인딩해도 되고,
-            # 아니면 400 을 던질 수도 있는데, 여기서는 엄격하게 막는다.
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="this session is not bound to any class (class_id is NULL)",
-            )
-
-        if session.class_id != class_id:
+            # 기존 데이터 호환용: 아직 class 에 안 묶인 세션이면
+            # 이번에 들어온 class_id 로 한 번만 바인딩해 준다.
+            session.class_id = class_id
+            db.add(session)
+            db.commit()
+        elif session.class_id != class_id:
+            # 이미 다른 class 에 묶여 있는데, 다른 class_id 로 호출한 경우는 에러
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="class_id does not match this session",

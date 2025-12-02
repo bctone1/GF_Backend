@@ -99,14 +99,24 @@ def create_class(
     - course_id 는 Query 로 받아서 course 소속 여부만 결정
     - payload 안의 primary_model_id / allowed_model_ids 로 LLM 설정
     - 기본 초대코드는 student 초대용으로 1개 발급
+
+    model_catalog 에 없는 모델 id 를 넘기면 400 에러 반환.
     """
-    obj = class_code_service.create_class_with_default_invite(
-        db,
-        partner_id=partner_id,
-        course_id=course_id,
-        data=payload,
-        created_by_partner_user_id=partner_id,
-    )
+    try:
+        obj = class_code_service.create_class_with_default_invite(
+            db,
+            partner_id=partner_id,
+            course_id=course_id,
+            data=payload,
+            created_by_partner_user_id=partner_id,
+        )
+    except ValueError as e:
+        # 예: model_catalog 에 없는 모델 id 등
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
     return ClassResponse.model_validate(obj)
 
 
@@ -144,24 +154,32 @@ def update_class(
     if not obj or obj.partner_id != partner_id:
         raise HTTPException(status_code=404, detail="Class not found")
 
-    obj = crud_classes.update_class(
-        db,
-        class_id=class_id,
-        name=payload.name,
-        description=payload.description,
-        status=payload.status,
-        start_at=payload.start_at,
-        end_at=payload.end_at,
-        capacity=payload.capacity,
-        timezone=payload.timezone,
-        location=payload.location,
-        online_url=payload.online_url,
-        invite_only=payload.invite_only,
-        course_id=payload.course_id,
-        # LLM 설정
-        primary_model_id=payload.primary_model_id,
-        allowed_model_ids=payload.allowed_model_ids,
-    )
+    try:
+        obj = crud_classes.update_class(
+            db,
+            class_id=class_id,
+            name=payload.name,
+            description=payload.description,
+            status=payload.status,
+            start_at=payload.start_at,
+            end_at=payload.end_at,
+            capacity=payload.capacity,
+            timezone=payload.timezone,
+            location=payload.location,
+            online_url=payload.online_url,
+            invite_only=payload.invite_only,
+            course_id=payload.course_id,
+            # LLM 설정
+            primary_model_id=payload.primary_model_id,
+            allowed_model_ids=payload.allowed_model_ids,
+        )
+    except ValueError as e:
+        # 예: model_catalog 에 없는 모델 id 등
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
     if not obj:
         raise HTTPException(status_code=404, detail="Class not found")
 

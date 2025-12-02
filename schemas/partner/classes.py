@@ -23,7 +23,10 @@ class ClassBase(ORMBase):
     Class 공통 필드
     - name, 시간, 정원, 장소 등
     - status / timezone / invite_only 에는 기본값 부여
+    - LLM 설정은 partner.model_catalog.id 기준으로 관리
     """
+    model_config = ConfigDict(from_attributes=False)
+
     name: str
     description: Optional[str] = None
 
@@ -44,14 +47,21 @@ class ClassBase(ORMBase):
     # 이 강의실에서 기본으로 사용할 LLM 모델 (partner.model_catalog.id)
     primary_model_id: Optional[int] = None
     # 이 강의실에서 허용되는 모델 목록 (model_catalog.id 리스트)
+    # CRUD 쪽에서:
+    # - primary_model_id 가 None 이고 allowed_model_ids 가 있으면,
+    #   allowed_model_ids[0] 를 primary 로 사용
+    # - primary_model_id 는 항상 allowed_model_ids 안에 포함되도록 정규화
+    # - 모든 id 는 model_catalog 에 존재하는지 검증
     allowed_model_ids: List[int] = Field(default_factory=list)
 
 
 class ClassCreate(ClassBase):
     """
     partner_id, course_id 는 path / 컨텍스트에서 받기 때문에 body 에선 제외.
+    LLM 설정은 model_catalog.id 배열을 그대로 넘겨주면,
+    CRUD 에서 검증 + 정규화 처리.
     """
-    # 여기서는 별도 필드 추가 없이 ClassBase 그대로 사용
+    # 별도 필드 없이 ClassBase 그대로 사용
     pass
 
 
@@ -75,7 +85,10 @@ class ClassUpdate(ORMBase):
     # 코스 소속 변경 가능 (독립 class ↔ course 소속)
     course_id: Optional[int] = None
 
-    # LLM 설정
+    # LLM 설정 (부분 수정)
+    # - 둘 다 None 이면 기존 값 유지
+    # - 하나라도 들어오면 CRUD 에서
+    #   (기존 값 + 새 값) 기준으로 재검증/정규화
     primary_model_id: Optional[int] = None
     allowed_model_ids: Optional[List[int]] = None
 
@@ -84,6 +97,8 @@ class ClassUpdate(ORMBase):
 # invite_codes
 # ==============================
 class InviteCodeBase(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
     code: str
     # 항상 student 초대코드
     target_role: InviteTargetRole = "student"
@@ -98,6 +113,8 @@ class InviteCodeCreate(ORMBase):
     path(`/partner/{partner_id}/classes/{class_id}/invites`) 등에서 결정.
     클라이언트는 code / expires_at / max_uses 정도만 보냄.
     """
+    model_config = ConfigDict(from_attributes=False)
+
     code: str
     expires_at: Optional[datetime] = None
     max_uses: Optional[int] = None
@@ -128,13 +145,14 @@ class InviteCodeResponse(InviteCodeBase):
 class ClassResponse(ClassBase):
     """
     DB → 응답용 스키마
+    - invite_codes 는 이 Class 에 연관된 초대코드 리스트
     """
     id: int
     partner_id: int
     course_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
-    invite_codes: List[InviteCodeResponse] = []
+    invite_codes: List[InviteCodeResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
 

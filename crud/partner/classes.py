@@ -8,6 +8,66 @@ from sqlalchemy import select, delete, func, and_, desc
 from sqlalchemy.orm import Session, selectinload
 
 from models.partner.course import Class, InviteCode
+from models.partner.catalog import ModelCatalog  # ← 추가: 모델 카탈로그 참조
+
+
+# ==============================
+# 내부 헬퍼: LLM 모델 검증/정규화
+# ==============================
+def _validate_models_for_class(
+    db: Session,
+    *,
+    primary_model_id: Optional[int],
+    allowed_model_ids: Optional[List[int]],
+) -> tuple[Optional[int], Optional[List[int]]]:
+    """
+    Class 에 설정할 LLM 모델들을 검증하고 정규화한다.
+    규칙:
+    - primary_model_id / allowed_model_ids 에 있는 모든 id 는
+      반드시 partner.model_catalog 에 존재해야 함.
+    - primary_model_id 가 None 이고 allowed_model_ids 가 있으면,
+      allowed_model_ids[0] 를 primary 로 자동 설정.
+    - primary_model_id 가 allowed_model_ids 안에 없으면 자동으로 포함시킴.
+    """
+    # 둘 다 비어 있으면 그대로 허용 (모델 없는 Class 도 허용하는 케이스)
+    if primary_model_id is None and not allowed_model_ids:
+        return primary_model_id, allowed_model_ids
+
+    # 리스트 정리
+    allowed_list: List[int] = list(allowed_model_ids or [])
+
+    # primary 없고 allowed만 있으면, 첫 번째를 기본 모델로 사용
+    if primary_model_id is None and allowed_list:
+        primary_model_id = allowed_list[0]
+
+    # primary 가 allowed 리스트에 없으면 추가
+    if primary_model_id is not None and primary_model_id not in allowed_list:
+        allowed_list.append(primary_model_id)
+
+    # 실제로 존재하는 model_catalog.id 인지 검증
+    model_ids = set(allowed_list)
+    if primary_model_id is not None:
+        model_ids.add(primary_model_id)
+
+    if model_ids:
+        rows = (
+            db.execute(
+                select(ModelCatalog.id).where(
+                    ModelCatalog.id.in_(model_ids)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        found_ids = set(rows)
+        missing = model_ids - found_ids
+        if missing:
+            # 여기서 ValueError 를 던지면 엔드포인트 쪽에서 HTTPException 으로 변환해서 써주면 됨
+            raise ValueError(
+                f"model_catalog 에 존재하지 않는 모델 id 가 포함되어 있습니다: {sorted(missing)}"
+            )
+
+    return primary_model_id, allowed_list
 
 
 # ==============================
@@ -49,10 +109,6 @@ def list_classes(
     return rows, total
 
 
-# 필요하면 여기에서 partner_id 기준 조회용 함수도 추가 예정
-# def list_classes_by_partner(...): ...
-
-
 def create_class(
     db: Session,
     *,
@@ -77,7 +133,20 @@ def create_class(
     - course_id: course 에 소속되면 지정, 아니면 None
     - primary_model_id: 기본으로 사용할 LLM (partner.model_catalog.id)
     - allowed_model_ids: 허용 모델 목록 (JSONB; None 이면 DB 기본값 [] 사용)
+
+    모델 관련 규칙:
+    - primary_model_id / allowed_model_ids 는 모두 model_catalog 에 존재해야 함.
+    - primary_model_id 가 None 이고 allowed_model_ids 가 있으면,
+      allowed_model_ids[0] 를 primary 로 사용.
+    - primary_model_id 는 항상 allowed_model_ids 안에 포함되도록 정규화.
     """
+    # ---- LLM 모델 검증/정규화 ----
+    primary_model_id, allowed_model_ids = _validate_models_for_class(
+        db,
+        primary_model_id=primary_model_id,
+        allowed_model_ids=allowed_model_ids,
+    )
+
     extra: dict = {}
     if allowed_model_ids is not None:
         extra["allowed_model_ids"] = allowed_model_ids
@@ -127,6 +196,7 @@ def update_class(
     if not obj:
         return None
 
+    # 기본 정보 수정
     if name is not None:
         obj.name = name
     if description is not None:
@@ -150,11 +220,27 @@ def update_class(
     if course_id is not None:
         obj.course_id = course_id
 
-    # LLM 설정
-    if primary_model_id is not None:
-        obj.primary_model_id = primary_model_id
-    if allowed_model_ids is not None:
-        obj.allowed_model_ids = allowed_model_ids
+    # LLM 설정 변경이 들어온 경우만 검증/정규화
+    if primary_model_id is not None or allowed_model_ids is not None:
+        # 현재 값에 패치 형태로 적용
+        new_primary = (
+            primary_model_id if primary_model_id is not None else obj.primary_model_id
+        )
+        existing_allowed = obj.allowed_model_ids or []
+        new_allowed = (
+            allowed_model_ids
+            if allowed_model_ids is not None
+            else list(existing_allowed)
+        )
+
+        new_primary, new_allowed = _validate_models_for_class(
+            db,
+            primary_model_id=new_primary,
+            allowed_model_ids=new_allowed,
+        )
+
+        obj.primary_model_id = new_primary
+        obj.allowed_model_ids = new_allowed
 
     db.commit()
     db.refresh(obj)
