@@ -123,6 +123,8 @@ def list_my_practice_sessions(
     return {"items": items, "total": total, "page": page, "size": size}
 
 
+
+
 @router.post(
     "/sessions",
     response_model=PracticeSessionResponse,
@@ -155,6 +157,11 @@ def run_practice_turn_endpoint(
         ...,
         ge=0,
         description="0이면 자동으로 새 세션을 생성 실행, 1 이상이면 해당 세션에서 이어서 대화",
+    ),
+    class_id: int = Query(
+        ...,
+        ge=1,
+        description="이 연습 세션이 속한 Class ID (partner.classes.id)",
     ),
     body: PracticeTurnRequest = ...,
     db: Session = Depends(get_db),
@@ -216,6 +223,9 @@ def run_practice_turn_endpoint(
     - 화면 구성:
       - `results` 배열을 기반으로 **모델별 컬럼**을 만들어
         각 모델의 답변/레이턴시/토큰 사용량을 나란히 비교해서 보여줌(구현중)
+    - 항상 class_id 를 필수로 받는다.
+      - session_id == 0 인 경우: 이 class 에 속한 새 practice_session 생성
+      - session_id > 0 인 경우: 해당 세션의 class_id 와 요청 class_id 가 일치하는지 검증
     """
 
     # 1) session_id == 0 → 새 세션 + 기본 모델 자동 생성
@@ -227,11 +237,12 @@ def run_practice_turn_endpoint(
                 detail="session_id=0 일 때는 session_model_ids 를 지정할 수 없습니다.",
             )
 
-        # 새 practice_session 생성
+        # 새 practice_session 생성 (class_id 필수)
         session = practice_session_crud.create(
             db,
             PracticeSessionCreate(
                 user_id=me.user_id,
+                class_id=class_id,
                 title=None,
                 notes=None,
             ),
@@ -248,7 +259,7 @@ def run_practice_turn_endpoint(
             if conf.get("enabled", True) and conf.get("default", False):
                 default_model_names.append(name)
 
-        # 2순위: enabled=True 인 첫 번째 모델(아마도 gpt)
+        # 2순위: enabled=True 인 첫 번째 모델
         if not default_model_names:
             for name, conf in practice_models.items():
                 if isinstance(conf, dict) and conf.get("enabled", True):
@@ -280,9 +291,24 @@ def run_practice_turn_endpoint(
     else:
         session = _ensure_my_session(db, session_id, me)
 
+        # 세션이 특정 class 에 묶여 있어야 하고, 요청한 class_id 와 일치해야 함
+        if session.class_id is None:
+            # 기존 데이터라 class_id 가 비어 있는 세션이면 바로 바인딩해도 되고,
+            # 아니면 400 을 던질 수도 있는데, 여기서는 엄격하게 막는다.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="this session is not bound to any class (class_id is NULL)",
+            )
+
+        if session.class_id != class_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="class_id does not match this session",
+            )
+
         # 어떤 모델들에 보낼지 결정
         if body.session_model_ids:
-            models = []
+            models: list[PracticeSessionModel] = []
             for sm_id in body.session_model_ids:
                 model, model_session = _ensure_my_session_model(db, sm_id, me)
                 if model_session.session_id != session.session_id:
@@ -311,7 +337,6 @@ def run_practice_turn_endpoint(
     )
     db.commit()
     return turn_result
-
 
 @router.get(
     "/sessions/{session_id}",

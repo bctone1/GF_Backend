@@ -11,6 +11,7 @@ class PracticeSessionCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     # 요청 바디에서는 user_id를 받지 않고, 엔드포인트에서 me.user_id로 채움
     user_id: Optional[int] = None
+    class_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -26,6 +27,7 @@ class PracticeSessionResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     session_id: int
     user_id: int
+    class_id: Optional[int] = None
     title: Optional[str] = None
     started_at: datetime
     completed_at: Optional[datetime] = None
@@ -38,6 +40,7 @@ class PracticeSessionResponse(ORMBase):
 class PracticeSessionModelCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     session_id: int
+    model_catalog_id: Optional[int] = None
     model_name: str
     is_primary: Optional[bool] = None  # server default false
 
@@ -51,6 +54,7 @@ class PracticeSessionModelUpdate(ORMBase):
 class PracticeSessionModelResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     session_model_id: int
+    model_catalog_id: Optional[int] = None
     session_id: int
     model_name: str
     is_primary: bool
@@ -162,6 +166,7 @@ class PracticeTurnRequest(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     prompt_text: str
+    model_catalog_id: Optional[int] = None
     session_model_ids: Optional[list[int]] = None
     document_ids: Optional[list[int]] = None  # 내가 선택한 문서들
 

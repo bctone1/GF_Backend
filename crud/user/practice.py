@@ -38,6 +38,7 @@ class PracticeSessionCRUD:
 
         obj = PracticeSession(
             user_id=data.user_id,
+            class_id=data.class_id,
             title=data.title,
             notes=data.notes,
             # started_at, completed_at 은 DB 기본값/제약에 맡김
@@ -115,6 +116,7 @@ class PracticeSessionModelCRUD:
     ) -> PracticeSessionModel:
         obj = PracticeSessionModel(
             session_id=data.session_id,
+            model_catalog_id=data.model_catalog_id,
             model_name=data.model_name,
             is_primary=data.is_primary if data.is_primary is not None else False,
         )

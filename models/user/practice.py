@@ -21,13 +21,33 @@ class PracticeSession(Base):
         nullable=False,
     )
 
+    # 이 연습 세션이 어떤 Class에 묶여 있는지 (없으면 독립 세션)
+    class_id = Column(
+        BigInteger,
+        ForeignKey("partner.classes.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     title = Column(Text, nullable=True)
-    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    started_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
     completed_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
 
-    models = relationship("PracticeSessionModel", back_populates="session", passive_deletes=True)
-    comparisons = relationship("ModelComparison", back_populates="session", passive_deletes=True)
+    models = relationship(
+        "PracticeSessionModel",
+        back_populates="session",
+        passive_deletes=True,
+    )
+    comparisons = relationship(
+        "ModelComparison",
+        back_populates="session",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         CheckConstraint(

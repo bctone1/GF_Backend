@@ -4,7 +4,8 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy.orm import Session
-
+from sqlalchemy import select
+from fastapi import HTTPException
 from models.user.account import AppUser
 from models.user.practice import (
     PracticeSession,
@@ -37,6 +38,8 @@ from langchain_service.llm.runner import generate_session_title_llm, _run_qa
 from langchain_service.embedding.get_vector import texts_to_vectors
 import time
 
+from models.partner.course import Class as PartnerClass
+from models.partner.catalog import ModelCatalog
 
 # =========================================
 # 질문 → 벡터 임베딩 헬퍼
@@ -425,3 +428,26 @@ def run_practice_turn(
         prompt_text=prompt_text,
         results=results,
     )
+
+
+def resolve_models_for_class(db: Session, class_id: int) -> tuple[PartnerClass, list[ModelCatalog]]:
+    clazz = db.execute(
+        select(PartnerClass).where(PartnerClass.id == class_id)
+    ).scalar_one_or_none()
+    if not clazz:
+        raise HTTPException(404, "class not found")
+
+    allowed_ids: list[int] = clazz.allowed_model_ids or []
+    if not allowed_ids:
+        raise HTTPException(400, "이 강의에 설정된 모델이 없습니다.")
+
+    rows = db.execute(
+        select(ModelCatalog).where(
+            ModelCatalog.id.in_(allowed_ids),
+            ModelCatalog.is_active.is_(True),
+        )
+    ).scalars().all()
+    if not rows:
+        raise HTTPException(400, "유효한 모델이 없습니다.")
+
+    return clazz, rows
