@@ -85,6 +85,34 @@ def create_document(
     return DocumentResponse.model_validate(doc)
 
 
+@router.post(
+    "/upload",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_document",
+    summary="업로드",
+)
+def upload_document(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    if not file.filename:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="file required",
+        )
+
+    # 로그인한 유저 기준으로 업로드 파이프라인 실행
+    pipeline = UploadPipeline(db, user_id=me.user_id)
+    doc = pipeline.run(file)
+
+    # SQLAlchemy 객체 → Pydantic 응답 스키마
+    return DocumentResponse.model_validate(doc)
+
+
+
+
 @router.get(
     "/document/{knowledge_id}",
     response_model=DocumentResponse,
@@ -320,26 +348,3 @@ def list_document_chunks(
     return [DocumentChunkResponse.model_validate(c) for c in chunks]
 
 
-@router.post(
-    "/upload",
-    response_model=DocumentResponse,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="upload_document",
-)
-def upload_document(
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="file required",
-        )
-
-    # 로그인한 유저 기준으로 업로드 파이프라인 실행
-    pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.run(file)
-
-    # SQLAlchemy 객체 → Pydantic 응답 스키마
-    return DocumentResponse.model_validate(doc)
