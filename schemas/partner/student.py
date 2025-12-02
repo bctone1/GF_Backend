@@ -91,7 +91,6 @@ class EnrollmentResponse(ORMBase):
 EnrollmentPage = Page[EnrollmentResponse]
 
 
-
 class StudentClassResponse(ORMBase):
     """
     수강생 입장에서 보는 '내 강의' 카드 한 줄.
@@ -106,7 +105,11 @@ class StudentClassResponse(ORMBase):
     org_name: Optional[str] = None
     teacher_name: Optional[str] = None
 
-    # 상태/기간
+    # 클래스 일정
+    class_start_at: Optional[datetime] = None
+    class_end_at: Optional[datetime] = None
+
+    # 수강 상태/기간
     enrollment_status: EnrollmentStatus
     enrolled_at: datetime
     completed_at: Optional[datetime] = None
@@ -114,4 +117,3 @@ class StudentClassResponse(ORMBase):
 
 
 StudentClassPage = Page[StudentClassResponse]
-

@@ -134,7 +134,14 @@ def list_my_classes(
                 class_title=getattr(cls, "name", ""),
                 course_title=(course.title if course is not None else None),
                 org_name=(getattr(org, "name", None) if org is not None else None),
-                teacher_name=getattr(partner, "full_name", None),
+
+                # 1) 이메일이 아니라 full_name 사용 (없으면 email로 폴백)
+                teacher_name=(getattr(partner, "full_name", None) or getattr(partner, "email", None)),
+
+                # 2) 클래스 시작/종료 시각 (Class.start_at / Class.end_at 기준)
+                class_start_at=getattr(cls, "start_at", None),
+                class_end_at=getattr(cls, "end_at", None),
+
                 enrollment_status=enr.status,
                 enrolled_at=enr.enrolled_at,
                 completed_at=enr.completed_at,
@@ -151,8 +158,6 @@ def list_my_classes(
         page=page,
         size=limit,
     )
-
-
 
 
 # ==============================
