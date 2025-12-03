@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from core.deps import get_db, get_current_user
 from core import config  # 기본 LLM/연습 모델 설정을 읽기 위함
 from models.user.account import AppUser
-
+from crud.partner import classes as classes_crud
 from crud.user.practice import (
     practice_session_crud,
     practice_session_model_crud,
@@ -230,14 +230,7 @@ def run_practice_turn_endpoint(
 
     # 1) session_id == 0 → 새 세션 + 기본 모델 자동 생성
     if session_id == 0:
-        # 새 세션 생성일 때는 session_model_ids 지정을 막아둠 (아직 존재하지 않는 id이므로)
-        if body.session_model_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="session_id=0 일 때는 session_model_ids 를 지정할 수 없습니다.",
-            )
-
-        # 새 practice_session 생성 (class_id 필수)
+        # 새 practice_session 생성
         session = practice_session_crud.create(
             db,
             PracticeSessionCreate(
@@ -248,44 +241,45 @@ def run_practice_turn_endpoint(
             ),
         )
 
-        # 기본 연습 모델 목록 결정 (config.PRACTICE_MODELS 기준)
-        practice_models = getattr(config, "PRACTICE_MODELS", {}) or {}
-        default_model_names: list[str] = []
-
-        # 1순위: enabled=True 이면서 default=True 인 모델들
-        for name, conf in practice_models.items():
-            if not isinstance(conf, dict):
-                continue
-            if conf.get("enabled", True) and conf.get("default", False):
-                default_model_names.append(name)
-
-        # 2순위: enabled=True 인 첫 번째 모델
-        if not default_model_names:
-            for name, conf in practice_models.items():
-                if isinstance(conf, dict) and conf.get("enabled", True):
-                    default_model_names.append(name)
-                    break
-
-        if not default_model_names:
+        # class 설정에서 사용할 모델 목록 가져오기
+        class_obj = classes_crud.get_class(db, class_id=class_id)
+        if not class_obj or class_obj.status != "active":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="사용 가능한 연습 모델이 설정되어 있지 않습니다. PRACTICE_MODELS를 확인하세요.",
+                detail="유효하지 않은 class_id 입니다.",
             )
 
-        # 세션에 기본 모델들 생성 (첫 번째만 is_primary=True)
+        model_catalog_ids: list[int] = []
+
+        # Class.primary_model_id (partner.model_catalog.id)
+        if class_obj.primary_model_id:
+            model_catalog_ids.append(class_obj.primary_model_id)
+
+        # Class.allowed_model_ids (JSONB 리스트)
+        if class_obj.allowed_model_ids:
+            for mid in class_obj.allowed_model_ids:
+                if mid not in model_catalog_ids:
+                    model_catalog_ids.append(mid)
+
+        if not model_catalog_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="이 class 에 설정된 모델이 없습니다. 강의 설정에서 모델을 추가하세요.",
+            )
+
+        # 세션-모델 레코드 생성 (첫 번째만 is_primary=True)
         models: list[PracticeSessionModel] = []
-        is_first = True
-        for name in default_model_names:
+        for idx, mc_id in enumerate(model_catalog_ids):
             m = practice_session_model_crud.create(
                 db,
                 PracticeSessionModelCreate(
                     session_id=session.session_id,
-                    model_name=name,
-                    is_primary=is_first,
+                    model_catalog_id=mc_id,  # partner.model_catalog.id
+                    # model_name 은 CRUD 내부에서 ModelCatalog 보고 채우도록 해도 됨
+                    is_primary=(idx == 0),
                 ),
             )
             models.append(m)
-            is_first = False
 
     # 2) session_id > 0 → 기존 세션에 대해 턴 실행
     else:
@@ -318,7 +312,10 @@ def run_practice_turn_endpoint(
                 models.append(model)
         else:
             # 지정 없을시 세션에 등록된 모든 모델에 순차 호출
-            models = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+            models = practice_session_model_crud.list_by_session(
+                db,
+                session_id=session.session_id,
+            )
 
     if not models:
         raise HTTPException(
@@ -329,7 +326,7 @@ def run_practice_turn_endpoint(
     turn_result = run_practice_turn(
         db=db,
         session=session,
-        models=models,    # 다중 LLM 모델 할때 여기서 모델 여러개 받음
+        models=models,  # 다중 LLM 모델 할때 여기서 모델 여러개 받음
         prompt_text=body.prompt_text,
         user=me,
         document_ids=body.document_ids,

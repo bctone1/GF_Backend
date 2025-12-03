@@ -4,7 +4,9 @@ from __future__ import annotations
 from typing import Optional, Sequence, Tuple, Any, Mapping, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
+from fastapi import HTTPException
 
+from models.partner.catalog import ModelCatalog
 from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
@@ -114,16 +116,25 @@ class PracticeSessionModelCRUD:
         db: Session,
         data: PracticeSessionModelCreate,
     ) -> PracticeSessionModel:
+        # 필요하면 여기서 ModelCatalog 조회
+        model_name = data.model_name
+        if data.model_catalog_id and not model_name:
+            catalog = db.get(ModelCatalog, data.model_catalog_id)
+            if not catalog:
+                raise HTTPException(400, "invalid model_catalog_id")
+            model_name = catalog.logical_name or catalog.model_name
+
         obj = PracticeSessionModel(
             session_id=data.session_id,
             model_catalog_id=data.model_catalog_id,
-            model_name=data.model_name,
+            model_name=model_name,
             is_primary=data.is_primary if data.is_primary is not None else False,
         )
         db.add(obj)
         db.flush()
         db.refresh(obj)
         return obj
+
 
     def get(
         self,

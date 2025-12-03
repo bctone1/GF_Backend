@@ -41,16 +41,10 @@ class PracticeSessionResponse(ORMBase):
 # user.practice_session_models
 # =========================================
 class PracticeSessionModelCreate(ORMBase):
-    """
-    한 세션에서 사용할 단일 모델 추가용.
-
-    - model_catalog_id: partner.model_catalog.id (반드시 카탈로그에 존재해야 함)
-    - model_name: 요청에서는 생략 가능, 서버에서 ModelCatalog 를 보고 채우는 용도
-    """
     model_config = ConfigDict(from_attributes=False)
 
     session_id: int
-    model_catalog_id: int  # 카탈로그 기준으로 필수
+    model_catalog_id: int  # 카탈로그 기준으로 필수(서버 내부사용)
     model_name: Optional[str] = None
     is_primary: Optional[bool] = None  # server default false
 
