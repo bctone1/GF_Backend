@@ -132,20 +132,20 @@ def list_my_classes(
                 enrollment_id=enr.id,
                 class_id=cls.id,
                 class_title=getattr(cls, "name", ""),
+                primary_model_id=getattr(cls, "primary_model_id", None),
+                allowed_model_ids=(getattr(cls, "allowed_model_ids", None) or []),
+
                 course_title=(course.title if course is not None else None),
                 org_name=(getattr(org, "name", None) if org is not None else None),
 
-                # 1) 이메일이 아니라 full_name 사용 (없으면 email로 폴백)
                 teacher_name=(getattr(partner, "full_name", None) or getattr(partner, "email", None)),
 
-                # 2) 클래스 시작/종료 시각 (Class.start_at / Class.end_at 기준)
                 class_start_at=getattr(cls, "start_at", None),
                 class_end_at=getattr(cls, "end_at", None),
 
                 enrollment_status=enr.status,
                 enrolled_at=enr.enrolled_at,
                 completed_at=enr.completed_at,
-                # NOTE: last_activity_at은 나중에 세션/활동 집계 테이블이 생기면 연동
                 last_activity_at=None,
             )
         )

@@ -101,7 +101,13 @@ class StudentClassResponse(ORMBase):
 
     # 표시 정보
     class_title: str
+
+    # 클래스에 연결된 LLM 모델 정보
+    primary_model_id: Optional[int] = None
+    allowed_model_ids: list[int] = []  # 또는 = Field(default_factory=list)
+
     course_title: Optional[str] = None
+
     org_name: Optional[str] = None
     teacher_name: Optional[str] = None
 
@@ -114,6 +120,5 @@ class StudentClassResponse(ORMBase):
     enrolled_at: datetime
     completed_at: Optional[datetime] = None
     last_activity_at: Optional[datetime] = None  # 추후 세션/활동 로그 연동 예정
-
 
 StudentClassPage = Page[StudentClassResponse]
