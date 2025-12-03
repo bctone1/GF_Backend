@@ -112,7 +112,8 @@ class Class(Base):
     status = Column(
         Text,
         nullable=False,
-        server_default=text("'planned'"),  # planned | ongoing | ended
+        # planned | active | ended
+        server_default=text("'planned'"),
     )
     start_at = Column(DateTime(timezone=True))
     end_at = Column(DateTime(timezone=True))
@@ -129,15 +130,12 @@ class Class(Base):
     # ==========================
     # LLM 관련 (강의실 단위)
     # ==========================
-    # 이 강의실에서 기본으로 사용할 LLM 모델
     primary_model_id = Column(
         BigInteger,
         ForeignKey("partner.model_catalog.id", ondelete="SET NULL"),
         nullable=True,
     )
 
-    # 이 강의실에서 허용되는 모델 목록 (model_catalog.id 리스트)
-    # 예: [1, 2, 3]
     allowed_model_ids = Column(
         JSONB,
         nullable=False,
@@ -195,7 +193,7 @@ class Class(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('planned','ongoing','ended')",
+            "status IN ('planned','active','ended')",
             name="chk_classes_status",
         ),
         Index("idx_classes_course_status", "course_id", "status"),

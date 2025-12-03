@@ -110,7 +110,7 @@ class CourseStatus(str, Enum):
 
 class ClassStatus(str, Enum):
     planned = "planned"    # 개강 전
-    ongoing = "ongoing"    # 진행 중
+    active = "active"    # 진행 중
     ended = "ended"        # 종료
 
 

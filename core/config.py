@@ -135,7 +135,7 @@ PRACTICE_MODELS = {
         "enabled": True,
         "default": True,
     },
-    "claude-3.7-haiku": {
+     "claude-3-haiku-20240307": {
         "provider": "anthropic",
         "model_name": "claude-3-haiku-20240307",
         "display_name": "Claude 3.7 Haiku",

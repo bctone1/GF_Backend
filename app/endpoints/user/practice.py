@@ -123,8 +123,6 @@ def list_my_practice_sessions(
     return {"items": items, "total": total, "page": page, "size": size}
 
 
-
-
 @router.post(
     "/sessions",
     response_model=PracticeSessionResponse,
