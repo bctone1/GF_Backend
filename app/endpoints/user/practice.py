@@ -106,6 +106,7 @@ def _ensure_my_comparison(db: Session, comparison_id: int, me: AppUser):
     "/sessions",
     response_model=Page[PracticeSessionResponse],
     operation_id="list_my_practice_sessions",
+    summary="내 강의 불러오기"
 )
 def list_my_practice_sessions(
     page: int = Query(1, ge=1),

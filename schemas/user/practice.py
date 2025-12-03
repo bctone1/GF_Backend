@@ -76,6 +76,7 @@ class PracticeResponseCreate(ORMBase):
 
     session_model_id: int
     model_name: str
+    session_id: int
     prompt_text: str
     response_text: str
     token_usage: Optional[Dict[str, Any]] = None

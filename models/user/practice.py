@@ -97,26 +97,51 @@ class PracticeResponse(Base):
 
     response_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    session_model_id = Column(  # 오타 수정: session_model_id가 정답
+    # 어떤 세션-모델의 응답인지
+    session_model_id = Column(
         BigInteger,
         ForeignKey("user.practice_session_models.session_model_id", ondelete="CASCADE"),
         nullable=False,
     )
+
+    session_id = Column(
+        BigInteger,
+        ForeignKey("user.practice_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
     model_name = Column(Text, nullable=False)
     prompt_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
     token_usage = Column(JSONB, nullable=True)
     latency_ms = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
-    session_model = relationship("PracticeSessionModel", back_populates="responses", passive_deletes=True)
-    ratings = relationship("PracticeRating", back_populates="response", passive_deletes=True)
+    session_model = relationship(
+        "PracticeSessionModel",
+        back_populates="responses",
+        passive_deletes=True,
+    )
+    ratings = relationship(
+        "PracticeRating",
+        back_populates="response",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
-        CheckConstraint("latency_ms IS NULL OR latency_ms >= 0", name="chk_practice_responses_latency_nonneg"),
+        CheckConstraint(
+            "latency_ms IS NULL OR latency_ms >= 0",
+            name="chk_practice_responses_latency_nonneg",
+        ),
         Index("idx_practice_responses_model_time", "session_model_id", "created_at"),
+        Index("idx_practice_responses_session_time", "session_id", "created_at"),  # ← 세션 기준 조회용
         {"schema": "user"},
     )
+
 
 
 # ========== user.practice_ratings ==========

@@ -209,6 +209,7 @@ class PracticeResponseCRUD:
     ) -> PracticeResponse:
         obj = PracticeResponse(
             session_model_id=data.session_model_id,
+            session_id=data.session_id,
             model_name=data.model_name,
             prompt_text=data.prompt_text,
             response_text=data.response_text,

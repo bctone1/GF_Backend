@@ -383,6 +383,7 @@ def run_practice_turn(
             db,
             PracticeResponseCreate(
                 session_model_id=m.session_model_id,
+                session_id=session.session_id,
                 model_name=m.model_name,
                 prompt_text=prompt_text,
                 response_text=response_text,
