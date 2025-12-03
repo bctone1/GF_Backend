@@ -2,7 +2,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Any, Dict
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 
 from schemas.base import ORMBase
 
@@ -44,8 +44,7 @@ class PracticeSessionModelCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     session_id: int
-    model_catalog_id: int  # 카탈로그 기준으로 필수(서버 내부사용)
-    model_name: Optional[str] = None
+    model_name: str
     is_primary: Optional[bool] = None  # server default false
 
 
@@ -64,7 +63,6 @@ class PracticeSessionModelResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
 
     session_model_id: int
-    model_catalog_id: Optional[int] = None
     session_id: int
     model_name: str
     is_primary: bool
@@ -196,7 +194,6 @@ class PracticeTurnRequest(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     prompt_text: str
-    model_catalog_id: Optional[int] = None
     session_model_ids: Optional[list[int]] = None
     document_ids: Optional[list[int]] = None  # 내가 선택한 문서들
 
@@ -209,7 +206,6 @@ class PracticeTurnModelResult(ORMBase):
     model_config = ConfigDict(from_attributes=True)
 
     session_model_id: int
-    model_catalog_id: Optional[int] = None
     model_name: str
 
     response_id: int

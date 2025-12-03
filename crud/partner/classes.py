@@ -174,6 +174,7 @@ def create_class(
     return obj
 
 
+
 def update_class(
     db: Session,
     class_id: int,

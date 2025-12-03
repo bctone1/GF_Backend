@@ -50,7 +50,7 @@ from service.user.practice import (
     run_practice_turn,
     # create_model_comparison_from_metrics,
 )
-
+from models.partner.catalog import ModelCatalog
 router = APIRouter()
 
 
@@ -228,7 +228,7 @@ def run_practice_turn_endpoint(
       - session_id > 0 인 경우: 해당 세션의 class_id 와 요청 class_id 가 일치하는지 검증
     """
 
-    # 1) session_id == 0 → 새 세션 + 기본 모델 자동 생성
+    # 1) session_id == 0 → 새 세션 + class 설정 기반 기본 모델 자동 생성
     if session_id == 0:
         # 새 practice_session 생성
         session = practice_session_crud.create(
@@ -249,13 +249,12 @@ def run_practice_turn_endpoint(
                 detail="유효하지 않은 class_id 입니다.",
             )
 
+        # 1) class 에 설정된 model_catalog id 목록 수집
         model_catalog_ids: list[int] = []
 
-        # Class.primary_model_id (partner.model_catalog.id)
         if class_obj.primary_model_id:
             model_catalog_ids.append(class_obj.primary_model_id)
 
-        # Class.allowed_model_ids (JSONB 리스트)
         if class_obj.allowed_model_ids:
             for mid in class_obj.allowed_model_ids:
                 if mid not in model_catalog_ids:
@@ -267,15 +266,29 @@ def run_practice_turn_endpoint(
                 detail="이 class 에 설정된 모델이 없습니다. 강의 설정에서 모델을 추가하세요.",
             )
 
-        # 세션-모델 레코드 생성 (첫 번째만 is_primary=True)
+        # 2) 각 catalog id → 실제 LLM logical name 으로 매핑
+        model_names: list[str] = []
+        for mc_id in model_catalog_ids:
+            catalog = db.get(ModelCatalog, mc_id)
+            if not catalog:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"유효하지 않은 model_catalog id: {mc_id}",
+                )
+
+            # logical_name 이 있으면 그걸 우선 사용, 없으면 model_name 사용
+            logical_name = getattr(catalog, "logical_name", None)
+            name = logical_name or catalog.model_name
+            model_names.append(name)
+
+        # 3) 세션-모델 레코드 생성 (첫 번째만 is_primary=True)
         models: list[PracticeSessionModel] = []
-        for idx, mc_id in enumerate(model_catalog_ids):
+        for idx, name in enumerate(model_names):
             m = practice_session_model_crud.create(
                 db,
                 PracticeSessionModelCreate(
                     session_id=session.session_id,
-                    model_catalog_id=mc_id,  # partner.model_catalog.id
-                    # model_name 은 CRUD 내부에서 ModelCatalog 보고 채우도록 해도 됨
+                    model_name=name,         # ← 더 이상 model_catalog_id 없음
                     is_primary=(idx == 0),
                 ),
             )
@@ -326,7 +339,7 @@ def run_practice_turn_endpoint(
     turn_result = run_practice_turn(
         db=db,
         session=session,
-        models=models,  # 다중 LLM 모델 할때 여기서 모델 여러개 받음
+        models=models,   # 다중 LLM 모델일 때 여기서 모델 여러 개 받음
         prompt_text=body.prompt_text,
         user=me,
         document_ids=body.document_ids,
