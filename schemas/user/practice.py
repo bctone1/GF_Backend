@@ -75,6 +75,7 @@ class PracticeResponseCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     session_model_id: int
+    model_name: str
     prompt_text: str
     response_text: str
     token_usage: Optional[Dict[str, Any]] = None
@@ -88,6 +89,7 @@ class PracticeResponseUpdate(ORMBase):
     response_text: Optional[str] = None
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
+    # model_name 은 보통 수정 안 해도 되니까 굳이 안 넣어도 됨
 
 
 class PracticeResponseResponse(ORMBase):
@@ -95,6 +97,7 @@ class PracticeResponseResponse(ORMBase):
 
     response_id: int
     session_model_id: int
+    model_name: str
     prompt_text: str
     response_text: str
     token_usage: Optional[Dict[str, Any]] = None

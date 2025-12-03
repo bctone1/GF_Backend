@@ -102,7 +102,7 @@ class PracticeResponse(Base):
         ForeignKey("user.practice_session_models.session_model_id", ondelete="CASCADE"),
         nullable=False,
     )
-
+    model_name = Column(Text, nullable=False)
     prompt_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
     token_usage = Column(JSONB, nullable=True)

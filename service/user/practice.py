@@ -378,11 +378,12 @@ def run_practice_turn(
             prompt_text=full_prompt,
         )
 
-        # 3) 응답 저장 (DB에는 원래 질문만 저장)
+        # 3) 응답 저장
         resp = practice_response_crud.create(
             db,
             PracticeResponseCreate(
                 session_model_id=m.session_model_id,
+                model_name=m.model_name,
                 prompt_text=prompt_text,
                 response_text=response_text,
                 token_usage=token_usage,
@@ -390,10 +391,10 @@ def run_practice_turn(
             ),
         )
 
-        # 4) 응답 DTO 생성
+        # 4) 클라이언트 응답용 DTO
         results.append(
             PracticeTurnModelResult(
-                session_model_id=m.session_model_id,
+                session_model_id=resp.session_model_id,  # DB에 저장된 FK 그대로
                 model_name=m.model_name,
                 response_id=resp.response_id,
                 prompt_text=resp.prompt_text,
@@ -419,15 +420,16 @@ def run_practice_turn(
             session_id=session.session_id,
             data=PracticeSessionUpdate(title=title),
         )
-        session.title = title  # in-memory 도 같이 반영
+        session.title = title
 
-    # 6) 클라이언트로 돌려줄 DTO
+    # 6) 최종 응답
     return PracticeTurnResponse(
         session_id=session.session_id,
         session_title=session.title,
         prompt_text=prompt_text,
         results=results,
     )
+
 
 
 def resolve_models_for_class(db: Session, class_id: int) -> tuple[PartnerClass, list[ModelCatalog]]:

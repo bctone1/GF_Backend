@@ -209,16 +209,17 @@ class PracticeResponseCRUD:
     ) -> PracticeResponse:
         obj = PracticeResponse(
             session_model_id=data.session_model_id,
+            model_name=data.model_name,
             prompt_text=data.prompt_text,
             response_text=data.response_text,
             token_usage=data.token_usage,
             latency_ms=data.latency_ms,
-            # created_at 은 DB default
         )
         db.add(obj)
         db.flush()
         db.refresh(obj)
         return obj
+
 
     def get(
         self,
