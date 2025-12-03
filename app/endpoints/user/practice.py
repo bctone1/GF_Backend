@@ -166,64 +166,94 @@ def run_practice_turn_endpoint(
     me: AppUser = Depends(get_current_user),
 ):
     """
-   [요청 시나리오]
+    [기능 개요]
 
-    1. **새 대화 시작**
-       - `session_id = 0` 으로 호출
-       - 서버가 새로운 practice_session 을 만들고,
-         설정된 기본 모델들(`PRACTICE_MODELS` 중 enabled/default)로 세션을 초기화한 뒤
-         각 모델에 한 번씩 질문을 보내서 첫 응답을 생성
-       - 응답에 포함된 `session_id` 를 이후 턴에서 그대로 재사용
+    - 특정 강의실(class_id)에 연결된 LLM 설정을 기준으로, 멀티 모델 실습 턴을 실행하는 엔드포인트.
+    - `session_id == 0` 이면: 새 practice_session 을 만들고, 해당 class 의 LLM 설정으로
+      `practice_session_models` 를 자동 구성한 뒤 첫 턴을 실행한다.
+    - `session_id > 0` 이면: 기존 세션에 대해 이어서 턴을 실행한다.
 
-    2. **기존 대화 이어서 하기**
-       - 이전에 받은 `session_id` 로 호출 (`/sessions/{session_id}/chat`)
-       - `session_model_ids` 를 비워 두면: 해당 세션에 등록된 **모든 모델**에게 질문을 보냄
-       - `session_model_ids` 에 ID 배열을 넣으면: 그 ID에 해당하는 모델들만 호출합니다.
+    [동작 상세]
 
-    3. **지식베이스(RAG) 기반으로 질문하기**
-       - `document_ids` 에 사용자가 업로드한 문서 ID 배열을 넘기면,
-         서버가 해당 문서들의 벡터 임베딩을 이용해
-         질문과 가장 관련도 높은 청크들(top-k)을 찾아 **프롬프트 앞에 컨텍스트로 붙인 뒤**
-         각 LLM에 전달
-       - 아무 값도 안 넘기면 일반 LLM 채팅처럼 동작
+    1. **새 대화 시작 (session_id = 0)**
 
-    [요청 바디]
+       - 필수: `class_id` 와 `prompt_text`.
+       - 현재 로그인 유저(`me.user_id`) 기준으로 새 `practice_session` 을 생성하고,
+         `class_id` 로 해당 세션을 강의실에 묶는다.
+       - `partner.classes.id = class_id` 인 row를 조회:
+         - 없거나 `status != "active"` 이면 `400 (유효하지 않은 class_id 입니다.)`.
+       - `class.primary_model_id` + `class.allowed_model_ids` 에서
+         **model_catalog_id 리스트**를 만든 뒤,
+         각각에 대해 `partner.model_catalog` 존재 여부를 검증한다.
+           - `logical_name` 이 있으면 그 값을,
+             없으면 `model_name` 을 사용해서 `PracticeSessionModel.model_name` 에 저장한다.
+       - 만들어진 모델 목록에 대해:
+         - 첫 번째만 `is_primary = True`, 나머지는 `False` 인
+           `PracticeSessionModel` 레코드를 생성한다.
+       - 이렇게 생성된 세션/모델들을 대상으로
+         이번 턴의 `prompt_text` 를 바로 LLM 에 보내고, 응답을 저장한다.
+       - 현재 구현에서는 `session_id=0` 인 경우 `body.session_model_ids` 값은 사용되지 않고 무시된다.
 
-    - `prompt_text` (필수): 이번 턴에서 보낼 사용자 질문 텍스트
-    - `session_model_ids` : 이번 턴에 호출할 세션-모델 ID 목록 널값 하면 자동 디폴트 실행됨
-    - `document_ids` : 참고할 지식베이스 문서 ID 목록
-    - 한 session 안에 practice_session_models가 여러 개 붙을 수 있음
-    - /sessions/{session_id}/chat 호출할 때:
-        session_model_ids 비워두면 → 그 세션에 등록된 모든 모델한테 동시에 질문 보냄
-        session_model_ids 배열 채우면 → 거기에 있는 모델들만 호출
-        results[] 배열에 모델별 응답이 각각 한 칸씩 들어옴
+    2. **기존 대화 이어가기 (session_id > 0)**
 
-    [응답 구조]
+       - `_ensure_my_session` 으로 세션이 현재 유저(me.user_id)의 것인지 검증한다.
+       - 세션에 묶인 `class_id` 를 검증한다.
+         - 세션의 `class_id` 가 `None` 이면:
+           - 최초 1회에 한해, 이번에 들어온 `class_id` 로 바인딩하고 저장한다.
+         - 세션의 `class_id` 가 이미 있는데, 쿼리로 들어온 `class_id` 와 다르면:
+           - `400 (class_id does not match this session)` 을 반환한다.
+       - 어떤 세션-모델을 호출할지 결정:
+         - `body.session_model_ids` 가 비어 있으면:
+           - 이 세션에 등록된 **모든** `PracticeSessionModel` 을 조회해서 호출한다.
+         - `body.session_model_ids` 에 값이 있으면:
+           - 각 ID에 대해 `_ensure_my_session_model` 로
+             - 현재 유저 소유 여부,
+             - 해당 세션에 속한 모델인지 여부를 검증한 뒤,
+             - 이 세션에 속한 모델만 모아 호출한다.
 
-    - `session_id` : 현재 대화 세션 ID
-    - `session_title` : 세션 제목 (첫 턴에서 자동 생성, 이후 유지)
-    - `prompt_text` : 이번 턴에서 보낸 질문 텍스트
-    - `results[]` : **모델별 응답 리스트** (밑에건 아직 구현중)
-        - `session_model_id` : 세션 내 모델 식별자
-        - `model_name` : 논리 모델 이름 (예: `gpt-4o-mini`, `claude-3.7-haiku`)
-        - `response_id` : 저장된 응답 ID
-        - `response_text` : 해당 모델의 답변 텍스트
-        - `token_usage` : 토큰 사용량 정보(있을 때만 값 존재)
-        - `latency_ms` : 해당 모델 응답까지 걸린 시간(ms)
-        - `created_at` : 응답 생성 시각
-        - `is_primary` : 대표 모델 여부 (자동 제목 생성 등에 사용)config에서 함
+    3. **지식베이스(RAG) 기반 질문 (선택)**
 
-    [프로세스]
-    - 새 대화 시작:
-      - `POST /user/practice/sessions/0/chat` 한 번 호출 → `session_id` 저장
-    - 이후 턴:
-      - 같은 `session_id` 로 계속 `/chat` 호출
-    - 화면 구성:
-      - `results` 배열을 기반으로 **모델별 컬럼**을 만들어
-        각 모델의 답변/레이턴시/토큰 사용량을 나란히 비교해서 보여줌(구현중)
-    - 항상 class_id 를 필수로 받는다.
-      - session_id == 0 인 경우: 이 class 에 속한 새 practice_session 생성
-      - session_id > 0 인 경우: 해당 세션의 class_id 와 요청 class_id 가 일치하는지 검증
+       - `body.document_ids` 에 값이 들어오면:
+         - 각 `document_id` 가 현재 유저의 문서인지 검증한다.
+         - 질문 텍스트를 임베딩한 뒤,
+           pgvector 기반 유사도 검색으로 관련도가 높은 청크들을 top-k 로 조회한다.
+         - 검색된 청크 텍스트들을 하나의 컨텍스트 문자열로 합쳐서,
+           LLM 프롬프트 앞부분에 붙인 뒤 질문을 전달한다.
+       - `document_ids` 를 비우면 일반 LLM 채팅처럼 동작한다.
+
+    [요청 바디 (PracticeTurnRequest)]
+
+    - `prompt_text` (필수): 이번 턴에서 보낼 사용자 질문 텍스트.
+    - `session_model_ids` (선택):
+        - 비우면: 해당 세션에 등록된 **모든** 모델에게 질문을 보낸다.
+        - 채우면: 배열에 포함된 `session_model_id` 들에 해당하는 모델만 호출한다.
+          (값은 `user.practice_session_models.session_model_id` 기준)
+    - `document_ids` (선택): RAG 에 사용할 내 문서 ID 목록.
+
+    [응답 구조 (PracticeTurnResponse)]
+
+    - `session_id` : 현재 대화 세션 ID.
+    - `session_title` : 세션 제목.
+        - 첫 턴에서 아직 제목이 없으면, 대표 모델 응답을 기반으로 LLM이 자동 생성한다.
+    - `prompt_text` : 이번 턴에서 보낸 질문 텍스트.
+    - `results[]` : 모델별 응답 리스트 (`PracticeTurnModelResult`):
+        - `session_model_id` : `user.practice_session_models.session_model_id`.
+        - `model_name` : 논리 모델 이름
+          (예: `gpt-4o-mini`, `claude-3-haiku-20240307` 등,
+          `config.PRACTICE_MODELS` 의 key 와 대응).
+        - `response_id` : `user.practice_responses.response_id`.
+        - `response_text` : 해당 모델의 답변 텍스트.
+        - `token_usage` : 토큰 사용량 정보(있을 때만 값 존재).
+        - `latency_ms` : 해당 모델 응답까지 걸린 시간(ms).
+        - `created_at` : 응답 생성 시각.
+        - `is_primary` : 이 세션에서 대표 모델인지 여부.
+
+    [주의사항]
+
+    - 항상 `class_id` 쿼리 파라미터가 필수이다.
+    - 세션과 세션-모델은 항상 현재 로그인한 유저의 소유인지 검증된다.
+    - 실제 LLM provider / 물리 모델명은
+      `config.PRACTICE_MODELS[model_name]` 설정을 통해 매핑된다.
     """
 
     # 1) session_id == 0 → 새 세션 + class 설정 기반 기본 모델 자동 생성
@@ -286,7 +316,7 @@ def run_practice_turn_endpoint(
                 db,
                 PracticeSessionModelCreate(
                     session_id=session.session_id,
-                    model_name=name,         # ← 더 이상 model_catalog_id 없음
+                    model_name=name,         # 더 이상 model_catalog_id 없음
                     is_primary=(idx == 0),
                 ),
             )
@@ -344,6 +374,7 @@ def run_practice_turn_endpoint(
     )
     db.commit()
     return turn_result
+
 
 @router.get(
     "/sessions/{session_id}",
