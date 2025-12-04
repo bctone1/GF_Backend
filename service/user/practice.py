@@ -1,27 +1,36 @@
 # service/user/practice.py
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
+import time
 
-from sqlalchemy.orm import Session
+from fastapi import HTTPException, status
 from sqlalchemy import select
-from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from core import config
+from langchain_service.embedding.get_vector import texts_to_vectors
+from langchain_service.llm.runner import generate_session_title_llm, _run_qa
+from langchain_service.llm.setup import get_llm
+
+from crud.user.document import document_crud, document_chunk_crud
+from crud.user.practice import (
+    practice_session_crud,
+    practice_session_model_crud,
+    practice_response_crud,
+    practice_rating_crud,
+    model_comparison_crud,
+)
+from crud.partner import classes as classes_crud
+
 from models.user.account import AppUser
 from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
     PracticeResponse,
 )
-from crud.user.practice import (
-    practice_session_crud,
-    practice_session_model_crud,
-    practice_response_crud,
-    model_comparison_crud,
-)
-from crud.user.document import (
-    document_crud,
-    document_chunk_crud,
-)
+from models.partner.course import Class as PartnerClass
+from models.partner.catalog import ModelCatalog
 
 from schemas.user.practice import (
     PracticeResponseCreate,
@@ -30,16 +39,10 @@ from schemas.user.practice import (
     PracticeSessionModelCreate,
     PracticeSessionUpdate,
     PracticeTurnModelResult,
+    PracticeTurnRequest,
     PracticeTurnResponse,
 )
-from core import config
-from langchain_service.llm.setup import get_llm
-from langchain_service.llm.runner import generate_session_title_llm, _run_qa
-from langchain_service.embedding.get_vector import texts_to_vectors
-import time
 
-from models.partner.course import Class as PartnerClass
-from models.partner.catalog import ModelCatalog
 
 # =========================================
 # 질문 → 벡터 임베딩 헬퍼
@@ -53,7 +56,7 @@ def _embed_question_to_vector(question: str) -> list[float]:
     if not cleaned:
         return []
 
-    vectors = texts_to_vectors([cleaned])  # 인제스트 때랑 동일한 함수
+    vectors = texts_to_vectors([cleaned])
     if not vectors:
         return []
 
@@ -96,7 +99,6 @@ def _build_context_from_documents(
 
     # 3) 각 문서별로 벡터 검색(top-k) 실행
     chunks: List = []
-    # 문서 수에 따라 per-doc top_k 분배 (최소 1개는 보장)
     per_doc_top_k = max(1, max_chunks // len(valid_docs))
 
     for doc in valid_docs:
@@ -114,7 +116,6 @@ def _build_context_from_documents(
     # 4) 컨텐츠 텍스트 합치기
     texts: List[str] = []
     for c in chunks:
-        # DocumentChunk 모델의 텍스트 필드명에 맞게 사용 (여기는 chunk_text)
         chunk_text = getattr(c, "chunk_text", None)
         if chunk_text:
             texts.append(chunk_text)
@@ -124,13 +125,63 @@ def _build_context_from_documents(
 
     context_body = "\n\n".join(texts)
 
-    # 최종 컨텍스트 프롬프트
     return (
         "다음은 사용자가 업로드한 참고 문서 중에서, "
         "질문과 가장 관련도가 높은 일부 발췌 내용입니다.\n\n"
         f"{context_body}\n\n"
         "위 내용을 참고해서 아래 질문에 답변해 주세요."
     )
+
+
+# =========================================
+# 공통 ensure_* 헬퍼 (소유권 검증)
+# =========================================
+def ensure_my_session(db: Session, session_id: int, me: AppUser) -> PracticeSession:
+    session = practice_session_crud.get(db, session_id)
+    if not session or session.user_id != me.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+    return session
+
+
+def ensure_my_session_model(
+    db: Session,
+    session_model_id: int,
+    me: AppUser,
+) -> Tuple[PracticeSessionModel, PracticeSession]:
+    model = practice_session_model_crud.get(db, session_model_id)
+    if not model:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+
+    session = practice_session_crud.get(db, model.session_id)
+    if not session or session.user_id != me.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+
+    return model, session
+
+
+def ensure_my_response(db: Session, response_id: int, me: AppUser):
+    resp = practice_response_crud.get(db, response_id)
+    if not resp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="response not found")
+    model, session = ensure_my_session_model(db, resp.session_model_id, me)
+    return resp, model, session
+
+
+def ensure_my_rating(db: Session, rating_id: int, me: AppUser):
+    rating = practice_rating_crud.get(db, rating_id)
+    if not rating or rating.user_id != me.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="rating not found")
+    return rating
+
+
+def ensure_my_comparison(db: Session, comparison_id: int, me: AppUser):
+    comp = model_comparison_crud.get(db, comparison_id)
+    if not comp:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="comparison not found")
+    session = practice_session_crud.get(db, comp.session_id)
+    if not session or session.user_id != me.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="comparison not found")
+    return comp, session
 
 
 # =========================================
@@ -150,11 +201,14 @@ def set_primary_model_for_session(
     """
     session = practice_session_crud.get(db, session_id)
     if not session or session.user_id != me.user_id:
-        raise PermissionError("session not found or not owned by user")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
 
     models = practice_session_model_crud.list_by_session(db, session_id=session_id)
     if not models:
-        raise ValueError("no models for this session")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no models for this session",
+        )
 
     target: PracticeSessionModel | None = None
     for m in models:
@@ -165,7 +219,10 @@ def set_primary_model_for_session(
             m.is_primary = False
 
     if target is None:
-        raise ValueError("target model does not belong to this session")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="target model does not belong to this session",
+        )
 
     db.flush()
     return target
@@ -193,7 +250,7 @@ def create_model_comparison_from_metrics(
     """
     session = practice_session_crud.get(db, session_id)
     if not session or session.user_id != me.user_id:
-        raise PermissionError("session not found or not owned by user")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
 
     latency_diff_ms: Optional[int] = None
     if latency_a_ms is not None and latency_b_ms is not None:
@@ -219,8 +276,45 @@ def create_model_comparison_from_metrics(
 
 
 # =========================================
-# LLM 호출 헬퍼 (provider/API는 하나, 모델만 변경)
+# LLM 연결/모델 해석 유틸
 # =========================================
+def resolve_models_for_class(
+    db: Session,
+    class_id: int,
+) -> tuple[PartnerClass, list[ModelCatalog]]:
+    clazz = (
+        db.execute(select(PartnerClass).where(PartnerClass.id == class_id))
+        .scalar_one_or_none()
+    )
+    if not clazz:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="class not found")
+
+    allowed_ids: list[int] = clazz.allowed_model_ids or []
+    if not allowed_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이 강의에 설정된 모델이 없습니다.",
+        )
+
+    rows = (
+        db.execute(
+            select(ModelCatalog).where(
+                ModelCatalog.id.in_(allowed_ids),
+                ModelCatalog.is_active.is_(True),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효한 모델이 없습니다.",
+        )
+
+    return clazz, rows
+
+
 def _call_llm_for_model(
     model_name: str,
     prompt_text: str,
@@ -264,7 +358,7 @@ def _call_llm_for_model(
 
 
 # =========================================
-# 첫 턴에서 세션 생성 + 자동 타이틀 (단일 모델 + knowledge_id 기반 RAG)
+# 세션 + 첫 턴 생성 (단일 모델/RAG)
 # =========================================
 def create_session_with_first_turn(
     db: Session,
@@ -300,7 +394,7 @@ def create_session_with_first_turn(
         question=prompt_text,
         knowledge_id=knowledge_id,
         top_k=3,
-        session_id=None,  # 필요하면 세션 연동
+        session_id=None,
     )
 
     # 4) 응답 저장
@@ -308,9 +402,11 @@ def create_session_with_first_turn(
         db,
         PracticeResponseCreate(
             session_model_id=session_model.session_model_id,
+            session_id=session.session_id,
+            model_name=model_name,
             prompt_text=prompt_text,
             response_text=qa.answer,
-            token_usage=None,   # 나중에 runner에서 토큰정보 넘겨받으면 채우기
+            token_usage=None,  # runner에서 토큰정보 넘겨받으면 채우기
             latency_ms=None,
         ),
     )
@@ -327,7 +423,7 @@ def create_session_with_first_turn(
 
 
 # =========================================
-# 멀티 모델 Practice 턴 실행 (/sessions/{session_id}/chat)
+# 멀티 모델 Practice 턴 실행 (저수준, 세션/모델 확정 이후)
 # =========================================
 def run_practice_turn(
     *,
@@ -345,7 +441,10 @@ def run_practice_turn(
     - 세션에 title 없으면 자동 생성하여 업데이트
     """
     if session.user_id != user.user_id:
-        raise PermissionError("session not owned by user")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="session not owned by user",
+        )
 
     # 0) 지식베이스 컨텍스트 구성
     context_text = ""
@@ -361,14 +460,14 @@ def run_practice_turn(
 
     for m in models:
         if m.session_id != session.session_id:
-            raise ValueError("session_model does not belong to given session")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="session_model does not belong to given session",
+            )
 
         # 1) 실제 LLM에 보낼 프롬프트 만들기
         if context_text:
-            full_prompt = (
-                f"{context_text}\n\n"
-                f"질문: {prompt_text}"
-            )
+            full_prompt = f"{context_text}\n\n질문: {prompt_text}"
         else:
             full_prompt = prompt_text
 
@@ -395,7 +494,7 @@ def run_practice_turn(
         # 4) 클라이언트 응답용 DTO
         results.append(
             PracticeTurnModelResult(
-                session_model_id=resp.session_model_id,  # DB에 저장된 FK 그대로
+                session_model_id=resp.session_model_id,
                 model_name=m.model_name,
                 response_id=resp.response_id,
                 prompt_text=resp.prompt_text,
@@ -432,25 +531,217 @@ def run_practice_turn(
     )
 
 
+# =========================================
+# /sessions/{session_id}/chat 유즈케이스
+# =========================================
+def _init_session_and_models_from_class(
+    db: Session,
+    *,
+    me: AppUser,
+    class_id: int,
+    body: PracticeTurnRequest,
+) -> tuple[PracticeSession, List[PracticeSessionModel]]:
+    """
+    session_id == 0 인 경우:
+    - 새 practice_session 생성
+    - class LLM 설정 기반으로 practice_session_models 생성
+    - 이번 턴에 쓸 모델 리스트 리턴
+    """
+    # 새 practice_session 생성
+    session = practice_session_crud.create(
+        db,
+        PracticeSessionCreate(
+            user_id=me.user_id,
+            class_id=class_id,
+            title=None,
+            notes=None,
+        ),
+    )
 
-def resolve_models_for_class(db: Session, class_id: int) -> tuple[PartnerClass, list[ModelCatalog]]:
-    clazz = db.execute(
-        select(PartnerClass).where(PartnerClass.id == class_id)
-    ).scalar_one_or_none()
-    if not clazz:
-        raise HTTPException(404, "class not found")
-
-    allowed_ids: list[int] = clazz.allowed_model_ids or []
-    if not allowed_ids:
-        raise HTTPException(400, "이 강의에 설정된 모델이 없습니다.")
-
-    rows = db.execute(
-        select(ModelCatalog).where(
-            ModelCatalog.id.in_(allowed_ids),
-            ModelCatalog.is_active.is_(True),
+    # class 설정에서 사용할 모델 목록 가져오기
+    class_obj = classes_crud.get_class(db, class_id=class_id)
+    if not class_obj or class_obj.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="유효하지 않은 class_id 입니다.",
         )
-    ).scalars().all()
-    if not rows:
-        raise HTTPException(400, "유효한 모델이 없습니다.")
 
-    return clazz, rows
+    # class 에 설정된 model_catalog id 목록 수집
+    model_catalog_ids: list[int] = []
+    if class_obj.primary_model_id:
+        model_catalog_ids.append(class_obj.primary_model_id)
+
+    if class_obj.allowed_model_ids:
+        for mid in class_obj.allowed_model_ids:
+            if mid not in model_catalog_ids:
+                model_catalog_ids.append(mid)
+
+    if not model_catalog_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="이 class 에 설정된 모델이 없습니다. 강의 설정에서 모델을 추가하세요.",
+        )
+
+    # catalog → logical_name/model_name 매핑
+    all_model_names: list[str] = []
+    for mc_id in model_catalog_ids:
+        catalog = db.get(ModelCatalog, mc_id)
+        if not catalog:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"유효하지 않은 model_catalog id: {mc_id}",
+            )
+
+        logical_name = getattr(catalog, "logical_name", None)
+        name = logical_name or catalog.model_name
+        all_model_names.append(name)
+
+    # 세션-모델 레코드 생성 (첫 번째만 is_primary=True)
+    created_models: list[PracticeSessionModel] = []
+    for idx, name in enumerate(all_model_names):
+        m = practice_session_model_crud.create(
+            db,
+            PracticeSessionModelCreate(
+                session_id=session.session_id,
+                model_name=name,
+                is_primary=(idx == 0),
+            ),
+        )
+        created_models.append(m)
+
+    # 이번 턴에 실제로 호출할 모델 선택
+    if body.model_names:
+        requested_names = set(body.model_names)
+        models = [m for m in created_models if m.model_name in requested_names]
+        if not models:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="requested model_names not configured for this class",
+            )
+    else:
+        models = created_models
+
+    return session, models
+
+
+def _select_models_for_existing_session(
+    db: Session,
+    *,
+    session: PracticeSession,
+    class_id: int,
+    body: PracticeTurnRequest,
+    me: AppUser,
+) -> List[PracticeSessionModel]:
+    """
+    session_id > 0 인 경우:
+    - 세션 ↔ class 바인딩 검증
+    - 세션에 등록된 모델 중에서 model_names / session_model_ids 로 필터링
+    """
+    # 세션 ↔ class_id 바인딩 검증
+    if session.class_id is None:
+        session.class_id = class_id
+        db.add(session)
+        db.commit()
+    elif session.class_id != class_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="class_id does not match this session",
+        )
+
+    # 이 세션에 등록된 모든 모델 먼저 가져오기
+    all_models: list[PracticeSessionModel] = practice_session_model_crud.list_by_session(
+        db,
+        session_id=session.session_id,
+    )
+    if not all_models:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no models configured for this session",
+        )
+
+    # 1순위: model_names
+    if body.model_names:
+        requested_names = set(body.model_names)
+        models = [m for m in all_models if m.model_name in requested_names]
+
+        if not models:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="requested model_names not found in this session",
+            )
+
+    # 2순위: session_model_ids
+    elif body.session_model_ids:
+        requested_ids = {
+            sm_id
+            for sm_id in body.session_model_ids or []
+            if isinstance(sm_id, int) and sm_id > 0
+        }
+
+        if requested_ids:
+            id_to_model = {m.session_model_id: m for m in all_models}
+            models = [
+                id_to_model[sm_id]
+                for sm_id in requested_ids
+                if sm_id in id_to_model
+            ]
+            if not models:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="requested session_model_ids not found in this session",
+                )
+        else:
+            models = all_models
+
+    # 3순위: 아무 것도 안 보냈으면 전체
+    else:
+        models = all_models
+
+    return models
+
+
+def run_practice_turn_for_session(
+    db: Session,
+    *,
+    me: AppUser,
+    session_id: int,
+    class_id: int,
+    body: PracticeTurnRequest,
+) -> PracticeTurnResponse:
+    """
+    엔드포인트에서 바로 호출할 유즈케이스 함수.
+    - session_id == 0 → 새 세션 + class 기반 모델 구성
+    - session_id > 0 → 기존 세션 + 모델 선택
+    - 마지막에 run_practice_turn 호출
+    """
+    if session_id == 0:
+        session, models = _init_session_and_models_from_class(
+            db,
+            me=me,
+            class_id=class_id,
+            body=body,
+        )
+    else:
+        session = ensure_my_session(db, session_id, me)
+        models = _select_models_for_existing_session(
+            db,
+            session=session,
+            class_id=class_id,
+            body=body,
+            me=me,
+        )
+
+    if not models:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no models configured for this session",
+        )
+
+    return run_practice_turn(
+        db=db,
+        session=session,
+        models=models,
+        prompt_text=body.prompt_text,
+        user=me,
+        document_ids=body.document_ids,
+    )
