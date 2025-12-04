@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
-import time
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 from core import config
 from langchain_service.embedding.get_vector import texts_to_vectors
 from langchain_service.llm.runner import generate_session_title_llm, _run_qa
-from langchain_service.llm.setup import get_llm
+from langchain_service.llm.setup import call_llm_chat
 
 from crud.user.document import document_crud, document_chunk_crud
 from crud.user.practice import (
@@ -321,40 +320,40 @@ def _call_llm_for_model(
 ) -> tuple[str, Dict[str, Any] | None, int | None]:
     """
     하나의 모델에 대해 LLM 호출을 수행.
-    - 프로바이더/모델 정보는 config.PRACTICE_MODELS 에서 가져옴.
+    - 프로바이더/실제 모델 이름은 config.PRACTICE_MODELS 에서 가져오되,
+      없으면 model_name 그대로 넘겨서 call_llm_chat 의 자동 추론에 맡김.
     """
-    model_conf = config.PRACTICE_MODELS.get(model_name)
-    if model_conf is None or not model_conf.get("enabled", True):
-        raise ValueError(f"unsupported or disabled model_name: {model_name}")
+    practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
+    model_conf = practice_models.get(model_name)
 
-    provider = model_conf.get("provider", "openai")
-    real_model_name = model_conf["model_name"]
+    provider: str | None = None
+    real_model_name: str = model_name
+    temperature: float = 0.7
+    max_tokens: int | None = None
 
-    llm = get_llm(
+    if isinstance(model_conf, dict):
+        if not model_conf.get("enabled", True):
+            raise ValueError(f"unsupported or disabled model_name: {model_name}")
+
+        provider = model_conf.get("provider")
+        real_model_name = model_conf.get("model_name", model_name)
+        temperature = model_conf.get("temperature", temperature)
+        max_tokens = model_conf.get("max_output_tokens") or model_conf.get("max_tokens")
+
+    # OpenAI 스타일 messages 형식으로 변환 (단일 user 메시지)
+    messages = [
+        {"role": "user", "content": prompt_text},
+    ]
+
+    llm_result = call_llm_chat(
+        messages=messages,
         provider=provider,
         model=real_model_name,
-        streaming=False,
-        callbacks=None,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
-    start = time.perf_counter()
-    result = llm.invoke(prompt_text)
-    end = time.perf_counter()
-
-    latency_ms = int((end - start) * 1000)
-
-    token_usage: Dict[str, Any] | None = None
-    usage = getattr(result, "usage_metadata", None)
-    if usage:
-        token_usage = {
-            "input_tokens": getattr(usage, "input_tokens", None),
-            "output_tokens": getattr(usage, "output_tokens", None),
-            "total_tokens": getattr(usage, "total_tokens", None),
-        }
-
-    content = getattr(result, "content", None) or str(result)
-
-    return content, token_usage, latency_ms
+    return llm_result.text, llm_result.token_usage, llm_result.latency_ms
 
 
 # =========================================
