@@ -187,6 +187,7 @@ def get_practice_session(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="update_practice_session",
+    summary="세션 제목 수정"
 )
 def update_practice_session(
     session_id: int = Path(..., ge=1),
@@ -206,6 +207,7 @@ def update_practice_session(
     "/sessions/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_session",
+    summary="세션 삭제"
 )
 def delete_practice_session(
     session_id: int = Path(..., ge=1),
