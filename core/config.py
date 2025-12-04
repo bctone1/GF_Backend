@@ -135,25 +135,41 @@ PRACTICE_MODELS = {
         "enabled": True,
         "default": True,
     },
-     "claude-3-haiku-20240307": {
-        "provider": "anthropic",
-        "model_name": "claude-3-haiku-20240307",
-        "display_name": "Claude 3.7 Haiku",
+    "gpt-5-nano": {
+        "provider": "openai",
+        "model_name": "gpt-5-nano",
+        "display_name": "GPT-5 nano",
         "enabled": True,
         "default": False,
     },
-    "gemini-2.5-flash": {
-        "provider": "google",
-        "model_name": "gemini-2.5-flash",
-        "display_name": "Gemini 2.5 Flash",
-        "enabled": False,
+    "gpt-3.5-turbo": {
+        "provider": "openai",
+        "model_name": "gpt-3.5-turbo",
+        "display_name": "GPT-3.5 Turbo",
+        "enabled": True,
         "default": False,
     },
-    "exaone-4.0": {
-        "provider": "lg",
-        "model_name": "exaone-4.0",
-        "display_name": "EXAONE 4.0",
-        "enabled": False,
+    "claude-3-haiku-20240307": {
+        "provider": "anthropic",
+        "model_name": "claude-3-haiku-20240307",
+        "display_name": "Claude 3 Haiku (2024-03-07)",
+        "enabled": True,
         "default": False,
     },
 }
+
+    # "gemini-2.5-flash": {
+    #     "provider": "google",
+    #     "model_name": "gemini-2.5-flash",
+    #     "display_name": "Gemini 2.5 Flash",
+    #     "enabled": True,
+    #     "default": False,
+    # },
+    # "exaone-4.0": {
+    #     "provider": "lg",
+    #     "model_name": "exaone-4.0",
+    #     "display_name": "EXAONE 4.0",
+    #     "enabled": True,
+    #     "default": False,
+    # },
+# }

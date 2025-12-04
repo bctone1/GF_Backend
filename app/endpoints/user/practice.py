@@ -327,37 +327,59 @@ def run_practice_turn_endpoint(
     else:
         session = _ensure_my_session(db, session_id, me)
 
-        # 세션이 특정 class 에 묶여 있어야 하고, 요청한 class_id 와 일치해야 함
+        # 세션 ↔ class_id 바인딩 검증
         if session.class_id is None:
-            # 기존 데이터 호환용: 아직 class 에 안 묶인 세션이면
-            # 이번에 들어온 class_id 로 한 번만 바인딩해 준다.
             session.class_id = class_id
             db.add(session)
             db.commit()
         elif session.class_id != class_id:
-            # 이미 다른 class 에 묶여 있는데, 다른 class_id 로 호출한 경우는 에러
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="class_id does not match this session",
             )
 
-        # 어떤 모델들에 보낼지 결정
-        if body.session_model_ids:
-            models: list[PracticeSessionModel] = []
-            for sm_id in body.session_model_ids:
-                model, model_session = _ensure_my_session_model(db, sm_id, me)
-                if model_session.session_id != session.session_id:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="session_model does not belong to this session",
-                    )
-                models.append(model)
-        else:
-            # 지정 없을시 세션에 등록된 모든 모델에 순차 호출
-            models = practice_session_model_crud.list_by_session(
-                db,
-                session_id=session.session_id,
+        # 이 세션에 등록된 모든 모델 먼저 가져오기
+        all_models: list[PracticeSessionModel] = practice_session_model_crud.list_by_session(
+            db,
+            session_id=session.session_id,
+        )
+
+        if not all_models:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="no models configured for this session",
             )
+
+        # ① 사용자가 session_model_ids 를 보낸 경우 → 그 안에서만 필터링
+        if body.session_model_ids is not None:
+            # 0, 음수, None 같은 값은 미리 제거
+            requested_ids = {
+                sm_id
+                for sm_id in body.session_model_ids
+                if isinstance(sm_id, int) and sm_id > 0
+            }
+
+            if requested_ids:
+                # 이 세션에 속한 모델 중에서만 선택
+                id_to_model = {m.session_model_id: m for m in all_models}
+                selected_models: list[PracticeSessionModel] = [
+                    id_to_model[sm_id]
+                    for sm_id in requested_ids
+                    if sm_id in id_to_model
+                ]
+
+                # 요청한 ID가 다 이 세션에 없으면 → 전체 모델로 fallback
+                if selected_models:
+                    models = selected_models
+                else:
+                    models = all_models
+            else:
+                # 유효한 ID가 하나도 없으면 → 전체 모델 사용
+                models = all_models
+        # ② 아예 session_model_ids 필드가 없으면 → 전체 모델 사용
+        else:
+            models = all_models
+
 
     if not models:
         raise HTTPException(

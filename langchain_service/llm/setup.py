@@ -70,18 +70,12 @@ def get_llm(
 
     # 3) provider별 분기
     # ------------------------- OpenAI -------------------------
-    if provider == "openai":
-        key = _pick_key(
-            api_key,
-            getattr(config, "OPENAI_API", None),
-            getattr(config, "DEFAULT_API_KEY", None),
-            os.getenv("OPENAI_API"),
-        )
+    if provider is None or provider.lower() in ("openai"):
+        key = _pick_key(api_key, getattr(config, "OPENAI_API", None), os.getenv("OPENAI_API_KEY"))
         if not key:
-            raise RuntimeError("OPENAI_API 키가 설정되지 않았습니다.")
-
+            raise RuntimeError("OPENAI_API_KEY가 설정되지 않았습니다.")
         return ChatOpenAI(
-            model=resolved_model,
+            model=model or "gpt-4o-mini",
             api_key=key,
             temperature=temperature,
             **kwargs,
