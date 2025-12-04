@@ -28,6 +28,7 @@ class PracticeSessionUpdate(ORMBase):
 
 class PracticeSessionResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
+
     session_id: int
     user_id: int
     class_id: Optional[int] = None
@@ -36,7 +37,10 @@ class PracticeSessionResponse(ORMBase):
     completed_at: Optional[datetime] = None
     notes: Optional[str] = None
 
+    prompt_text: Optional[str] = None
+    response_text: Optional[str] = None
 
+    responses: list[PracticeResponseResponse] = []
 # =========================================
 # user.practice_session_models
 # =========================================

@@ -139,6 +139,7 @@ def run_practice_turn_endpoint(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="get_practice_session",
+    summary="세션 대화목록"
 )
 def get_practice_session(
     session_id: int = Path(..., ge=1),
@@ -146,7 +147,40 @@ def get_practice_session(
     me: AppUser = Depends(get_current_user),
 ):
     session = ensure_my_session(db, session_id, me)
-    return PracticeSessionResponse.model_validate(session)
+
+    # 이 세션에 속한 모든 응답 조회
+    resp_rows = practice_response_crud.list_by_session(
+        db,
+        session_id=session.session_id,
+    )
+
+    # 스키마로 변환
+    resp_items = [
+        PracticeResponseResponse.model_validate(r) for r in resp_rows
+    ]
+
+    # 마지막 턴 기준으로 요약 필드 채우기 (없으면 None)
+    if resp_items:
+        last = resp_items[-1]
+        last_prompt = last.prompt_text
+        last_response = last.response_text
+    else:
+        last = None
+        last_prompt = None
+        last_response = None
+
+    return PracticeSessionResponse(
+        session_id=session.session_id,
+        user_id=session.user_id,
+        class_id=session.class_id,
+        title=session.title,
+        started_at=session.started_at,
+        completed_at=session.completed_at,
+        notes=session.notes,
+        prompt_text=last_prompt,
+        response_text=last_response,
+        responses=resp_items,
+    )
 
 
 @router.patch(

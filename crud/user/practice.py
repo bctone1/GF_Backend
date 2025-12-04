@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, Sequence, Tuple, Any, Mapping, Union
 from sqlalchemy.orm import Session
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, desc
 from fastapi import HTTPException
 
 from models.partner.catalog import ModelCatalog
@@ -126,7 +126,6 @@ class PracticeSessionModelCRUD:
         db.refresh(obj)
         return obj
 
-
     def get(
         self,
         db: Session,
@@ -151,7 +150,6 @@ class PracticeSessionModelCRUD:
             )
         )
         return db.scalars(stmt).all()
-
 
     def update(
         self,
@@ -188,6 +186,7 @@ class PracticeSessionModelCRUD:
         db.commit()
         db.refresh(obj)
         return obj
+
     # NOTE (service/user/practice.py):
     # - 세션 내 primary 모델 변경 시
     #   1) 기존 is_primary=true 모두 false로 초기화
@@ -221,7 +220,6 @@ class PracticeResponseCRUD:
         db.refresh(obj)
         return obj
 
-
     def get(
         self,
         db: Session,
@@ -241,6 +239,24 @@ class PracticeResponseCRUD:
             select(PracticeResponse)
             .where(PracticeResponse.session_model_id == session_model_id)
             .order_by(PracticeResponse.created_at.asc())
+        )
+        return db.scalars(stmt).all()
+
+    def list_by_session(
+        self,
+        db: Session,
+        session_id: int,
+    ) -> Sequence[PracticeResponse]:
+        """
+        특정 세션에 속한 모든 응답을 시간순으로 반환.
+        """
+        stmt = (
+            select(PracticeResponse)
+            .where(PracticeResponse.session_id == session_id)
+            .order_by(
+                PracticeResponse.created_at.asc(),
+                PracticeResponse.response_id.asc(),
+            )
         )
         return db.scalars(stmt).all()
 
