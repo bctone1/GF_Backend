@@ -189,7 +189,7 @@ class PracticeTurnRequest(ORMBase):
         * session_id == 0 인 새 세션 시작 시,
           카탈로그 기준으로 특정 모델 한 개만 골라서 시작하고 싶을 때 사용
         * 기존 세션(session_id > 0)에서는 보통 사용하지 않음
-    - session_model_ids:
+    - session_model_ids:(폐기)
         * 이미 세션에 등록된 모델들 중 일부만 대상으로 돌리고 싶을 때 사용
         * None 이면 세션에 등록된 모든 모델 대상
     - document_ids:
@@ -198,7 +198,12 @@ class PracticeTurnRequest(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     prompt_text: str
-    session_model_ids: Optional[list[int]] = None
+    model_names: Optional[list[str]] = Field(
+        None,
+        description="이 세션에서 호출할 논리 모델 이름 목록 (예: ['gpt-4o-mini', 'gpt-5-nano'])",
+    )
+
+    # session_model_ids: Optional[list[int]] = None
     document_ids: Optional[list[int]] = None  # 내가 선택한 문서들
 
 

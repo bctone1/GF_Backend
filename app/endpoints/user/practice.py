@@ -296,7 +296,7 @@ def run_practice_turn_endpoint(
             )
 
         # 2) 각 catalog id → 실제 LLM logical name 으로 매핑
-        model_names: list[str] = []
+        all_model_names: list[str] = []
         for mc_id in model_catalog_ids:
             catalog = db.get(ModelCatalog, mc_id)
             if not catalog:
@@ -308,11 +308,11 @@ def run_practice_turn_endpoint(
             # logical_name 이 있으면 그걸 우선 사용, 없으면 model_name 사용
             logical_name = getattr(catalog, "logical_name", None)
             name = logical_name or catalog.model_name
-            model_names.append(name)
+            all_model_names.append(name)
 
         # 3) 세션-모델 레코드 생성 (첫 번째만 is_primary=True)
-        models: list[PracticeSessionModel] = []
-        for idx, name in enumerate(model_names):
+        created_models: list[PracticeSessionModel] = []
+        for idx, name in enumerate(all_model_names):
             m = practice_session_model_crud.create(
                 db,
                 PracticeSessionModelCreate(
@@ -321,9 +321,24 @@ def run_practice_turn_endpoint(
                     is_primary=(idx == 0),
                 ),
             )
-            models.append(m)
+            created_models.append(m)
 
-    # 2) session_id > 0 → 기존 세션에 대해 턴 실행
+        # 4) 이번 턴에 실제로 호출할 모델 선택
+        if body.model_names:
+            requested_names = set(body.model_names)
+            models = [
+                m for m in created_models
+                if m.model_name in requested_names
+            ]
+            if not models:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="requested model_names not configured for this class",
+                )
+        else:
+            # 아무 것도 안 보냈으면 → class 에 설정된 전체 모델 호출
+            models = created_models
+
     else:
         session = _ensure_my_session(db, session_id, me)
 
@@ -343,40 +358,53 @@ def run_practice_turn_endpoint(
             db,
             session_id=session.session_id,
         )
-
         if not all_models:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="no models configured for this session",
             )
 
-        # ① 사용자가 session_model_ids 를 보낸 경우 → 그 안에서만 필터링
-        if body.session_model_ids is not None:
-            # 0, 음수, None 같은 값은 미리 제거
+        # -------------------------------------------------
+        # 1순위: model_names (논리 이름으로 선택)
+        # -------------------------------------------------
+        if body.model_names:
+            requested_names = set(body.model_names)
+            models = [m for m in all_models if m.model_name in requested_names]
+
+            if not models:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="requested model_names not found in this session",
+                )
+
+        # -------------------------------------------------
+        # 2순위: session_model_ids (하위호환)
+        # -------------------------------------------------
+        elif body.session_model_ids:
             requested_ids = {
                 sm_id
-                for sm_id in body.session_model_ids
+                for sm_id in body.session_model_ids or []
                 if isinstance(sm_id, int) and sm_id > 0
             }
 
             if requested_ids:
-                # 이 세션에 속한 모델 중에서만 선택
                 id_to_model = {m.session_model_id: m for m in all_models}
-                selected_models: list[PracticeSessionModel] = [
+                models = [
                     id_to_model[sm_id]
                     for sm_id in requested_ids
                     if sm_id in id_to_model
                 ]
-
-                # 요청한 ID가 다 이 세션에 없으면 → 전체 모델로 fallback
-                if selected_models:
-                    models = selected_models
-                else:
-                    models = all_models
+                if not models:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="requested session_model_ids not found in this session",
+                    )
             else:
-                # 유효한 ID가 하나도 없으면 → 전체 모델 사용
                 models = all_models
-        # ② 아예 session_model_ids 필드가 없으면 → 전체 모델 사용
+
+        # -------------------------------------------------
+        # 3순위: 아무것도 안 보냈으면 → 모든 모델 호출
+        # -------------------------------------------------
         else:
             models = all_models
 
