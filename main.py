@@ -1,7 +1,7 @@
 # main.py
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
-
+from core.middleware import ProcessTimeMiddleware
 from app.routers import register_routers
 
 import warnings
@@ -16,6 +16,7 @@ warnings.filterwarnings(
 app = FastAPI(title="GrowFit API")
 
 app.add_middleware(
+    ProcessTimeMiddleware,
     CORSMiddleware,
     allow_origins=["*"],      # 모든 도메인/포트 허용
     allow_credentials=True,
