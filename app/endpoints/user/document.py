@@ -32,7 +32,7 @@ from schemas.user.document import (
     DocumentTagAssignmentResponse,
     DocumentUsageResponse,
     DocumentPageResponse,
-    DocumentChunkResponse,
+    DocumentChunkResponse, DocumentUploadResponse, DocumentProcessingJobResponse,
 )
 
 from service.user.upload_pipeline import UploadPipeline
@@ -111,10 +111,8 @@ def upload_document(
 
     # 로그인한 유저 기준으로 업로드 파이프라인 실행
     pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.run(file)
-
-    # SQLAlchemy 객체 → Pydantic 응답 스키마
-    return DocumentResponse.model_validate(doc)
+    doc, job = pipeline.run(file)
+    return DocumentUploadResponse(document=doc, job=job)
 
 
 
@@ -354,3 +352,23 @@ def list_document_chunks(
     return [DocumentChunkResponse.model_validate(c) for c in chunks]
 
 
+@router.get(
+    "/document/jobs/{job_id}",
+    response_model=DocumentProcessingJobResponse,
+    operation_id="get_document_job",
+    summary="문서 처리 Job 단건 조회",
+    description=(
+        "지정된 job_id에 해당하는 문서 처리 Job 상태를 조회\n"
+        "- 로그인한 사용자 소유 문서에 속한 Job만 조회.\n"
+        "- progress, stage, status, step 등을 이용해 업로드/임베딩 진행률 표시용으로 사용"
+    ),
+)
+def get_document_job(
+    job_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    job = document_job_crud.get(db, job_id=job_id)  # get 메서드 필요
+    if not job or not job.document or job.document.owner_id != me.user_id:
+        raise HTTPException(status_code=404, detail="job not found")
+    return DocumentProcessingJobResponse.model_validate(job)

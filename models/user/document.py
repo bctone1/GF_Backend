@@ -9,7 +9,6 @@ from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from models.base import Base
 
-
 # ========== user.documents ==========
 class Document(Base):
     __tablename__ = "documents"
@@ -26,27 +25,42 @@ class Document(Base):
     file_format = Column(Text, nullable=False)
     file_size_bytes = Column(BigInteger, nullable=False)
     folder_path = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, server_default=text("'processing'"))
+
+    # status: uploading -> processing(또는 embedding) -> ready / failed
+    status = Column(
+        Text,
+        nullable=False,
+        server_default=text("'uploading'"),
+    )
     chunk_count = Column(Integer, nullable=False, server_default=text("0"))
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
-    # 기존 관계
+    # 관계들
     jobs = relationship("DocumentProcessingJob", back_populates="document", passive_deletes=True)
     tags = relationship("DocumentTagAssignment", back_populates="document", passive_deletes=True)
     usages = relationship("DocumentUsage", back_populates="document", passive_deletes=True)
-
-    # 페이지/청크
     pages = relationship("DocumentPage", back_populates="document", passive_deletes=True)
     chunks = relationship("DocumentChunk", back_populates="document", passive_deletes=True)
 
     __table_args__ = (
         CheckConstraint("file_size_bytes >= 0", name="chk_documents_size_nonneg"),
         CheckConstraint("chunk_count >= 0", name="chk_documents_chunk_nonneg"),
+
+        # 여기서 status 허용 값 고정
+        CheckConstraint(
+            "status IN ('uploading', 'embedding', 'ready', 'failed')",
+            name="chk_documents_status_enum",
+        ),
+
         Index("idx_documents_owner_time", "owner_id", "uploaded_at"),
         Index("idx_documents_status_time", "status", "uploaded_at"),
-        # 텍스트 검색 가속(pg_trgm) — 확장 설치 후 유효
         Index(
             "idx_documents_name_trgm",
             "name",
@@ -69,9 +83,31 @@ class DocumentProcessingJob(Base):
         nullable=False,
     )
 
-    stage = Column(Text, nullable=False)                         # e.g., 'upload','parse','embed'
-    status = Column(Text, nullable=False, server_default=text("'queued'"))  # queued|running|completed|failed
+    # 어떤 단계인지: upload / parse / chunk / embed 등
+    stage = Column(Text, nullable=False)
+
+    # 전체 상태: queued | running | completed | failed
+    status = Column(
+        Text,
+        nullable=False,
+        server_default=text("'queued'"),
+    )
+
+    # 진행률 (0~100)
+    progress = Column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+
+    # 사용자에게 보여줄 한 줄 설명 (예: "임베딩 3/10")
+    step = Column(Text, nullable=True)
+
+    # 내부 로그/메모용
     message = Column(Text, nullable=True)
+
+    # 실패 시 에러 메시지
+    error_message = Column(Text, nullable=True)
 
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -83,11 +119,14 @@ class DocumentProcessingJob(Base):
             "completed_at IS NULL OR started_at IS NULL OR completed_at >= started_at",
             name="chk_document_jobs_time",
         ),
+        CheckConstraint(
+            "progress >= 0 AND progress <= 100",
+            name="chk_document_jobs_progress_range",
+        ),
         Index("idx_document_jobs_doc_time", "knowledge_id", "started_at"),
         Index("idx_document_jobs_status", "status"),
         {"schema": "user"},
     )
-
 
 # ========== user.document_tags ==========
 class DocumentTag(Base):

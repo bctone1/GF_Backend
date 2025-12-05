@@ -55,7 +55,7 @@ def _tok_len(s: str) -> int:
 
 class UploadPipeline:
     """
-    파일 저장 → 텍스트 추출 → 프리뷰 → Document 메타 생성(status=processing)
+    파일 저장 → 텍스트 추출 → 프리뷰 → Document 메타 생성(status=uploading)
     → 페이지 저장(user.document_pages)
     → 청크 + 임베딩(user.document_chunks.vector_memory)
     → Document.chunk_count 갱신 + 상태(active)

@@ -1,5 +1,4 @@
 # langchain_service/embedding/get_vector.py
-# 임베딩 생성기
 from __future__ import annotations
 
 from typing import List, Optional, Literal

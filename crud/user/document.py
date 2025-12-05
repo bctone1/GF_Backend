@@ -37,13 +37,18 @@ from schemas.user.document import (
 # =========================================================
 class DocumentCRUD:
     def create(self, db: Session, data: DocumentCreate) -> Document:
+        """
+        파일 업로드/등록 시 Document row 생성.
+        status는 기본적으로 'uploading' 단계에서 시작.
+        """
         obj = Document(
             owner_id=data.owner_id,
             name=data.name,
             file_format=data.file_format,
             file_size_bytes=data.file_size_bytes,
             folder_path=data.folder_path,
-            status=data.status or "processing",
+            # 클라이언트가 status를 안 주면 'uploading'부터 시작
+            status=data.status or "uploading",
             chunk_count=data.chunk_count or 0,
             # uploaded_at, updated_at 은 DB server_default(func.now())에 맡김
         )
@@ -121,6 +126,79 @@ class DocumentCRUD:
 
 
 document_crud = DocumentCRUD()
+
+
+# =========================================================
+# Document Processing Jobs CRUD
+# =========================================================
+class DocumentProcessingJobCRUD:
+    def create(self, db: Session, data: DocumentProcessingJobCreate) -> DocumentProcessingJob:
+        """
+        지식베이스 처리 Job 생성.
+        - status: 기본 'queued'
+        - progress: 기본 0
+        """
+        obj = DocumentProcessingJob(
+            knowledge_id=data.knowledge_id,
+            stage=data.stage,
+            status=data.status or "queued",
+            progress=data.progress or 0,
+            step=data.step,
+            message=data.message,
+            error_message=data.error_message,
+            started_at=data.started_at,
+            completed_at=data.completed_at,
+        )
+        db.add(obj)
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def list_by_document(
+        self,
+        db: Session,
+        knowledge_id: int,
+    ) -> Sequence[DocumentProcessingJob]:
+        stmt = (
+            select(DocumentProcessingJob)
+            .where(DocumentProcessingJob.knowledge_id == knowledge_id)
+            .order_by(DocumentProcessingJob.started_at.asc().nullsfirst())
+        )
+        return db.scalars(stmt).all()
+
+    def update(
+        self,
+        db: Session,
+        job_id: int,
+        data: DocumentProcessingJobUpdate,
+    ) -> Optional[DocumentProcessingJob]:
+        """
+        Job 상태/진행률 업데이트.
+        - exclude_unset=True 로 부분 업데이트
+        - None 값도 허용해서 step/message/error_message 초기화 가능
+        """
+        values = data.model_dump(exclude_unset=True)
+
+        if not values:
+            stmt = select(DocumentProcessingJob).where(
+                DocumentProcessingJob.job_id == job_id
+            )
+            return db.scalar(stmt)
+
+        stmt = (
+            update(DocumentProcessingJob)
+            .where(DocumentProcessingJob.job_id == job_id)
+            .values(**values)
+        )
+        db.execute(stmt)
+        db.flush()
+        stmt = select(DocumentProcessingJob).where(
+            DocumentProcessingJob.job_id == job_id
+        )
+        return db.scalar(stmt)
+
+
+document_job_crud = DocumentProcessingJobCRUD()
 
 
 # =========================================================

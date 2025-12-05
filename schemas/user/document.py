@@ -16,7 +16,7 @@ class DocumentCreate(ORMBase):
     file_format: str
     file_size_bytes: int
     folder_path: Optional[str] = None
-    status: Optional[str] = None          # server default 'processing'
+    status: Optional[str] = None          # server default 'uploading'
     chunk_count: Optional[int] = None     # server default 0
     uploaded_at: Optional[datetime] = None
 
@@ -45,6 +45,13 @@ class DocumentResponse(ORMBase):
     updated_at: datetime
 
 
+class DocumentUploadResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+    document: DocumentResponse
+    job: DocumentProcessingJobResponse
+
+
+
 # =========================================================
 # user.document_processing_jobs
 # =========================================================
@@ -52,9 +59,12 @@ class DocumentProcessingJobCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     knowledge_id: int
     stage: str
-    status: Optional[str] = None          # server default 'queued'
-    message: Optional[str] = None
-    started_at: Optional[datetime] = None
+    status: Optional[str] = None           # server default 'queued'
+    progress: Optional[int] = None         # server default 0
+    step: Optional[str] = None             # "임베딩 3/10" 같은 설명
+    message: Optional[str] = None          # 내부 로그용
+    error_message: Optional[str] = None    # 실패 시 에러 메시지
+    started_at: Optional[datetime] = None  # 보통 서버에서 채움
     completed_at: Optional[datetime] = None
 
 
@@ -62,7 +72,10 @@ class DocumentProcessingJobUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     stage: Optional[str] = None
     status: Optional[str] = None
+    progress: Optional[int] = None
+    step: Optional[str] = None
     message: Optional[str] = None
+    error_message: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -71,11 +84,15 @@ class DocumentProcessingJobResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     job_id: int
     knowledge_id: int
-    stage: str
-    status: str
+    stage: str          # 'parse' / 'chunk' / 'embed'
+    status: str         # 'queued' / 'running' / 'completed' / 'failed'
+    progress: int       # 0~100
+    step: Optional[str] = None  # "임베딩 3/10" 등
     message: Optional[str] = None
+    error_message: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
 
 
 # =========================================================
