@@ -1,6 +1,5 @@
-# main.py
 from fastapi import FastAPI
-from starlette.middleware.cors import CORSMiddleware
+from fastapi.middleware.cors import CORSMiddleware  # 이쪽 import를 권장
 from core.middleware import ProcessTimeMiddleware
 from app.routers import register_routers
 
@@ -12,11 +11,10 @@ warnings.filterwarnings(
     module="langchain_core._api.deprecation",
 )
 
-
 app = FastAPI(title="GrowFit API")
 
+app.add_middleware(ProcessTimeMiddleware)
 app.add_middleware(
-    ProcessTimeMiddleware,
     CORSMiddleware,
     allow_origins=["*"],      # 모든 도메인/포트 허용
     allow_credentials=True,
