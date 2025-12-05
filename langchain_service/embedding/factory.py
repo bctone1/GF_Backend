@@ -20,6 +20,15 @@ except ImportError:  # 패키지 없으면 None 처리
 # 지원 provider 타입
 ProviderType = Literal["openai", "exaone", "upstage", "google"]
 
+# langchain_service/embedding/factory.py
+
+
+def get_embeddings(provider: str = "openai", model: str | None = None):
+    if provider == "openai":
+        return build_openai_embeddings(model)
+    # 나중에 다른 provider 추가하면 여기 분기
+
+
 # ==============================
 # 통합 factory
 # ==============================

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Optional, List
-
+from database.session import SessionLocal
 from fastapi import (
     APIRouter,
     File,
@@ -12,6 +12,7 @@ from fastapi import (
     Path,
     status,
     UploadFile,
+    BackgroundTasks,
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -46,6 +47,18 @@ from schemas.user.document import (
 from service.user.upload_pipeline import UploadPipeline
 
 router = APIRouter()
+
+def run_document_pipeline_background(user_id: int, knowledge_id: int) -> None:
+    """
+    BackgroundTasks에서 호출할 실제 작업 함수.
+    - 새로운 DB 세션을 열어서 사용 후 닫는다.
+    """
+    db = SessionLocal()
+    try:
+        pipeline = UploadPipeline(db, user_id=user_id)
+        pipeline.process_document(knowledge_id=knowledge_id)
+    finally:
+        db.close()
 
 
 # =========================================================
@@ -104,17 +117,18 @@ def create_document(
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document",
-    summary="지식베이스 파일 업로드",
+    summary="지식베이스 파일 업로드 (비동기 처리)",
     description=(
-        "파일을 업로드하고 서버에서 텍스트 추출, 페이지/청크 생성, 임베딩까지 수행한 뒤 "
-        "`user.documents` 레코드를 반환\n\n"
-        "- 진행 상태는 `Document.status` (uploading / embedding / ready / failed)\n"
-        "  와 `Document.progress` (0~100) 필드로 관리\n"
-        "- 업로드 완료 후에는 `/user/document/{knowledge_id}` 를 주기적으로 조회해서 "
-        "상태와 진행률을 확인"
+        "파일을 업로드하면 즉시 Document row를 생성하고 반환한다.\n"
+        "- 최초 상태는 status='uploading', progress=0.\n"
+        "- 실제 텍스트 추출/청크/임베딩 등 무거운 작업은 BackgroundTasks에서 비동기로 수행.\n"
+        "- 프론트는 응답에서 받은 knowledge_id로 "
+        "`GET /user/document/{knowledge_id}`를 폴링하여\n"
+        "status/progress/error_message를 확인하면서 프로그레스 바를 갱신하면 된다."
     ),
 )
 def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -125,12 +139,24 @@ def upload_document(
             detail="file required",
         )
 
-    # 로그인한 유저 기준으로 업로드 파이프라인 실행
+    # 1) 파일 저장 + Document row 생성 (status='uploading', progress=0)
     pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.run(file)
+    doc = pipeline.init_document(file)
 
-    # SQLAlchemy 객체 → Pydantic 응답 스키마
+    # 2) 일단 여기까지 커밋해서 Document가 확정되도록 함
+    db.commit()
+    db.refresh(doc)
+
+    # 3) 백그라운드에서 무거운 처리 실행
+    background_tasks.add_task(
+        run_document_pipeline_background,
+        me.user_id,
+        doc.knowledge_id,
+    )
+
+    # 4) 지금 시점의 Document 상태 반환 (uploading / 0%)
     return DocumentResponse.model_validate(doc)
+
 
 
 @router.get(

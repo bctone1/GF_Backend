@@ -6,6 +6,7 @@ from pydantic import ConfigDict
 from schemas.base import ORMBase
 
 
+
 # =========================================================
 # user.documents
 # =========================================================
@@ -16,10 +17,10 @@ class DocumentCreate(ORMBase):
     file_format: str
     file_size_bytes: int
     folder_path: Optional[str] = None
-    status: Optional[str] = None          # server default 'uploading'
-    chunk_count: Optional[int] = None     # server default 0
-    progress: Optional[int] = None        # server default 0 (서버 관리용)
-    error_message: Optional[str] = None   # 보통 None
+    status: Optional[str] = None           # default: 'uploading'
+    chunk_count: Optional[int] = None      # default: 0
+    progress: Optional[int] = None         # default: 0
+    error_message: Optional[str] = None    # default: None
     uploaded_at: Optional[datetime] = None
 
 
@@ -31,7 +32,7 @@ class DocumentUpdate(ORMBase):
     chunk_count: Optional[int] = None
     progress: Optional[int] = None
     error_message: Optional[str] = None
-    # updated_at 은 서버에서 관리
+    # updated_at는 서버 관리
 
 
 class DocumentResponse(ORMBase):
@@ -42,12 +43,13 @@ class DocumentResponse(ORMBase):
     file_format: str
     file_size_bytes: int
     folder_path: Optional[str] = None
-    status: str
+    status: str          # 'uploading' / 'embedding' / 'ready' / 'failed'
     chunk_count: int
-    progress: int
+    progress: int        # 0 ~ 100
     error_message: Optional[str] = None
     uploaded_at: datetime
     updated_at: datetime
+
 
 
 # =========================================================
