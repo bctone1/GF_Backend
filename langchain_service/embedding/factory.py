@@ -20,58 +20,6 @@ except ImportError:  # 패키지 없으면 None 처리
 # 지원 provider 타입
 ProviderType = Literal["openai", "exaone", "upstage", "google"]
 
-
-# ==============================
-# Exaone (기존 코드 유지)
-# ==============================
-class ExaoneEmbeddings(Embeddings):
-    """
-    기존 get_vector.py 에 있던 ExaoneEmbeddings 그대로 옮김.
-    지금은 안 써도 되지만, 확장성 위해 남겨둠.
-    """
-    def __init__(self, api_url: str, api_key: str | None = None):
-        self.api_url = api_url
-        self.api_key = api_key
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        headers = {}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        response = requests.post(
-            self.api_url,
-            headers=headers,
-            json={"texts": texts},
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        return data["embeddings"]
-
-    def embed_query(self, text: str) -> List[float]:
-        return self.embed_documents([text])[0]
-
-
-# ==============================
-# Google 스텁 클래스
-# ==============================
-class GoogleEmbeddings(Embeddings):
-    """
-    Google 임베딩용 스텁.
-    - Vertex AI / Generative AI 등 실제 사용하는 서비스에 맞게 구현해서 쓰면 됨.
-    """
-    def __init__(self, api_key: str, model: str):
-        self.api_key = api_key
-        self.model = model
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        # Google 임베딩 API 스펙에 맞게 구현(추후_)
-        raise NotImplementedError("Google embeddings는 아직 구현되지 않았습니다.")
-
-    def embed_query(self, text: str) -> List[float]:
-        return self.embed_documents([text])[0]
-
-
 # ==============================
 # 통합 factory
 # ==============================
@@ -142,3 +90,54 @@ def get_embeddings(
     # ---------- 기타 ----------
     else:
         raise ValueError(f"지원하지 않는 embedding provider: {provider}")
+
+# ==============================
+# Google 스텁 클래스
+# ==============================
+class GoogleEmbeddings(Embeddings):
+    """
+    Google 임베딩용 스텁.
+    - Vertex AI / Generative AI 등 실제 사용하는 서비스에 맞게 구현해서 쓰면 됨.
+    """
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        # Google 임베딩 API 스펙에 맞게 구현(추후_)
+        raise NotImplementedError("Google embeddings는 아직 구현되지 않았습니다.")
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed_documents([text])[0]
+
+
+
+# ==============================
+# Exaone (기존 코드 유지)
+# ==============================
+class ExaoneEmbeddings(Embeddings):
+    """
+    기존 get_vector.py 에 있던 ExaoneEmbeddings 그대로 옮김.
+    지금은 안 써도 되지만, 확장성 위해 남겨둠.
+    """
+    def __init__(self, api_url: str, api_key: str | None = None):
+        self.api_url = api_url
+        self.api_key = api_key
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        response = requests.post(
+            self.api_url,
+            headers=headers,
+            json={"texts": texts},
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["embeddings"]
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.embed_documents([text])[0]
