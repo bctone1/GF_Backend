@@ -18,6 +18,8 @@ class DocumentCreate(ORMBase):
     folder_path: Optional[str] = None
     status: Optional[str] = None          # server default 'uploading'
     chunk_count: Optional[int] = None     # server default 0
+    progress: Optional[int] = None        # server default 0 (서버 관리용)
+    error_message: Optional[str] = None   # 보통 None
     uploaded_at: Optional[datetime] = None
 
 
@@ -27,8 +29,9 @@ class DocumentUpdate(ORMBase):
     folder_path: Optional[str] = None
     status: Optional[str] = None
     chunk_count: Optional[int] = None
-    # updated_at is server-managed; include only if you allow manual override
-    # updated_at: Optional[datetime] = None
+    progress: Optional[int] = None
+    error_message: Optional[str] = None
+    # updated_at 은 서버에서 관리
 
 
 class DocumentResponse(ORMBase):
@@ -41,58 +44,10 @@ class DocumentResponse(ORMBase):
     folder_path: Optional[str] = None
     status: str
     chunk_count: int
+    progress: int
+    error_message: Optional[str] = None
     uploaded_at: datetime
     updated_at: datetime
-
-
-class DocumentUploadResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-    document: DocumentResponse
-    job: DocumentProcessingJobResponse
-
-
-
-# =========================================================
-# user.document_processing_jobs
-# =========================================================
-class DocumentProcessingJobCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-    knowledge_id: int
-    stage: str
-    status: Optional[str] = None           # server default 'queued'
-    progress: Optional[int] = None         # server default 0
-    step: Optional[str] = None             # "임베딩 3/10" 같은 설명
-    message: Optional[str] = None          # 내부 로그용
-    error_message: Optional[str] = None    # 실패 시 에러 메시지
-    started_at: Optional[datetime] = None  # 보통 서버에서 채움
-    completed_at: Optional[datetime] = None
-
-
-class DocumentProcessingJobUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-    stage: Optional[str] = None
-    status: Optional[str] = None
-    progress: Optional[int] = None
-    step: Optional[str] = None
-    message: Optional[str] = None
-    error_message: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-
-class DocumentProcessingJobResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-    job_id: int
-    knowledge_id: int
-    stage: str          # 'parse' / 'chunk' / 'embed'
-    status: str         # 'queued' / 'running' / 'completed' / 'failed'
-    progress: int       # 0~100
-    step: Optional[str] = None  # "임베딩 3/10" 등
-    message: Optional[str] = None
-    error_message: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
 
 
 # =========================================================

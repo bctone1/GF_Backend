@@ -17,8 +17,6 @@ from schemas.user.document import (
     DocumentUpdate,
     DocumentPageCreate,
     DocumentChunkCreate,
-    DocumentProcessingJobCreate,
-    DocumentProcessingJobUpdate,
 )
 import crud.supervisor.api_usage as cost
 from core import config
@@ -57,14 +55,11 @@ def _tok_len(s: str) -> int:
 
 class UploadPipeline:
     """
-    파일 저장 → 텍스트 추출 → 프리뷰 → Document 메타 생성(status=uploading)
+    파일 저장 → 텍스트 추출 → 프리뷰 → Document 메타 생성(status=uploading, progress=0)
     → 페이지 저장(user.document_pages)
     → 청크 + 임베딩(user.document_chunks.vector_memory)
-    → Document.chunk_count 갱신 + 상태(ready)
-    실패 시 상태(failed)
-
-    + DocumentProcessingJob 추가:
-      - stage/status/progress/step 을 단계별로 갱신
+    → Document.chunk_count 갱신 + 상태(ready, progress=100)
+    실패 시 status=failed, error_message 세팅
     """
 
     def __init__(self, db: Session, user_id: int):
@@ -75,42 +70,44 @@ class UploadPipeline:
         self.file_path: Optional[str] = None
         self.saved_file_name: Optional[str] = None
         self.document: Optional[Document] = None
-        self.job_id: Optional[int] = None
 
     # ---------------------------
-    # Job 헬퍼
+    # Document 헬퍼
     # ---------------------------
-    def _create_job(self, knowledge_id: int) -> None:
+    def _update_doc(
+        self,
+        *,
+        status: Optional[str] = None,
+        progress: Optional[int] = None,
+        error_message: Optional[str] = None,
+        chunk_count: Optional[int] = None,
+    ) -> None:
         """
-        DocumentProcessingJob row 생성 (초기 상태: queued, progress=0)
+        Document.status / progress / error_message / chunk_count 부분 업데이트
         """
-        job_in = DocumentProcessingJobCreate(
-            knowledge_id=knowledge_id,
-            stage="queued",
-            status="queued",
-            progress=0,
-            step=None,
-            message=None,
-            error_message=None,
-            started_at=None,
-            completed_at=None,
-        )
-        job = doc_crud.document_job_crud.create(self.db, job_in)
-        self.job_id = job.job_id
-        # 여기서는 commit 하지 않고, run() 내의 흐름에서 함께 commit
-
-    def _update_job(self, **fields) -> None:
-        """
-        Job 상태/진행률 업데이트.
-        - 존재하는 필드만 DocumentProcessingJobUpdate 로 생성
-        """
-        if not self.job_id:
+        if not self.document:
             return
 
-        data = DocumentProcessingJobUpdate(**fields)
-        doc_crud.document_job_crud.update(self.db, job_id=self.job_id, data=data)
-        # Job 상태 변경은 바로바로 프론트에 보이도록 commit
-        self.db.commit()
+        payload: dict = {}
+        if status is not None:
+            payload["status"] = status
+        if progress is not None:
+            payload["progress"] = progress
+        if error_message is not None:
+            payload["error_message"] = error_message
+        if chunk_count is not None:
+            payload["chunk_count"] = chunk_count
+
+        if not payload:
+            return
+
+        data = DocumentUpdate(**payload)
+        doc_crud.document_crud.update(
+            self.db,
+            knowledge_id=self.document.knowledge_id,
+            data=data,
+        )
+        self.db.flush()
 
     # 1) 파일 저장
     def save_file(self, file: UploadFile) -> str:
@@ -168,7 +165,7 @@ class UploadPipeline:
         name = self.saved_file_name or file.filename or "uploaded.pdf"
         file_format = file.content_type or "application/octet-stream"
 
-        # 서버 처리 단계이므로 status='uploading' 으로 시작
+        # 서버 처리 단계이므로 status='uploading', progress=0 으로 시작
         doc_in = DocumentCreate(
             owner_id=self.user_id,
             name=name,
@@ -177,6 +174,7 @@ class UploadPipeline:
             folder_path=self.folder_rel,
             status="uploading",
             chunk_count=0,
+            progress=0,
         )
         doc = doc_crud.document_crud.create(self.db, doc_in)
         self.document = doc
@@ -253,26 +251,16 @@ class UploadPipeline:
         doc_crud.document_chunk_crud.bulk_create(self.db, items)
 
         # Document.chunk_count 갱신
-        update_in = DocumentUpdate(chunk_count=len(chunks))
-        doc_crud.document_crud.update(self.db, knowledge_id=knowledge_id, data=update_in)
-
-    # 10) Document 상태 변경
-    def _set_status(self, knowledge_id: int, status: str):
-        try:
-            update_in = DocumentUpdate(status=status)
-            doc_crud.document_crud.update(self.db, knowledge_id=knowledge_id, data=update_in)
-        except Exception:
-            # 상태 변경 실패는 치명적이지 않으므로 무시
-            pass
+        self._update_doc(chunk_count=len(chunks))
 
     # 전체 파이프라인 실행
     def run(self, file: UploadFile) -> Document:
         """
         최종적으로 user.documents 레코드(Document)를 반환
-        (status, chunk_count 등은 커밋 후 최신 상태)
+        (status, chunk_count, progress 등은 커밋 후 최신 상태)
         """
         try:
-            # 1) 파일 저장 (여기까지는 Document/Job 미생성 상태)
+            # 1) 파일 저장 (여기까지는 Document 미생성 상태)
             path = self.save_file(file)
 
             # 2) 텍스트 추출
@@ -281,44 +269,23 @@ class UploadPipeline:
             # 3) 프리뷰 생성
             preview = self._build_preview(text)
 
-            # 4) Document 메타 생성 (status='uploading')
+            # 4) Document 메타 생성 (status='uploading', progress=0)
             doc = self.create_metadata(file, preview)
 
-            # 5) Job 생성 + parse 단계 시작
-            self._create_job(doc.knowledge_id)
-            self._update_job(
-                stage="parse",
-                status="uploading",
-                progress=10,
-                step="텍스트 추출 중",
-                started_at=datetime.now(timezone.utc),
-            )
-
-            # 6) 페이지 저장
+            # 5) 페이지 저장 시작: status=embedding, progress 대략 10%
+            self._update_doc(status="embedding", progress=10)
             self.store_pages(doc.knowledge_id, num_pages)
-            self._update_job(
-                stage="chunk",
-                progress=30,
-                step=f"페이지 {num_pages}개 저장 완료, 청크 생성 중",
-            )
+            self._update_doc(progress=30)
 
-            # 7) 청크 생성
+            # 6) 청크 생성: 50%
             chunks = self.chunk_text(text)
-            self._update_job(
-                stage="chunk",
-                progress=40,
-                step=f"청크 {len(chunks)}개 생성됨",
-            )
+            self._update_doc(progress=50)
 
-            # 8) 임베딩
+            # 7) 임베딩: 50 ~ 90%
             chunks, vectors = self.embed_chunks(chunks)
 
             if vectors:
-                self._update_job(
-                    stage="embed",
-                    progress=70,
-                    step="임베딩 계산 완료, DB 저장 중",
-                )
+                self._update_doc(progress=70)
 
                 self.store_chunks(doc.knowledge_id, chunks, vectors)
 
@@ -361,14 +328,8 @@ class UploadPipeline:
                 except Exception as e:
                     log.exception("api-cost embedding record failed: %s", e)
 
-            # 성공: Document.status = ready, Job 완료
-            self._set_status(doc.knowledge_id, "ready")
-            self._update_job(
-                status="completed",
-                progress=100,
-                step="completed",
-                completed_at=datetime.now(timezone.utc),
-            )
+            # 8) 성공: status=ready, progress=100
+            self._update_doc(status="ready", progress=100)
 
             # 나머지 변경사항 commit
             self.db.commit()
@@ -379,24 +340,15 @@ class UploadPipeline:
             return doc
 
         except Exception as e:
-            # 실패: Document.status = failed, Job 실패 처리
+            # 실패: Document.status = failed, progress=100, error_message 세팅
             if self.document:
                 try:
-                    self._set_status(self.document.knowledge_id, "failed")
-                except Exception:
-                    pass
-            if self.job_id:
-                try:
-                    self._update_job(
+                    self._update_doc(
                         status="failed",
-                        step="failed",
+                        progress=100,
                         error_message=str(e),
-                        completed_at=datetime.now(timezone.utc),
                     )
+                    self.db.commit()
                 except Exception:
                     pass
-            try:
-                self.db.commit()
-            except Exception:
-                pass
             raise

@@ -1,9 +1,18 @@
 # app/endpoints/user/document.py
 from __future__ import annotations
 
-from typing import Optional, List, Tuple
+from typing import Optional, List
 
-from fastapi import APIRouter,File, Depends, HTTPException, Query, Path, status,UploadFile, BackgroundTasks
+from fastapi import (
+    APIRouter,
+    File,
+    Depends,
+    HTTPException,
+    Query,
+    Path,
+    status,
+    UploadFile,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -12,7 +21,6 @@ from models.user.account import AppUser
 
 from crud.user.document import (
     document_crud,
-    document_job_crud,
     document_tag_crud,
     document_tag_assignment_crud,
     document_usage_crud,
@@ -32,10 +40,11 @@ from schemas.user.document import (
     DocumentTagAssignmentResponse,
     DocumentUsageResponse,
     DocumentPageResponse,
-    DocumentChunkResponse, DocumentUploadResponse, DocumentProcessingJobResponse,
+    DocumentChunkResponse,
 )
 
 from service.user.upload_pipeline import UploadPipeline
+
 router = APIRouter()
 
 
@@ -46,7 +55,7 @@ router = APIRouter()
     "/document",
     response_model=Page[DocumentResponse],
     operation_id="list_my_document",
-    summary="내문서 리스트"
+    summary="내 문서 리스트 조회",
 )
 def list_my_document(
     page: int = Query(1, ge=1),
@@ -80,9 +89,8 @@ def create_document(
     me: AppUser = Depends(get_current_user),
 ):
     """
-    문서 레코딩용(메타데이터 기록) 추후에 API등 연결시 구글 드라이브라던가..
-    혹은 다른 팀원(프로젝트 할때나)
-    지금은 굳이 안씀(예약엔드포인트)
+    문서 메타데이터만 직접 생성하는 예약 엔드포인트.
+    실제 파일 업로드/파싱/임베딩은 /user/upload 사용.
     """
     # owner_id는 토큰 기준으로 강제
     data_for_create = data.model_copy(update={"owner_id": me.user_id})
@@ -99,8 +107,11 @@ def create_document(
     summary="지식베이스 파일 업로드",
     description=(
         "파일을 업로드하고 서버에서 텍스트 추출, 페이지/청크 생성, 임베딩까지 수행한 뒤 "
-        "user.documents 레코드를 반환합니다.\n"
-        "업로드/임베딩 진행 상태는 내부적으로 user.document_processing_jobs에 기록됩니다."
+        "`user.documents` 레코드를 반환\n\n"
+        "- 진행 상태는 `Document.status` (uploading / embedding / ready / failed)\n"
+        "  와 `Document.progress` (0~100) 필드로 관리\n"
+        "- 업로드 완료 후에는 `/user/document/{knowledge_id}` 를 주기적으로 조회해서 "
+        "상태와 진행률을 확인"
     ),
 )
 def upload_document(
@@ -122,8 +133,6 @@ def upload_document(
     return DocumentResponse.model_validate(doc)
 
 
-
-
 @router.get(
     "/document/{knowledge_id}",
     response_model=DocumentResponse,
@@ -134,9 +143,16 @@ def get_document_detail(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    문서 상세 + 현재 상태/진행률 조회용.
+    - status, progress, error_message 등을 함께 내려줌 (스키마에 포함되어 있다면).
+    """
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
     return DocumentResponse.model_validate(doc)
 
 
@@ -153,12 +169,18 @@ def update_document(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     updated = document_crud.update(db, knowledge_id=knowledge_id, data=data)
     db.commit()
     if not updated:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
     return DocumentResponse.model_validate(updated)
 
 
@@ -174,7 +196,10 @@ def delete_document(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     document_crud.delete(db, knowledge_id=knowledge_id)
     db.commit()
@@ -194,8 +219,8 @@ def list_all_document_tags(
     db: Session = Depends(get_db),
     _: AppUser = Depends(get_current_user),
 ):
-    stmt = select(DocumentTagCreate.__config__.orm_model) if False else None  # 타입 힌트용 더미
-    # 위 한 줄은 그냥 타입힌트용, 실제로 사용되진 않음
+    # 타입 힌트용 더미 (사용 안 함)
+    _ = select(DocumentTagCreate.__config__.orm_model) if False else None
 
     from models.user.document import DocumentTag  # 로컬 import (순환 방지용)
 
@@ -221,7 +246,10 @@ def list_document_tags(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     from models.user.document import DocumentTag, DocumentTagAssignment
 
@@ -252,10 +280,16 @@ def add_document_tag(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     tag = document_tag_crud.ensure(db, name=body.name)
-    assignment_in = DocumentTagAssignmentCreate(knowledge_id=knowledge_id, tag_id=tag.tag_id)
+    assignment_in = DocumentTagAssignmentCreate(
+        knowledge_id=knowledge_id,
+        tag_id=tag.tag_id,
+    )
     document_tag_assignment_crud.assign(db, assignment_in)
     db.commit()
     return DocumentTagResponse.model_validate(tag)
@@ -274,7 +308,10 @@ def remove_document_tag(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     from models.user.document import DocumentTagAssignment
 
@@ -309,7 +346,10 @@ def list_document_usage(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     usages = document_usage_crud.list_by_document(db, knowledge_id=knowledge_id)
     return [DocumentUsageResponse.model_validate(u) for u in usages]
@@ -330,7 +370,10 @@ def list_document_pages(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     pages = document_page_crud.list_by_document(db, knowledge_id=knowledge_id)
     return [DocumentPageResponse.model_validate(p) for p in pages]
@@ -349,7 +392,10 @@ def list_document_chunks(
 ):
     doc = document_crud.get(db, knowledge_id=knowledge_id)
     if not doc or doc.owner_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="document not found",
+        )
 
     chunks = document_chunk_crud.list_by_document_page(
         db,
@@ -357,25 +403,3 @@ def list_document_chunks(
         page_id=page_id,
     )
     return [DocumentChunkResponse.model_validate(c) for c in chunks]
-
-
-@router.get(
-    "/document/jobs/{job_id}",
-    response_model=DocumentProcessingJobResponse,
-    operation_id="get_document_job",
-    summary="문서 처리 Job 단건 조회",
-    description=(
-        "지정된 job_id에 해당하는 문서 처리 Job 상태를 조회\n"
-        "- 로그인한 사용자 소유 문서에 속한 Job만 조회.\n"
-        "- progress, stage, status, step 등을 이용해 업로드/임베딩 진행률 표시용으로 사용"
-    ),
-)
-def get_document_job(
-    job_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    job = document_job_crud.get(db, job_id=job_id)  # get 메서드 필요
-    if not job or not job.document or job.document.owner_id != me.user_id:
-        raise HTTPException(status_code=404, detail="job not found")
-    return DocumentProcessingJobResponse.model_validate(job)
