@@ -132,12 +132,13 @@ document_crud = DocumentCRUD()
 # Document Processing Jobs CRUD
 # =========================================================
 class DocumentProcessingJobCRUD:
+    def get(self, db: Session, job_id: int) -> Optional[DocumentProcessingJob]:
+        stmt = select(DocumentProcessingJob).where(
+            DocumentProcessingJob.job_id == job_id
+        )
+        return db.scalar(stmt)
+
     def create(self, db: Session, data: DocumentProcessingJobCreate) -> DocumentProcessingJob:
-        """
-        지식베이스 처리 Job 생성.
-        - status: 기본 'queued'
-        - progress: 기본 0
-        """
         obj = DocumentProcessingJob(
             knowledge_id=data.knowledge_id,
             stage=data.stage,
@@ -210,7 +211,11 @@ class DocumentProcessingJobCRUD:
             knowledge_id=data.knowledge_id,
             stage=data.stage,
             status=data.status or "queued",
+            # 여기서 progress 값을 꼭 채워줘야 함
+            progress=data.progress if data.progress is not None else 0,
+            step=data.step,
             message=data.message,
+            error_message=data.error_message,
             started_at=data.started_at,
             completed_at=data.completed_at,
         )
@@ -218,6 +223,10 @@ class DocumentProcessingJobCRUD:
         db.flush()
         db.refresh(obj)
         return obj
+
+    def get(self, db: Session, job_id: int) -> Optional[DocumentProcessingJob]:
+        stmt = select(DocumentProcessingJob).where(DocumentProcessingJob.job_id == job_id)
+        return db.scalar(stmt)
 
     def list_by_document(
         self,
@@ -237,15 +246,14 @@ class DocumentProcessingJobCRUD:
         job_id: int,
         data: DocumentProcessingJobUpdate,
     ) -> Optional[DocumentProcessingJob]:
+        # None 값은 제외하고 실제로 들어온 필드만 업데이트
         values = {
             k: v
             for k, v in data.model_dump(exclude_unset=True).items()
+            if v is not None
         }
         if not values:
-            stmt = select(DocumentProcessingJob).where(
-                DocumentProcessingJob.job_id == job_id
-            )
-            return db.scalar(stmt)
+            return self.get(db, job_id)
 
         stmt = (
             update(DocumentProcessingJob)
@@ -254,10 +262,7 @@ class DocumentProcessingJobCRUD:
         )
         db.execute(stmt)
         db.flush()
-        stmt = select(DocumentProcessingJob).where(
-            DocumentProcessingJob.job_id == job_id
-        )
-        return db.scalar(stmt)
+        return self.get(db, job_id)
 
 
 document_job_crud = DocumentProcessingJobCRUD()

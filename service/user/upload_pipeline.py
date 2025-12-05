@@ -17,6 +17,8 @@ from schemas.user.document import (
     DocumentUpdate,
     DocumentPageCreate,
     DocumentChunkCreate,
+    DocumentProcessingJobCreate,
+    DocumentProcessingJobUpdate,
 )
 import crud.supervisor.api_usage as cost
 from core import config
@@ -58,8 +60,11 @@ class UploadPipeline:
     파일 저장 → 텍스트 추출 → 프리뷰 → Document 메타 생성(status=uploading)
     → 페이지 저장(user.document_pages)
     → 청크 + 임베딩(user.document_chunks.vector_memory)
-    → Document.chunk_count 갱신 + 상태(active)
-    실패 시 상태(error)
+    → Document.chunk_count 갱신 + 상태(ready)
+    실패 시 상태(failed)
+
+    + DocumentProcessingJob 추가:
+      - stage/status/progress/step 을 단계별로 갱신
     """
 
     def __init__(self, db: Session, user_id: int):
@@ -70,6 +75,42 @@ class UploadPipeline:
         self.file_path: Optional[str] = None
         self.saved_file_name: Optional[str] = None
         self.document: Optional[Document] = None
+        self.job_id: Optional[int] = None
+
+    # ---------------------------
+    # Job 헬퍼
+    # ---------------------------
+    def _create_job(self, knowledge_id: int) -> None:
+        """
+        DocumentProcessingJob row 생성 (초기 상태: queued, progress=0)
+        """
+        job_in = DocumentProcessingJobCreate(
+            knowledge_id=knowledge_id,
+            stage="queued",
+            status="queued",
+            progress=0,
+            step=None,
+            message=None,
+            error_message=None,
+            started_at=None,
+            completed_at=None,
+        )
+        job = doc_crud.document_job_crud.create(self.db, job_in)
+        self.job_id = job.job_id
+        # 여기서는 commit 하지 않고, run() 내의 흐름에서 함께 commit
+
+    def _update_job(self, **fields) -> None:
+        """
+        Job 상태/진행률 업데이트.
+        - 존재하는 필드만 DocumentProcessingJobUpdate 로 생성
+        """
+        if not self.job_id:
+            return
+
+        data = DocumentProcessingJobUpdate(**fields)
+        doc_crud.document_job_crud.update(self.db, job_id=self.job_id, data=data)
+        # Job 상태 변경은 바로바로 프론트에 보이도록 commit
+        self.db.commit()
 
     # 1) 파일 저장
     def save_file(self, file: UploadFile) -> str:
@@ -127,13 +168,14 @@ class UploadPipeline:
         name = self.saved_file_name or file.filename or "uploaded.pdf"
         file_format = file.content_type or "application/octet-stream"
 
+        # 서버 처리 단계이므로 status='uploading' 으로 시작
         doc_in = DocumentCreate(
             owner_id=self.user_id,
             name=name,
             file_format=file_format,
             file_size_bytes=file_size,
             folder_path=self.folder_rel,
-            status="processing",
+            status="uploading",
             chunk_count=0,
         )
         doc = doc_crud.document_crud.create(self.db, doc_in)
@@ -230,17 +272,54 @@ class UploadPipeline:
         (status, chunk_count 등은 커밋 후 최신 상태)
         """
         try:
+            # 1) 파일 저장 (여기까지는 Document/Job 미생성 상태)
             path = self.save_file(file)
+
+            # 2) 텍스트 추출
             text, num_pages = self.extract_text(path)
 
+            # 3) 프리뷰 생성
             preview = self._build_preview(text)
+
+            # 4) Document 메타 생성 (status='uploading')
             doc = self.create_metadata(file, preview)
 
-            self.store_pages(doc.knowledge_id, num_pages)
+            # 5) Job 생성 + parse 단계 시작
+            self._create_job(doc.knowledge_id)
+            self._update_job(
+                stage="parse",
+                status="uploading",
+                progress=10,
+                step="텍스트 추출 중",
+                started_at=datetime.now(timezone.utc),
+            )
 
+            # 6) 페이지 저장
+            self.store_pages(doc.knowledge_id, num_pages)
+            self._update_job(
+                stage="chunk",
+                progress=30,
+                step=f"페이지 {num_pages}개 저장 완료, 청크 생성 중",
+            )
+
+            # 7) 청크 생성
             chunks = self.chunk_text(text)
+            self._update_job(
+                stage="chunk",
+                progress=40,
+                step=f"청크 {len(chunks)}개 생성됨",
+            )
+
+            # 8) 임베딩
             chunks, vectors = self.embed_chunks(chunks)
+
             if vectors:
+                self._update_job(
+                    stage="embed",
+                    progress=70,
+                    step="임베딩 계산 완료, DB 저장 중",
+                )
+
                 self.store_chunks(doc.knowledge_id, chunks, vectors)
 
                 # ==== 비용 집계: 임베딩 ====
@@ -282,8 +361,16 @@ class UploadPipeline:
                 except Exception as e:
                     log.exception("api-cost embedding record failed: %s", e)
 
-            # 성공: status = active
-            self._set_status(doc.knowledge_id, "active")
+            # 성공: Document.status = ready, Job 완료
+            self._set_status(doc.knowledge_id, "ready")
+            self._update_job(
+                status="completed",
+                progress=100,
+                step="completed",
+                completed_at=datetime.now(timezone.utc),
+            )
+
+            # 나머지 변경사항 commit
             self.db.commit()
 
             # 최신 값으로 refresh
@@ -291,12 +378,25 @@ class UploadPipeline:
             self.document = doc
             return doc
 
-        except Exception:
-            # 실패: status = error
+        except Exception as e:
+            # 실패: Document.status = failed, Job 실패 처리
             if self.document:
                 try:
-                    self._set_status(self.document.knowledge_id, "error")
-                    self.db.commit()
+                    self._set_status(self.document.knowledge_id, "failed")
                 except Exception:
                     pass
+            if self.job_id:
+                try:
+                    self._update_job(
+                        status="failed",
+                        step="failed",
+                        error_message=str(e),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                except Exception:
+                    pass
+            try:
+                self.db.commit()
+            except Exception:
+                pass
             raise

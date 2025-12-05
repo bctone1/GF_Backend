@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional, List, Tuple
 
-from fastapi import APIRouter,File, Depends, HTTPException, Query, Path, status,UploadFile
+from fastapi import APIRouter,File, Depends, HTTPException, Query, Path, status,UploadFile, BackgroundTasks
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -96,7 +96,12 @@ def create_document(
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document",
-    summary="업로드",
+    summary="지식베이스 파일 업로드",
+    description=(
+        "파일을 업로드하고 서버에서 텍스트 추출, 페이지/청크 생성, 임베딩까지 수행한 뒤 "
+        "user.documents 레코드를 반환합니다.\n"
+        "업로드/임베딩 진행 상태는 내부적으로 user.document_processing_jobs에 기록됩니다."
+    ),
 )
 def upload_document(
     file: UploadFile = File(...),
@@ -111,8 +116,10 @@ def upload_document(
 
     # 로그인한 유저 기준으로 업로드 파이프라인 실행
     pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc, job = pipeline.run(file)
-    return DocumentUploadResponse(document=doc, job=job)
+    doc = pipeline.run(file)
+
+    # SQLAlchemy 객체 → Pydantic 응답 스키마
+    return DocumentResponse.model_validate(doc)
 
 
 
