@@ -20,11 +20,8 @@ class AIAgent(Base):
         nullable=False,
     )
     # 선택 참조
-    project_id = Column(
-        BigInteger,
-        ForeignKey("user.projects.project_id", ondelete="SET NULL"),
-        nullable=True,
-    )
+    project_id =  Column(BigInteger, nullable=True)
+
     knowledge_id = Column(
         BigInteger,
         ForeignKey("user.documents.knowledge_id", ondelete="SET NULL"),
