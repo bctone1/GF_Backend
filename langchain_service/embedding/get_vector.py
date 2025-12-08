@@ -1,10 +1,11 @@
 # langchain_service/embedding/get_vector.py
 from __future__ import annotations
 
-from typing import List, Optional, Literal
+from typing import Optional
 
 import numpy as np
 from langchain_core.embeddings import Embeddings
+
 from langchain_service.embedding.factory import get_embeddings, ProviderType
 
 
@@ -19,6 +20,7 @@ def text_to_vector(
     단일 텍스트를 임베딩 벡터(np.ndarray)로 변환.
     - 기본 provider는 'openai'
     - 필요 시 model, api_key 오버라이드 가능
+    - get_embeddings() 내부에서 (api_key, model) 단위 싱글톤/캐시를 사용
     """
     embeddings: Embeddings = get_embeddings(
         provider=provider,
@@ -29,7 +31,7 @@ def text_to_vector(
         vector = embeddings.embed_query(text)
         return np.array(vector, dtype=float)
     except Exception as e:
-        # logger 연동되면 print 대신 logger.error 사용(추후 작업)
+        # TODO: logger 연동되면 print 대신 logger.error 사용
         print(f"Error during embedding: {e}")
         return None
 
@@ -61,7 +63,7 @@ def _to_vector(
     # 안전하게 float 변환
     return [float(v) for v in vector_list]
 
-
+# 다수 텍스트를 한 번에 embed_documents로 처리
 def texts_to_vectors(
     texts: list[str],
     *,
@@ -71,7 +73,8 @@ def texts_to_vectors(
 ) -> list[list[float]]:
     """
     여러 텍스트를 한꺼번에 임베딩하는 유틸.
-    - DocumentIngestService 등에서 bulk 임베딩할 때 사용 가능.
+    - DocumentIngestService / 업로드 파이프라인 등에서 bulk 임베딩할 때 사용.
+    - get_embeddings() 내부에서 (api_key, model) 단위 싱글톤/캐시를 사용.
     """
     embeddings: Embeddings = get_embeddings(
         provider=provider,

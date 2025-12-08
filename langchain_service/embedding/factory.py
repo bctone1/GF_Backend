@@ -8,7 +8,7 @@ from langchain_core.embeddings import Embeddings
 
 import core.config as config
 from langchain_service.embedding.openai_embedder import build_openai_embeddings
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import cosine_similarity  # 사용 중이면 유지, 아니면 삭제 가능
 
 # LangChain용 Upstage Embeddings 사용
 try:
@@ -19,15 +19,6 @@ except ImportError:  # 패키지 없으면 None 처리
 
 # 지원 provider 타입
 ProviderType = Literal["openai", "exaone", "upstage", "google"]
-
-# langchain_service/embedding/factory.py
-
-
-def get_embeddings(provider: str = "openai", model: str | None = None):
-    if provider == "openai":
-        return build_openai_embeddings(model)
-    # 나중에 다른 provider 추가하면 여기 분기
-
 
 # ==============================
 # 통합 factory
@@ -55,6 +46,7 @@ def get_embeddings(
         if not effective_model:
             raise RuntimeError("OpenAI Embedding 모델(EMBEDDING_MODEL)이 설정되지 않았습니다.")
 
+        # 여기서 build_openai_embeddings 는 (api_key, model) 기준 싱글톤/캐시를 사용
         return build_openai_embeddings(
             api_key=effective_key,
             model=effective_model,
@@ -90,15 +82,18 @@ def get_embeddings(
     elif provider == "google":
         effective_key = api_key or config.GOOGLE_API
         effective_model = model or "gemini-embedding-001"
+
         if not effective_key:
             raise RuntimeError("Google API key(GOOGLE_API)가 설정되지 않았습니다.")
         if not model:
             raise RuntimeError("Google embedding 모델명을 model 파라미터로 명시해야 합니다.")
+
         return GoogleEmbeddings(api_key=effective_key, model=model)
 
     # ---------- 기타 ----------
     else:
         raise ValueError(f"지원하지 않는 embedding provider: {provider}")
+
 
 # ==============================
 # Google 스텁 클래스
@@ -113,12 +108,11 @@ class GoogleEmbeddings(Embeddings):
         self.model = model
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        # Google 임베딩 API 스펙에 맞게 구현(추후_)
+        # Google 임베딩 API 스펙에 맞게 구현(추후)
         raise NotImplementedError("Google embeddings는 아직 구현되지 않았습니다.")
 
     def embed_query(self, text: str) -> List[float]:
         return self.embed_documents([text])[0]
-
 
 
 # ==============================

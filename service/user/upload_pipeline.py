@@ -3,7 +3,6 @@ import os
 import shutil
 from uuid import uuid4
 from typing import List, Optional, Tuple
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 
@@ -29,20 +28,9 @@ from core.pricing import (
 from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from langchain_service.embedding.get_vector import texts_to_vectors
+
 log = logging.getLogger("api_cost")
-
-# 임베딩: 배치가 있으면 우선 사용, 없으면 단건 + 스레드풀
-try:
-    from langchain_service.embedding.get_vector import (
-        text_to_vector,
-        text_list_to_vectors,  # type: ignore
-    )
-
-    _HAS_BATCH = True
-except Exception:
-    from langchain_service.embedding.get_vector import text_to_vector  # type: ignore
-
-    _HAS_BATCH = False
 
 # 프리뷰 LLM 사용 여부(현재는 안 쓰지만 남겨둠)
 _USE_LLM_PREVIEW = getattr(config, "USE_LLM_PREVIEW", False)
@@ -114,19 +102,19 @@ class UploadPipeline:
         return splitter.split_text(text)
 
     def embed_chunks(self, chunks: List[str]) -> Tuple[List[str], List[List[float]]]:
+        """
+        청크 리스트를 임베딩한다.
+        - 빈/공백 청크는 제거
+        - 내부적으로 texts_to_vectors()를 통해
+          OpenAIEmbeddings 싱글톤 + embed_documents 를 사용
+        """
         # 1) 빈 문자열/공백 제거
         cleaned = [c for c in chunks if c and c.strip()]
         if not cleaned:
             return [], []
 
-        # 2) 임베딩 객체 한 번만 가져와서 재사용
-        #    (get_embeddings 안에서 OpenAIEmbeddings 를 캐시하도록 구현해두면,
-        #     업로드 한 번당 / 프로세스당 1개만 생성됨)
-        embeddings = get_embeddings()  # provider/model 은 factory 내부에서 config 기반으로 선택
-
-        # 3) 배치 임베딩: 한 번에 여러 문장을 벡터로 변환
-        #    LangChain Embeddings: embed_documents(List[str]) -> List[List[float]]
-        vectors: List[List[float]] = embeddings.embed_documents(cleaned)
+        # 2) 배치 임베딩 (texts_to_vectors 내부에서 get_embeddings 사용)
+        vectors: List[List[float]] = texts_to_vectors(cleaned)
 
         return cleaned, vectors
 
