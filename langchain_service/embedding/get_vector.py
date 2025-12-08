@@ -63,24 +63,42 @@ def _to_vector(
     # 안전하게 float 변환
     return [float(v) for v in vector_list]
 
-# 다수 텍스트를 한 번에 embed_documents로 처리
+# 다수 텍스트를 한 번에 embed_documents로 처리 (배치 분할 포함)
 def texts_to_vectors(
     texts: list[str],
     *,
     provider: ProviderType = "openai",
     model: Optional[str] = None,
     api_key: Optional[str] = None,
+    batch_size: int = 64,  # 한 번에 보낼 문서 수 (청크 개수)
 ) -> list[list[float]]:
     """
     여러 텍스트를 한꺼번에 임베딩하는 유틸.
     - DocumentIngestService / 업로드 파이프라인 등에서 bulk 임베딩할 때 사용.
     - get_embeddings() 내부에서 (api_key, model) 단위 싱글톤/캐시를 사용.
+    - OpenAI small embedding 모델 기준:
+      - chunk_size ≈ 900 토큰, batch_size 64면
+        요청당 최대 ≈ 900 * 64 = 57,600 토큰 수준 -> 300,000 토큰 제한보다 한참 여유.
     """
+    if not texts:
+        return []
+
     embeddings: Embeddings = get_embeddings(
         provider=provider,
         api_key=api_key,
-        model=model,
+        model=model,  # 예: "text-embedding-3-small"
     )
-    vectors = embeddings.embed_documents(texts)
-    # float 리스트 2차원 배열로 정규화
-    return [[float(v) for v in vec] for vec in vectors]
+
+    all_vectors: list[list[float]] = []
+
+    # texts 를 batch_size 단위로 잘라서 여러 번 호출
+    for start in range(0, len(texts), batch_size):
+        batch = texts[start : start + batch_size]
+        batch_vectors = embeddings.embed_documents(batch)
+
+        # float 리스트 2차원 배열로 정규화
+        for vec in batch_vectors:
+            all_vectors.append([float(v) for v in vec])
+
+    return all_vectors
+
