@@ -1,4 +1,4 @@
-# from sqlalchemy.ext.declarative import declarative_base
+# database/base.py
 from sqlalchemy.orm import declarative_base
 import core.config as config
 import os

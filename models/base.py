@@ -1,4 +1,4 @@
-# Base, MetaData(naming_convention)만
+# model/base.py
 from __future__ import annotations
 
 from datetime import datetime
