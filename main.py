@@ -3,13 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware  # 이쪽 import를 권장
 from core.middleware import ProcessTimeMiddleware
 from app.routers import register_routers
 
-import warnings
-
-warnings.filterwarnings(
-    "ignore",
-    message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.",
-    module="langchain_core._api.deprecation",
-)
+# import warnings
+#
+# warnings.filterwarnings(
+#     "ignore",
+#     message="Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater.",
+#     module="langchain_core._api.deprecation",
+# )
 
 app = FastAPI(title="GrowFit API")
 
