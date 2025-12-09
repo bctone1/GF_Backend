@@ -12,19 +12,19 @@ from schemas.base import ORMBase
 # =========================================
 class PracticeSessionCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-    # 요청 바디에서는 user_id를 받지 않고, 엔드포인트에서 me.user_id로 채움
-    class_id: Optional[int] = None  # 어떤 class 에서 시작된 실습인지 연결용
-    project_id: Optional[int] = None  # NEW: 어떤 프로젝트(폴더)에 속한 세션인지
+
+    class_id: Optional[int] = None          # 어떤 class 에서 시작된 실습인지 연결용
+    project_id: Optional[int] = None        # 어떤 프로젝트(폴더)에 속한 세션인지
     title: Optional[str] = None
     notes: Optional[str] = None
 
 
 class PracticeSessionUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
+
     class_id: Optional[int] = None
-    project_id: Optional[int] = None  # NEW
+    project_id: Optional[int] = None        # 프로젝트 이동/해제할 때 사용 가능
     title: Optional[str] = None
-    completed_at: Optional[datetime] = None
     notes: Optional[str] = None
 
 
@@ -34,11 +34,11 @@ class PracticeSessionResponse(ORMBase):
     session_id: int
     user_id: int
     class_id: Optional[int] = None
-    project_id: Optional[int] = None  # NEW
+    project_id: Optional[int] = None
 
     title: Optional[str] = None
-    started_at: datetime
-    completed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
     notes: Optional[str] = None
 
     # 편의를 위해 마지막 프롬프트/응답 한 쌍을 세션 레벨에서 보여줄 때 사용
@@ -110,7 +110,7 @@ class PracticeResponseResponse(ORMBase):
 
     response_id: int
     session_model_id: int
-    session_id: int  # NEW: FK 붙인 컬럼까지 응답에 포함
+    session_id: int          # NEW: FK 붙인 컬럼까지 응답에 포함
     model_name: str
     prompt_text: str
     response_text: str
@@ -241,4 +241,8 @@ class PracticeTurnResponse(ORMBase):
     session_id: int
     session_title: Optional[str] = None  # 자동 요약 타이틀
     prompt_text: str
-    results: list[PracticeTurnModelResult]
+    results: List[PracticeTurnModelResult]
+
+
+# ForwardRef 해결
+PracticeSessionResponse.model_rebuild()

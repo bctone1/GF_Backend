@@ -40,16 +40,12 @@ class PracticeSessionCRUD:
         data: PracticeSessionCreate,
         user_id: int,
     ) -> PracticeSession:
-        """
-        엔드포인트에서 me.user_id 를 user_id 인자로 넘겨주는 패턴으로 사용.
-        """
         obj = PracticeSession(
             user_id=user_id,
             class_id=data.class_id,
-            project_id=data.project_id,  # NEW: 프로젝트 연결
+            project_id=data.project_id,
             title=data.title,
             notes=data.notes,
-            # started_at, completed_at 은 DB 기본값/제약에 맡김
         )
         db.add(obj)
         db.flush()
@@ -76,12 +72,13 @@ class PracticeSessionCRUD:
         ) or 0
 
         stmt = (
-            stmt.order_by(PracticeSession.started_at.desc())
+            stmt.order_by(PracticeSession.created_at.desc())
             .offset((page - 1) * size)
             .limit(size)
         )
         rows = db.scalars(stmt).all()
         return rows, total
+
 
     def update(
         self,
@@ -105,8 +102,14 @@ class PracticeSessionCRUD:
         db.flush()
         return self.get(db, session_id)
 
-    def delete(self, db: Session, session_id: int) -> None:
-        stmt = delete(PracticeSession).where(PracticeSession.session_id == session_id)
+    def delete(
+        self,
+        db: Session,
+        session_model_id: int,
+    ) -> None:
+        stmt = delete(PracticeSessionModel).where(
+            PracticeSessionModel.session_model_id == session_model_id
+        )
         db.execute(stmt)
         db.flush()
 

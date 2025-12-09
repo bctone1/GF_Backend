@@ -1,19 +1,16 @@
 # models/user/practice.py
 from sqlalchemy import (
     Column, BigInteger, Text, Integer, DateTime, Boolean,
-    ForeignKey, UniqueConstraint, CheckConstraint, Index, text
+    ForeignKey, Index, text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
+
 from models.base import Base
 
 
-# models/user/practice.py
-
-from sqlalchemy.orm import relationship
-...
-
+# ========== user.practice_sessions ==========
 class PracticeSession(Base):
     __tablename__ = "practice_sessions"
 
@@ -38,9 +35,13 @@ class PracticeSession(Base):
     )
 
     title = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, server_default=text("'active'"))
+    notes = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -48,7 +49,7 @@ class PracticeSession(Base):
         nullable=False,
     )
 
-    # 기존에 있던 것들
+    # 관계들
     models = relationship(
         "PracticeSessionModel",
         back_populates="session",
@@ -70,7 +71,7 @@ class PracticeSession(Base):
     # 프로젝트와의 관계
     project = relationship(
         "UserProject",
-        back_populates="sessions",   # UserProject 쪽에서 쓰는 속성 이름이 sessions 라고 가정
+        back_populates="sessions",  # UserProject.sessions 가 있어야 함
         passive_deletes=True,
     )
 
@@ -78,7 +79,6 @@ class PracticeSession(Base):
         Index("idx_practice_sessions_user", "user_id"),
         {"schema": "user"},
     )
-
 
 
 # ========== user.practice_session_models ==========
@@ -94,7 +94,7 @@ class PracticeSessionModel(Base):
     )
 
     model_name = Column(Text, nullable=False)
-    provider = Column(Text, nullable=False)
+    # provider 는 config.PRACTICE_MODELS 로 해석하니까 ORM에서는 제거
     is_primary = Column(Boolean, nullable=False, server_default=text("false"))
 
     created_at = Column(
@@ -109,7 +109,6 @@ class PracticeSessionModel(Base):
         passive_deletes=True,
     )
 
-    # PracticeResponse 와도 1:N
     responses = relationship(
         "PracticeResponse",
         back_populates="session_model",

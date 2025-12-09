@@ -1,4 +1,3 @@
-# service/user/practice.py
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
@@ -47,10 +46,6 @@ from schemas.user.practice import (
 # 질문 → 벡터 임베딩 헬퍼
 # =========================================
 def _embed_question_to_vector(question: str) -> list[float]:
-    """
-    질문 텍스트를 pgvector용 벡터(list[float])로 변환.
-    인제스트 때와 동일한 임베딩 모델(texts_to_vectors) 사용.
-    """
     cleaned = (question or "").strip()
     if not cleaned:
         return []
@@ -72,12 +67,6 @@ def _build_context_from_documents(
     question: str,
     max_chunks: int = 10,
 ) -> str:
-    """
-    선택한 document_ids 기준으로:
-    - 내 소유 문서인지 검증
-    - 질문을 임베딩해서 pgvector 코사인 거리 기반 top-k 청크 검색
-    - 상위 청크들을 하나의 컨텍스트 텍스트로 합침
-    """
     if not document_ids:
         return ""
 
@@ -86,7 +75,6 @@ def _build_context_from_documents(
     for doc_id in document_ids:
         doc = document_crud.get(db, knowledge_id=doc_id)
         if not doc or doc.owner_id != user.user_id:
-            # 내 문서가 아니면 스킵 (원하면 여기서 HTTPException으로 바꿀 수도 있음)
             continue
         valid_docs.append(doc)
 
@@ -109,10 +97,8 @@ def _build_context_from_documents(
         )
         chunks.extend(doc_chunks)
 
-    # 혹시 너무 많이 모이면 max_chunks까지만 사용
     chunks = chunks[:max_chunks]
 
-    # 4) 컨텐츠 텍스트 합치기
     texts: List[str] = []
     for c in chunks:
         chunk_text = getattr(c, "chunk_text", None)
@@ -193,11 +179,6 @@ def set_primary_model_for_session(
     session_id: int,
     target_session_model_id: int,
 ) -> PracticeSessionModel:
-    """
-    1) 세션이 내 것인지 검증
-    2) 해당 세션의 모든 모델 is_primary = false
-    3) target만 is_primary = true
-    """
     session = practice_session_crud.get(db, session_id)
     if not session or session.user_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
@@ -244,9 +225,6 @@ def create_model_comparison_from_metrics(
     winner_model: Optional[str] = None,
     user_feedback: Optional[str] = None,
 ):
-    """
-    이미 수집된 두 모델의 latency/token 메트릭을 기반으로 model_comparisons 레코드 생성
-    """
     session = practice_session_crud.get(db, session_id)
     if not session or session.user_id != me.user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
@@ -270,12 +248,11 @@ def create_model_comparison_from_metrics(
     )
 
     comp_row = model_comparison_crud.create(db, comp_in)
-    # commit 은 바깥에서 처리
     return comp_row
 
 
 # =========================================
-# LLM 연결/모델 해석 유틸
+# LLM 연결/모델 해석 유틸 (현재는 직접 사용 안 함)
 # =========================================
 def resolve_models_for_class(
     db: Session,
@@ -318,11 +295,6 @@ def _call_llm_for_model(
     model_name: str,
     prompt_text: str,
 ) -> tuple[str, Dict[str, Any] | None, int | None]:
-    """
-    하나의 모델에 대해 LLM 호출을 수행.
-    - 프로바이더/실제 모델 이름은 config.PRACTICE_MODELS 에서 가져오되,
-      없으면 model_name 그대로 넘겨서 call_llm_chat 의 자동 추론에 맡김.
-    """
     practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
     model_conf = practice_models.get(model_name)
 
@@ -340,7 +312,6 @@ def _call_llm_for_model(
         temperature = model_conf.get("temperature", temperature)
         max_tokens = model_conf.get("max_output_tokens") or model_conf.get("max_tokens")
 
-    # OpenAI 스타일 messages 형식으로 변환 (단일 user 메시지)
     messages = [
         {"role": "user", "content": prompt_text},
     ]
@@ -367,14 +338,16 @@ def create_session_with_first_turn(
     prompt_text: str,
     knowledge_id: int | None = None,
 ) -> tuple[PracticeSession, PracticeResponse]:
-    # 1) 세션 생성
+    # 1) 세션 생성 (class_id / project_id 없이 단순 세션)
     session = practice_session_crud.create(
         db,
-        PracticeSessionCreate(
-            user_id=user.user_id,
+        data=PracticeSessionCreate(
+            class_id=None,
+            project_id=None,
             title=None,
             notes=None,
         ),
+        user_id=user.user_id,
     )
 
     # 2) 세션-모델 연결
@@ -405,7 +378,7 @@ def create_session_with_first_turn(
             model_name=model_name,
             prompt_text=prompt_text,
             response_text=qa.answer,
-            token_usage=None,  # runner에서 토큰정보 넘겨받으면 채우기
+            token_usage=None,
             latency_ms=None,
         ),
     )
@@ -433,19 +406,12 @@ def run_practice_turn(
     user: AppUser,
     document_ids: Optional[List[int]] = None,
 ) -> PracticeTurnResponse:
-    """
-    - 선택된 지식베이스의 벡터 top-k 청크를 컨텍스트로 붙여서
-      각 모델에 LLM 호출
-    - PracticeResponse 레코드 생성
-    - 세션에 title 없으면 자동 생성하여 업데이트
-    """
     if session.user_id != user.user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="session not owned by user",
         )
 
-    # 0) 지식베이스 컨텍스트 구성
     context_text = ""
     if document_ids:
         context_text = _build_context_from_documents(
@@ -464,19 +430,16 @@ def run_practice_turn(
                 detail="session_model does not belong to given session",
             )
 
-        # 1) 실제 LLM에 보낼 프롬프트 만들기
         if context_text:
             full_prompt = f"{context_text}\n\n질문: {prompt_text}"
         else:
             full_prompt = prompt_text
 
-        # 2) LLM 호출
         response_text, token_usage, latency_ms = _call_llm_for_model(
             model_name=m.model_name,
             prompt_text=full_prompt,
         )
 
-        # 3) 응답 저장
         resp = practice_response_crud.create(
             db,
             PracticeResponseCreate(
@@ -490,7 +453,6 @@ def run_practice_turn(
             ),
         )
 
-        # 4) 클라이언트 응답용 DTO
         results.append(
             PracticeTurnModelResult(
                 session_model_id=resp.session_model_id,
@@ -505,7 +467,6 @@ def run_practice_turn(
             )
         )
 
-    # 5) 세션 제목이 아직 없으면 → 첫 턴 기준으로 자동 생성
     if not session.title and results:
         primary = next((r for r in results if r.is_primary), results[0])
         title = generate_session_title_llm(
@@ -521,7 +482,6 @@ def run_practice_turn(
         )
         session.title = title
 
-    # 6) 최종 응답
     return PracticeTurnResponse(
         session_id=session.session_id,
         session_title=session.title,
@@ -539,6 +499,7 @@ def _init_session_and_models_from_class(
     me: AppUser,
     class_id: int,
     body: PracticeTurnRequest,
+    project_id: Optional[int] = None,
 ) -> tuple[PracticeSession, List[PracticeSessionModel]]:
     """
     session_id == 0 인 경우:
@@ -546,15 +507,16 @@ def _init_session_and_models_from_class(
     - class LLM 설정 기반으로 practice_session_models 생성
     - 이번 턴에 쓸 모델 리스트 리턴
     """
-    # 새 practice_session 생성
+    # 새 practice_session 생성 (class + optional project에 묶기)
     session = practice_session_crud.create(
         db,
-        PracticeSessionCreate(
-            user_id=me.user_id,
+        data=PracticeSessionCreate(
             class_id=class_id,
+            project_id=project_id,
             title=None,
             notes=None,
         ),
+        user_id=me.user_id,
     )
 
     # class 설정에서 사용할 모델 목록 가져오기
@@ -634,9 +596,8 @@ def _select_models_for_existing_session(
     """
     session_id > 0 인 경우:
     - 세션 ↔ class 바인딩 검증
-    - 세션에 등록된 모델 중에서 model_names / session_model_ids 로 필터링
+    - 세션에 등록된 모델 중에서 model_names 로 필터링
     """
-    # 세션 ↔ class_id 바인딩 검증
     if session.class_id is None:
         session.class_id = class_id
         db.add(session)
@@ -647,7 +608,6 @@ def _select_models_for_existing_session(
             detail="class_id does not match this session",
         )
 
-    # 이 세션에 등록된 모든 모델 먼저 가져오기
     all_models: list[PracticeSessionModel] = practice_session_model_crud.list_by_session(
         db,
         session_id=session.session_id,
@@ -658,7 +618,6 @@ def _select_models_for_existing_session(
             detail="no models configured for this session",
         )
 
-    # 1순위: model_names
     if body.model_names:
         requested_names = set(body.model_names)
         models = [m for m in all_models if m.model_name in requested_names]
@@ -668,31 +627,6 @@ def _select_models_for_existing_session(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="requested model_names not found in this session",
             )
-
-    # 2순위: session_model_ids
-    elif body.session_model_ids:
-        requested_ids = {
-            sm_id
-            for sm_id in body.session_model_ids or []
-            if isinstance(sm_id, int) and sm_id > 0
-        }
-
-        if requested_ids:
-            id_to_model = {m.session_model_id: m for m in all_models}
-            models = [
-                id_to_model[sm_id]
-                for sm_id in requested_ids
-                if sm_id in id_to_model
-            ]
-            if not models:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="requested session_model_ids not found in this session",
-                )
-        else:
-            models = all_models
-
-    # 3순위: 아무 것도 안 보냈으면 전체
     else:
         models = all_models
 
@@ -706,12 +640,16 @@ def run_practice_turn_for_session(
     session_id: int,
     class_id: int,
     body: PracticeTurnRequest,
+    project_id: Optional[int] = None,
 ) -> PracticeTurnResponse:
     """
-    엔드포인트에서 바로 호출할 유즈케이스 함수.
-    - session_id == 0 → 새 세션 + class 기반 모델 구성
-    - session_id > 0 → 기존 세션 + 모델 선택
-    - 마지막에 run_practice_turn 호출
+    - session_id == 0:
+      새 세션 + class 기반 모델 구성
+      + (옵션) project_id 로 프로젝트에 세션을 귀속
+
+    - session_id > 0:
+      기존 세션 + 모델 선택
+      project_id 가 넘어온 경우, 기존 세션의 project_id 와 불일치하면 400
     """
     if session_id == 0:
         session, models = _init_session_and_models_from_class(
@@ -719,9 +657,11 @@ def run_practice_turn_for_session(
             me=me,
             class_id=class_id,
             body=body,
+            project_id=project_id,
         )
     else:
         session = ensure_my_session(db, session_id, me)
+
         models = _select_models_for_existing_session(
             db,
             session=session,
@@ -729,6 +669,16 @@ def run_practice_turn_for_session(
             body=body,
             me=me,
         )
+
+        if project_id is not None:
+            if session.project_id is not None and session.project_id != project_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="요청한 project_id와 세션이 속한 project_id가 일치하지 않습니다.",
+                )
+            # session.project_id 가 None 이고 project_id 가 온 경우
+            # 여기서 attach 해도 되고, 별도 API로만 수정해도 됨.
+            # 지금은 보수적으로 그대로 둔다.
 
     if not models:
         raise HTTPException(

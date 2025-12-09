@@ -100,6 +100,16 @@ def create_practice_session(
 # =========================================
 # LLM /chat 엔드포인트
 # =========================================
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Path,
+    status,
+    Body,
+)
+
 @router.post(
     "/sessions/{session_id}/chat",
     response_model=PracticeTurnResponse,
@@ -118,27 +128,33 @@ def run_practice_turn_endpoint(
         ge=1,
         description="이 연습 세션이 속한 Class ID (partner.classes.id)",
     ),
-    body: PracticeTurnRequest = ...,
+    project_id: int | None = Query(
+        None,
+        ge=1,
+        description="이 연습 세션이 속한 Project ID (user.projects.project_id). "
+                    "session_id == 0 인 새 세션 생성 시에만 사용.",
+    ),
+    body: PracticeTurnRequest = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
     """
     멀티 LLM 실습 턴 실행:
     - session_id == 0: 새 세션 생성 + class LLM 설정 기반 모델 구성 후 첫 턴 실행
+      (이때 project_id 가 있으면 해당 프로젝트에 세션을 묶음)
     - session_id > 0: 기존 세션/클래스 검증 + 세션에 등록된 모델 중 선택 실행
-    1) `body.model_names` 에 포함된 논리 이름
-         `gpt-4o-mini`, `gpt-3.5-turbo`, `gpt-5-nano`, `claude-3-haiku-20240307`
-    2) 아무 것도 안 보내면: 해당 class 에 설정된 모든 모델 호출
     """
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
         session_id=session_id,
         class_id=class_id,
+        project_id=project_id,
         body=body,
     )
     db.commit()
     return turn_result
+
 
 
 @router.get(
@@ -159,32 +175,19 @@ def get_practice_session(
         db,
         session_id=session.session_id,
     )
-
-    # 스키마로 변환
     resp_items = [
         PracticeResponseResponse.model_validate(r) for r in resp_rows
     ]
-
-    # 마지막 턴 기준으로 요약 필드 채우기 (없으면 None)
-    if resp_items:
-        last = resp_items[-1]
-        last_prompt = last.prompt_text
-        last_response = last.response_text
-    else:
-        last = None
-        last_prompt = None
-        last_response = None
 
     return PracticeSessionResponse(
         session_id=session.session_id,
         user_id=session.user_id,
         class_id=session.class_id,
+        project_id=session.project_id,
         title=session.title,
-        started_at=session.started_at,
-        completed_at=session.completed_at,
-        notes=session.notes,
-        prompt_text=last_prompt,
-        response_text=last_response,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        notes=getattr(session, "notes", None),
         responses=resp_items,
     )
 
@@ -263,12 +266,12 @@ def create_practice_session_model(
     db.commit()
     return PracticeSessionModelResponse.model_validate(model)
 
-
 @router.patch(
     "/models/{session_model_id}",
     response_model=PracticeSessionModelResponse,
     operation_id="update_practice_session_model",
 )
+
 def update_practice_session_model(
     session_model_id: int = Path(..., ge=1),
     data: PracticeSessionModelUpdate = ...,
@@ -279,17 +282,6 @@ def update_practice_session_model(
 
     # 1) is_primary=True 인 경우: primary 토글 흐름
     if data.is_primary is True:
-        update_data: dict[str, Any] = {}
-        if data.model_name is not None:
-            update_data["model_name"] = data.model_name
-
-        if update_data:
-            model = practice_session_model_crud.update(
-                db,
-                session_model_id=session_model_id,
-                data=update_data,
-            )
-
         target = set_primary_model_for_session(
             db,
             me=me,
@@ -364,10 +356,17 @@ def create_practice_response(
 ):
     _model, _session = ensure_my_session_model(db, session_model_id, me)
 
-    data_in = data.model_copy(update={"session_model_id": session_model_id})
+    data_in = data.model_copy(
+        update={
+            "session_model_id": session_model_id,
+            "session_id": _session.session_id,
+            "model_name": _model.model_name,
+        }
+    )
     resp = practice_response_crud.create(db, data_in)
     db.commit()
     return PracticeResponseResponse.model_validate(resp)
+
 
 
 @router.get(
