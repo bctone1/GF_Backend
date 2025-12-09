@@ -40,6 +40,46 @@ from service.user.agent import (
 
 router = APIRouter()
 
+# =========================================
+# (강사용/추후 학생용) class 기준 공유 에이전트 목록
+# =========================================
+@router.get(
+    "/agents/shared",
+    response_model=List[AIAgentResponse],
+    summary="특정 class 에 공유된 에이전트 목록 조회",
+    operation_id="list_shared_agents_for_class",
+)
+def list_shared_agents_for_class_endpoint(
+    class_id: int = Query(
+        ...,
+        ge=1,
+        description="공유 에이전트를 조회할 강의실 ID (partner.classes.id)",
+    ),
+    active_only: bool = Query(
+        True,
+        description="true 이면 활성 공유(is_active=true)만 조회",
+    ),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """
+    특정 class 에 공유된 에이전트 목록을 조회한다.
+
+    현재 서비스 레이어 로직 기준:
+    - me 가 해당 class 의 담당 강사인지 검증
+      (나중에 학생 수강 여부(enrollments) 검증을 추가해서 학생도 조회 가능하게 확장 예정)
+    """
+    agents = list_shared_agents_for_class(
+        db=db,
+        class_id=class_id,
+        me=me,
+        active_only=active_only,
+    )
+    # AIAgentResponse.from_orm 으로 자동 변환 (from_attributes=True)
+    return agents
+
+
+
 
 # =========================================
 # NEW: 내 에이전트 카드 CRUD
@@ -296,41 +336,4 @@ def deactivate_agent_share_endpoint(
     return share
 
 
-# =========================================
-# (강사용/추후 학생용) class 기준 공유 에이전트 목록
-# =========================================
-@router.get(
-    "/agents/shared",
-    response_model=List[AIAgentResponse],
-    summary="특정 class 에 공유된 에이전트 목록 조회",
-    operation_id="list_shared_agents_for_class",
-)
-def list_shared_agents_for_class_endpoint(
-    class_id: int = Query(
-        ...,
-        ge=1,
-        description="공유 에이전트를 조회할 강의실 ID (partner.classes.id)",
-    ),
-    active_only: bool = Query(
-        True,
-        description="true 이면 활성 공유(is_active=true)만 조회",
-    ),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    """
-    특정 class 에 공유된 에이전트 목록을 조회한다.
-
-    현재 서비스 레이어 로직 기준:
-    - me 가 해당 class 의 담당 강사인지 검증
-      (나중에 학생 수강 여부(enrollments) 검증을 추가해서 학생도 조회 가능하게 확장 예정)
-    """
-    agents = list_shared_agents_for_class(
-        db=db,
-        class_id=class_id,
-        me=me,
-        active_only=active_only,
-    )
-    # AIAgentResponse.from_orm 으로 자동 변환 (from_attributes=True)
-    return agents
 
