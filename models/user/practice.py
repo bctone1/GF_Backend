@@ -9,54 +9,37 @@ from sqlalchemy.orm import relationship
 from models.base import Base
 
 
-# ========== user.practice_sessions ==========
+# models/user/practice.py (이미 있을 거라고 가정)
 class PracticeSession(Base):
     __tablename__ = "practice_sessions"
 
     session_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    user_id = Column(
+    owner_id = Column(
         BigInteger,
         ForeignKey("user.users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # 이 연습 세션이 어떤 Class에 묶여 있는지 (없으면 독립 세션)
+    # 이미 있을 가능성 높음
     class_id = Column(
         BigInteger,
         ForeignKey("partner.classes.id", ondelete="SET NULL"),
         nullable=True,
     )
 
+    # NEW: 이 세션이 속한 프로젝트 (폴더)
+    project_id = Column(
+        BigInteger,
+        ForeignKey("user.projects.project_id", ondelete="SET NULL"),
+        nullable=True,  # 프로젝트 없이 만든 세션도 허용하려면 nullable=True 유지
+    )
+
     title = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default=text("'active'"))
+    # ... 기타 필드 (created_at 등등)
 
-    started_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    notes = Column(Text, nullable=True)
-
-    models = relationship(
-        "PracticeSessionModel",
-        back_populates="session",
-        passive_deletes=True,
-    )
-    comparisons = relationship(
-        "ModelComparison",
-        back_populates="session",
-        passive_deletes=True,
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            "completed_at IS NULL OR completed_at >= started_at",
-            name="chk_practice_sessions_time",
-        ),
-        Index("idx_practice_sessions_user_time", "user_id", "started_at"),
-        {"schema": "user"},
-    )
+    project = relationship("UserProject", back_populates="sessions", passive_deletes=True)
 
 
 # ========== user.practice_session_models ==========

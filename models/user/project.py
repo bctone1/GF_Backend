@@ -20,8 +20,18 @@ class UserProject(Base):
         ForeignKey("user.users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
+
+    # NEW: 어떤 class 안의 프로젝트인지
+    class_id = Column(
+        BigInteger,
+        ForeignKey("partner.classes.id", ondelete="CASCADE"),  # class 삭제 시 프로젝트들도 같이 삭제
+        nullable=False,
+    )
+
     name = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
+
+    # 지금은 personal만 사용
     project_type = Column(Text, nullable=False, server_default=text("'personal'"))
     status = Column(Text, nullable=False, server_default=text("'active'"))
 
@@ -33,16 +43,28 @@ class UserProject(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    members = relationship("ProjectMember", back_populates="project", passive_deletes=True)
-    tags = relationship("ProjectTagAssignment", back_populates="project", passive_deletes=True)
-    metrics = relationship("ProjectMetric", back_populates="project", passive_deletes=True)
-    activities = relationship("ProjectActivity", back_populates="project", passive_deletes=True)
+    members   = relationship("ProjectMember", back_populates="project", passive_deletes=True)
+    tags      = relationship("ProjectTagAssignment", back_populates="project", passive_deletes=True)
+    metrics   = relationship("ProjectMetric", back_populates="project", passive_deletes=True)
+    activities= relationship("ProjectActivity", back_populates="project", passive_deletes=True)
+
+    # NEW: 프로젝트에 속한 세션들 (PracticeSession 관계)
+    sessions  = relationship(
+        "PracticeSession",
+        back_populates="project",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
         CheckConstraint("progress_percent >= 0 AND progress_percent <= 100", name="chk_projects_progress_0_100"),
         CheckConstraint("practice_hours >= 0", name="chk_projects_practice_hours_nonneg"),
         CheckConstraint("conversation_count >= 0", name="chk_projects_conversation_count_nonneg"),
+
+        # 같은 class 안에서, 같은 사람이 같은 이름으로 두 번 만들지 못하게
+        UniqueConstraint("owner_id", "class_id", "name", name="uq_projects_owner_class_name"),
+
         Index("idx_projects_owner_status", "owner_id", "status"),
+        Index("idx_projects_owner_class", "owner_id", "class_id"),
         Index("idx_projects_last_activity", "last_activity_at"),
         {"schema": "user"},
     )

@@ -28,6 +28,7 @@ from app.endpoints.user.account import router as account
 from app.endpoints.user.document import router as user_document
 from app.endpoints.user.practice import router as practice
 from app.endpoints.user.agent import router as agent
+from app.endpoints.user.project import router as project
 
 def register_routers(app: FastAPI) -> None:
     app.include_router(common_course,  prefix="/course", tags=["유틸"])
@@ -59,7 +60,8 @@ def register_routers(app: FastAPI) -> None:
     # ==============================
     # User
     # ==============================
-    app.include_router(account,           prefix="/user",                   tags=["user/account"])
-    app.include_router(user_document,     prefix="/user",                   tags=["user/document"])
-    app.include_router(practice,          prefix="/user/practice",          tags=["user/practice"])
-    app.include_router(agent,             prefix="",             tags=["user/agent"])
+    app.include_router(account,           prefix="/user",                 tags=["user/account"])
+    app.include_router(user_document,     prefix="/user",                 tags=["user/document"])
+    app.include_router(practice,          prefix="/user/practice",        tags=["user/practice"])
+    app.include_router(agent,             prefix="",                      tags=["user/agent"])
+    app.include_router((project),         prefix="",                      tags=["project"])
