@@ -15,6 +15,8 @@ from schemas.user.agent import (
     AgentPromptCreate,
 )
 from crud.user.agent import ai_agent_crud
+from models.partner.student import Student, Enrollment
+from models.partner.course import Class
 
 
 # =========================================
@@ -33,9 +35,79 @@ def ensure_my_agent(db: Session, agent_id: int, me: AppUser) -> AIAgent:
     if agent is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="해당 에이전트를 찾을 수 없거나 권한이 없어.",
+            detail="해당 에이전트를 찾을 수 없거나 권한이 없음.",
         )
     return agent
+
+
+def ensure_enrolled_in_class(
+    db: Session,
+    *,
+    class_id: int,
+    user_id: int,
+) -> None:
+    """
+    주어진 user_id 가 해당 class_id 에 'active' 상태로 수강 중인지 검증.
+    - 없으면 403 Forbidden.
+    """
+    enrollment = (
+        db.query(Enrollment)
+        .join(Student, Enrollment.student_id == Student.id)
+        .filter(
+            Enrollment.class_id == class_id,
+            Student.user_id == user_id,
+            Enrollment.status == "active",
+        )
+        .first()
+    )
+    if enrollment is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="해당 강의에 수강 중인 학생이 아니라서 사용할 수 없음",
+        )
+
+
+def list_shared_agents_for_class(
+    db: Session,
+    *,
+    class_id: int,
+    me: AppUser,
+    active_only: bool = True,
+) -> List[AIAgent]:
+    """
+    특정 class 에 공유된 에이전트 목록 조회.
+    - 현재는 '해당 강의에 수강 중인 학생'만 허용.
+      (나중에 강사 권한 허용 로직을 추가해도 됨)
+    """
+    # 0) 강의 존재 여부 체크
+    cls = (
+        db.query(Class)
+        .filter(Class.id == class_id)
+        .first()
+    )
+    if cls is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="강의를 찾을 수 없음.",
+        )
+
+    # 1) me 가 이 class 의 수강생인지 검증 (수강생만 조회 가능)
+    ensure_enrolled_in_class(
+        db=db,
+        class_id=class_id,
+        user_id=me.user_id,
+    )
+
+    # 2) 공유 에이전트 목록 조회
+    q = (
+        db.query(AIAgent)
+        .join(AgentShare, AgentShare.agent_id == AIAgent.agent_id)
+        .filter(AgentShare.class_id == class_id)
+    )
+    if active_only:
+        q = q.filter(AgentShare.is_active.is_(True))
+
+    return q.all()
 
 
 # =========================================
@@ -224,12 +296,17 @@ def fork_shared_agent_to_my_agent(
     if share is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="해당 강의에 공유된 에이전트를 찾을 수 없어.",
+            detail="해당 강의에 공유된 에이전트를 찾을 수 없음.",
         )
 
-    # TODO: 나중에 me 가 이 class 의 수강생(enrollment)인지 검증 로직 추가
+    # 2) me 가 이 class 의 수강생(enrollment)인지 검증
+    ensure_enrolled_in_class(
+        db=db,
+        class_id=class_id,
+        user_id=me.user_id,
+    )
 
-    # 2) 원본 에이전트 조회 (소유자와 무관)
+    # 3) 원본 에이전트 조회 (소유자와 무관)
     src_agent: Optional[AIAgent] = (
         db.query(AIAgent)
         .filter(AIAgent.agent_id == agent_id)
@@ -241,7 +318,7 @@ def fork_shared_agent_to_my_agent(
             detail="원본 에이전트를 찾을 수 없어.",
         )
 
-    # 3) 원본 활성 시스템 프롬프트 조회
+    # 4) 원본 활성 시스템 프롬프트 조회
     src_prompt: Optional[AgentPrompt] = (
         db.query(AgentPrompt)
         .filter(
@@ -254,10 +331,10 @@ def fork_shared_agent_to_my_agent(
     if src_prompt is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="원본 에이전트에 활성 시스템 프롬프트가 없어.",
+            detail="원본 에이전트에 활성 시스템 프롬프트가 없음.",
         )
 
-    # 4) 새 에이전트 생성 (owner_id = me.user_id)
+    # 5) 새 에이전트 생성 (owner_id = me.user_id)
     agent_in = AIAgentCreate(
         name=new_name or f"{src_agent.name} - 내 버전",
         role_description=src_agent.role_description,
@@ -272,7 +349,7 @@ def fork_shared_agent_to_my_agent(
         owner_id=me.user_id,
     )
 
-    # 5) 프롬프트 복제: 내 새 에이전트에 활성 버전으로 하나 생성
+    # 6) 프롬프트 복제: 내 새 에이전트에 활성 버전으로 하나 생성
     upsert_prompt_for_agent(
         db=db,
         me=me,

@@ -29,7 +29,6 @@ from schemas.user.agent import (
 from service.user.agent_share import (
     share_agent_to_class,
     deactivate_agent_share,
-    list_shared_agents_for_class,
 )
 from service.user.agent import (
     create_agent,
@@ -39,18 +38,20 @@ from service.user.agent import (
     get_active_prompt_for_agent,
     upsert_prompt_for_agent,
     fork_shared_agent_to_my_agent,
+    list_shared_agents_for_class,
 )
+
 
 router = APIRouter()
 
 
 # =========================================
-# (강사용/추후 학생용) class 기준 공유 에이전트 목록
+# (강사용/학생용) class 기준 공유 에이전트 목록
 # =========================================
 @router.get(
     "/agents/shared",
     response_model=List[AIAgentResponse],
-    summary="특정 class 에 공유된 에이전트 목록 조회",
+    summary="class 에 공유된 에이전트 목록 조회(강사/수강생)",
     operation_id="list_shared_agents_for_class",
 )
 def list_shared_agents_for_class_endpoint(
@@ -69,9 +70,11 @@ def list_shared_agents_for_class_endpoint(
     """
     특정 class 에 공유된 에이전트 목록을 조회한다.
 
-    현재 서비스 레이어 로직 기준:
-    - me 가 해당 class 의 담당 강사인지 검증
-      (나중에 학생 수강 여부(enrollments) 검증을 추가해서 학생도 조회 가능하게 확장 예정)
+    서비스 레이어 로직 기준:
+    - me 가 해당 class 의 담당 강사이거나,
+    - 해당 class 에 'active' 상태로 등록된 수강생(enrollment)인 경우에만 조회 가능.
+
+    실제 권한 검사는 service.user.agent_share.list_shared_agents_for_class 에서 처리한다.
     """
     agents = list_shared_agents_for_class(
         db=db,
@@ -90,7 +93,7 @@ def list_shared_agents_for_class_endpoint(
     "/agents/{agent_id}/fork",
     response_model=AIAgentResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="공유 에이전트를 내 에이전트로 복제",
+    summary="공유 에이전트를 내 에이전트로 복제(수강생 전용)",
     operation_id="fork_shared_agent_to_my_agent",
 )
 def fork_shared_agent_to_my_agent_endpoint(
@@ -103,6 +106,11 @@ def fork_shared_agent_to_my_agent_endpoint(
     - agent_id: 강사가 만든 원본 에이전트 ID
     - payload.class_id: 이 에이전트가 공유된 class_id
     - me: 현재 로그인한 학생/사용자
+
+    서비스 레이어 로직 기준:
+    - 해당 agent_id 가 payload.class_id 에 공유(is_active=true) 되어 있어야 하고,
+    - me 가 그 class 에 'active' 상태로 등록된 수강생(enrollment)이어야 포크 가능.
+      (service.user.agent.ensure_enrolled_in_class 에서 검증)
     """
     new_agent = fork_shared_agent_to_my_agent(
         db=db,
