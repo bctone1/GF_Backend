@@ -33,14 +33,20 @@ from schemas.user.practice import (
 # PracticeSession CRUD
 # =========================================================
 class PracticeSessionCRUD:
-    def create(self, db: Session, data: PracticeSessionCreate) -> PracticeSession:
-        # 엔드포인트에서 me.user_id로 채워진 상태여야 함
-        if data.user_id is None:
-            raise ValueError("PracticeSessionCreate.user_id must be set before create()")
-
+    def create(
+        self,
+        db: Session,
+        *,
+        data: PracticeSessionCreate,
+        user_id: int,
+    ) -> PracticeSession:
+        """
+        엔드포인트에서 me.user_id 를 user_id 인자로 넘겨주는 패턴으로 사용.
+        """
         obj = PracticeSession(
-            user_id=data.user_id,
+            user_id=user_id,
             class_id=data.class_id,
+            project_id=data.project_id,  # NEW: 프로젝트 연결
             title=data.title,
             notes=data.notes,
             # started_at, completed_at 은 DB 기본값/제약에 맡김
@@ -49,6 +55,7 @@ class PracticeSessionCRUD:
         db.flush()
         db.refresh(obj)
         return obj
+
 
     def get(self, db: Session, session_id: int) -> Optional[PracticeSession]:
         stmt = select(PracticeSession).where(PracticeSession.session_id == session_id)

@@ -161,7 +161,7 @@ def list_project_session_summaries_for_me(
     raw_list = user_project_crud.list_session_summaries(
         db,
         project_id=project.project_id,
-        owner_id=me.user_id,
+        user_id=me.user_id,
         skip=skip,
         limit=limit,
     )

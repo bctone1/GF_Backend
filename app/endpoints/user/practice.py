@@ -85,9 +85,15 @@ def create_practice_session(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    data_in = data.model_copy(update={"user_id": me.user_id})
-    session = practice_session_crud.create(db, data_in)
-    db.commit()
+    """
+    - body: class_id / project_id / title / notes (전부 optional)
+    - user_id 는 여기서 me.user_id 로 강제 주입
+    """
+    session = practice_session_crud.create(
+        db=db,
+        data=data,
+        user_id=me.user_id,
+    )
     return PracticeSessionResponse.model_validate(session)
 
 

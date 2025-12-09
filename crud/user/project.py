@@ -95,14 +95,14 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
         return db.execute(stmt).scalars().all()
 
     def list_session_summaries(
-        self,
-        db: Session,
-        *,
-        project_id: int,
-        owner_id: int,
-        skip: int = 0,
-        limit: int = 50,
-        preview_length: int = 80,
+            self,
+            db: Session,
+            *,
+            project_id: int,
+            user_id: int,  # owner_id → user_id 로 통일
+            skip: int = 0,
+            limit: int = 50,
+            preview_length: int = 80,
     ) -> List[Dict[str, Any]]:
         """
         특정 프로젝트에 속한 practice_session 들을 카드용 요약 형태로 조회.
@@ -154,7 +154,7 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
             )
             .where(
                 PracticeSession.project_id == project_id,
-                PracticeSession.owner_id == owner_id,
+                PracticeSession.user_id == user_id,  # ← 실제 컬럼 이름
             )
             .order_by(last_resp_subq.c.max_created_at.desc())
             .offset(skip)
