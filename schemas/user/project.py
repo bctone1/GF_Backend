@@ -61,7 +61,7 @@ class UserProjectResponse(ORMBase):
     last_activity_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-
+    conversation_count: int = 0
 
 # =========================================================
 # user.project_members

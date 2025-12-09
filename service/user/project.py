@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from core import config
 from models.user.account import AppUser
+from models.user.practice import PracticeSession
 from models.user.project import UserProject
 from crud.user.project import user_project_crud
 from schemas.user.project import (
@@ -104,6 +105,33 @@ def list_my_projects(
         skip=skip,
         limit=limit,
     )
+
+    # 세션 카운트 붙이기
+    if not items:
+        return items, total
+
+    project_ids = [p.project_id for p in items]
+
+    # project_id + user_id 기준으로 세션 수 집계
+    count_stmt = (
+        select(
+            PracticeSession.project_id,
+            func.count(PracticeSession.session_id).label("cnt"),
+        )
+        .where(
+            PracticeSession.user_id == me.user_id,
+            PracticeSession.project_id.in_(project_ids),
+        )
+        .group_by(PracticeSession.project_id)
+    )
+
+    rows = db.execute(count_stmt).all()
+    count_map = {project_id: cnt for project_id, cnt in rows}
+
+    # ORM 객체에 동적으로 conversation_count 속성 부여
+    for p in items:
+        setattr(p, "conversation_count", count_map.get(p.project_id, 0))
+
     return items, total
 
 
