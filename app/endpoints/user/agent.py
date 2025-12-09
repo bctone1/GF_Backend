@@ -10,6 +10,7 @@ from fastapi import (
     Query,
     status,
     HTTPException,
+    Body,
 )
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,7 @@ from schemas.user.agent import (
     AgentShareResponse,
     AgentPromptCreate,
     AgentPromptResponse,
+    AgentForkRequest,
 )
 from service.user.agent_share import (
     share_agent_to_class,
@@ -36,9 +38,11 @@ from service.user.agent import (
     update_my_agent,
     get_active_prompt_for_agent,
     upsert_prompt_for_agent,
+    fork_shared_agent_to_my_agent,
 )
 
 router = APIRouter()
+
 
 # =========================================
 # (강사용/추후 학생용) class 기준 공유 에이전트 목록
@@ -79,6 +83,35 @@ def list_shared_agents_for_class_endpoint(
     return agents
 
 
+# =========================================
+# 공유 에이전트 → 내 에이전트로 포크
+# =========================================
+@router.post(
+    "/agents/{agent_id}/fork",
+    response_model=AIAgentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="공유 에이전트를 내 에이전트로 복제",
+    operation_id="fork_shared_agent_to_my_agent",
+)
+def fork_shared_agent_to_my_agent_endpoint(
+    agent_id: int = Path(..., ge=1),
+    payload: AgentForkRequest = Body(...),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """
+    - agent_id: 강사가 만든 원본 에이전트 ID
+    - payload.class_id: 이 에이전트가 공유된 class_id
+    - me: 현재 로그인한 학생/사용자
+    """
+    new_agent = fork_shared_agent_to_my_agent(
+        db=db,
+        agent_id=agent_id,
+        class_id=payload.class_id,
+        me=me,
+        new_name=payload.name,
+    )
+    return new_agent
 
 
 # =========================================
@@ -102,6 +135,7 @@ def create_my_agent_endpoint(
     """
     agent = create_agent(db=db, me=me, data=body)
     return agent
+
 
 @router.put(
     "/agents/{agent_id}/prompt",
@@ -132,8 +166,6 @@ def upsert_prompt_for_agent_endpoint(
         data=body,
     )
     return prompt
-
-
 
 
 @router.get(
@@ -167,6 +199,8 @@ def list_my_agents_endpoint(
         project_id=project_id,
         q=q,
     )
+    # Page 스키마 구조(page/size vs limit/offset)에 맞게 이 부분은
+    # 정의한 Page에 맞춰서만 한번 더 점검하면 됨.
     return {
         "total": total,
         "items": agents,
@@ -223,7 +257,7 @@ def update_my_agent_endpoint(
 
 
 # =========================================
-# NEW: 프롬프트(AgentPrompt) 조회/저장
+# NEW: 프롬프트(AgentPrompt) 조회
 # =========================================
 @router.get(
     "/agents/{agent_id}/prompt",
@@ -251,7 +285,6 @@ def get_active_prompt_for_agent_endpoint(
             detail="활성화된 프롬프트가 아직 없어.",
         )
     return prompt
-
 
 
 # =========================================
@@ -334,6 +367,3 @@ def deactivate_agent_share_endpoint(
         me=me,
     )
     return share
-
-
-

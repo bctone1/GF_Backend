@@ -176,3 +176,17 @@ class AgentShareResponse(ORMBase):
     shared_by_user_id: int
     is_active: bool
     created_at: datetime
+
+# =========================================================
+# 공유 에이전트 → 내 에이전트 포크(복붙) 요청
+# =========================================================
+class AgentForkRequest(ORMBase):
+    """
+    공유된 강사 에이전트를 '내 에이전트'로 복제할 때 사용하는 입력 스키마.
+    - class_id: 이 에이전트가 공유된 강의 ID
+    - name: 내 에이전트로 복제할 때 사용할 이름 (없으면 서버에서 기본값 생성)
+    """
+    model_config = ConfigDict(from_attributes=False)
+
+    class_id: int
+    name: Optional[str] = None

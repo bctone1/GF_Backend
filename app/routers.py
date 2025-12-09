@@ -64,4 +64,4 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(user_document,     prefix="/user",                 tags=["user/document"])
     app.include_router(practice,          prefix="/user/practice",        tags=["user/practice"])
     app.include_router(agent,             prefix="",                      tags=["user/agent"])
-    app.include_router((project),         prefix="",                      tags=["project"])
+    app.include_router((project),         prefix="",                      tags=["user/project"])

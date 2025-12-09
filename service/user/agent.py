@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models.user.account import AppUser
-from models.user.agent import AIAgent, AgentPrompt
+from models.user.agent import AIAgent, AgentPrompt, AgentShare
 from schemas.user.agent import (
     AIAgentCreate,
     AIAgentUpdate,
@@ -194,3 +194,92 @@ def upsert_prompt_for_agent(
     db.commit()
     db.refresh(prompt)
     return prompt
+
+
+# =========================================
+# 공유 에이전트 → 내 에이전트로 포크
+# =========================================
+def fork_shared_agent_to_my_agent(
+    db: Session,
+    *,
+    agent_id: int,
+    class_id: int,
+    me: AppUser,
+    new_name: Optional[str] = None,
+) -> AIAgent:
+    """
+    특정 class 에 공유된 강사 에이전트를
+    현재 로그인 유저(me)의 '내 에이전트'로 복제.
+    """
+    # 1) 이 agent 가 해당 class 에 공유되어 있는지 + 활성인지 확인
+    share: Optional[AgentShare] = (
+        db.query(AgentShare)
+        .filter(
+            AgentShare.agent_id == agent_id,
+            AgentShare.class_id == class_id,
+            AgentShare.is_active.is_(True),
+        )
+        .first()
+    )
+    if share is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="해당 강의에 공유된 에이전트를 찾을 수 없어.",
+        )
+
+    # TODO: 나중에 me 가 이 class 의 수강생(enrollment)인지 검증 로직 추가
+
+    # 2) 원본 에이전트 조회 (소유자와 무관)
+    src_agent: Optional[AIAgent] = (
+        db.query(AIAgent)
+        .filter(AIAgent.agent_id == agent_id)
+        .first()
+    )
+    if src_agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="원본 에이전트를 찾을 수 없어.",
+        )
+
+    # 3) 원본 활성 시스템 프롬프트 조회
+    src_prompt: Optional[AgentPrompt] = (
+        db.query(AgentPrompt)
+        .filter(
+            AgentPrompt.agent_id == agent_id,
+            AgentPrompt.is_active.is_(True),
+        )
+        .order_by(AgentPrompt.version.desc())
+        .first()
+    )
+    if src_prompt is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="원본 에이전트에 활성 시스템 프롬프트가 없어.",
+        )
+
+    # 4) 새 에이전트 생성 (owner_id = me.user_id)
+    agent_in = AIAgentCreate(
+        name=new_name or f"{src_agent.name} - 내 버전",
+        role_description=src_agent.role_description,
+        status="active",
+        template_source="class_shared",  # 원본이 class 공유에서 왔다는 표시
+        project_id=None,
+        knowledge_id=src_agent.knowledge_id,
+    )
+    new_agent = ai_agent_crud.create(
+        db,
+        obj_in=agent_in,
+        owner_id=me.user_id,
+    )
+
+    # 5) 프롬프트 복제: 내 새 에이전트에 활성 버전으로 하나 생성
+    upsert_prompt_for_agent(
+        db=db,
+        me=me,
+        agent_id=new_agent.agent_id,
+        data=AgentPromptCreate(
+            system_prompt=src_prompt.system_prompt,
+        ),
+    )
+
+    return new_agent
