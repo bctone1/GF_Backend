@@ -58,12 +58,11 @@ def approve_partner_request(
 ) -> PartnerPromotionRequest:
     """
     파트너/강사 승격 요청 승인 서비스 로직.
-
     - pending 상태만 승인 가능
     - Org 결정 (요청에 org_id 있으면 사용, 없으면 org_name 기반 신규 생성)
     - Partner 엔터티 생성 (org_id + user_id)
     - user.users.partner_id 에 partner.id 세팅
-    - user.default_role 을 partner 계열로 변경(예: 'partner')
+    - user.default_role 을 'partner'
     """
     # 1) 요청 조회
     req = sup_core.get_promotion_request(db, request_id)
