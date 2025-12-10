@@ -8,6 +8,22 @@ from schemas.base import ORMBase
 
 
 # =========================================
+# 공통: 세션-모델 generation 옵션
+# =========================================
+class GenerationParams(ORMBase):
+    """
+    세션 모델별 LLM 생성 옵션.
+    - DB에서는 JSONB로 저장되고, API에서는 이 구조로 주고받음.
+    """
+    model_config = ConfigDict(from_attributes=False)
+
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    response_length_preset: Optional[str] = None  # "short" | "normal" | "long" | "custom" 등
+    max_tokens: Optional[int] = None
+
+
+# =========================================
 # user.practice_sessions
 # =========================================
 class PracticeSessionCreate(ORMBase):
@@ -58,6 +74,8 @@ class PracticeSessionModelCreate(ORMBase):
     session_id: int
     model_name: str
     is_primary: Optional[bool] = None  # server default false
+    # ★ 추가: 생성 옵션(없으면 서버에서 default 채움)
+    generation_params: Optional[GenerationParams] = None
 
 
 class PracticeSessionModelUpdate(ORMBase):
@@ -65,10 +83,12 @@ class PracticeSessionModelUpdate(ORMBase):
     세션 모델 설정 업데이트.
 
     - 모델 자체는 바꾸지 않고(is_primary만 수정)
+    - generation_params 는 옵션 변경용(PATCH /options 에서 사용 가능)
     """
     model_config = ConfigDict(from_attributes=False)
 
     is_primary: Optional[bool] = None
+    generation_params: Optional[GenerationParams] = None
 
 
 class PracticeSessionModelResponse(ORMBase):
@@ -78,6 +98,8 @@ class PracticeSessionModelResponse(ORMBase):
     session_id: int
     model_name: str
     is_primary: bool
+    # ★ 추가: 현재 세션-모델에 설정된 LLM 생성 옵션
+    generation_params: Optional[GenerationParams] = None
 
 
 # =========================================

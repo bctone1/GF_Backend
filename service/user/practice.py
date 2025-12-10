@@ -43,6 +43,29 @@ from schemas.user.practice import (
 
 
 # =========================================
+# 기본 generation params 헬퍼
+# =========================================
+def _get_default_generation_params() -> Dict[str, Any]:
+    """
+    시스템 전역 기본값(config.PRACTICE_DEFAULT_GENERATION)을
+    세션-모델 생성 시 복사해서 사용하는 헬퍼.
+    """
+    base = getattr(config, "PRACTICE_DEFAULT_GENERATION", None)
+    if isinstance(base, dict):
+        # dict()로 복사해서 원본이 수정되지 않도록 방지
+        return dict(base)
+
+    # config에 값이 없거나 잘못된 경우를 위한 안전한 fallback
+    return {
+        "temperature": 0.7,
+        "top_p": 0.9,
+        "response_length_preset": "normal",
+        "max_tokens": 512,
+    }
+
+
+
+# =========================================
 # 질문 → 벡터 임베딩 헬퍼
 # =========================================
 def _embed_question_to_vector(question: str) -> list[float]:
@@ -294,14 +317,24 @@ def resolve_models_for_class(
 def _call_llm_for_model(
     model_name: str,
     prompt_text: str,
+    generation_params: Dict[str, Any] | None = None,  # ★ 추가
 ) -> tuple[str, Dict[str, Any] | None, int | None]:
+    """
+    - config.PRACTICE_MODELS 에 정의된 provider/model 기본값을 읽고
+    - 세션-모델에 저장된 generation_params 로 덮어쓴 뒤
+    - 최종 temperature / top_p / max_tokens 를 결정해서 LLM 호출.
+    """
     practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
-    model_conf = practice_models.get(model_name)
+    model_conf = practice_models.get(model_name) or {}
 
     provider: str | None = None
     real_model_name: str = model_name
-    temperature: float = 0.7
+
+    # 1) 모델 카탈로그에서 기본값 로드
+    temperature: float | None = 0.7
+    top_p: float | None = 1.0
     max_tokens: int | None = None
+    response_length_preset: str | None = None
 
     if isinstance(model_conf, dict):
         if not model_conf.get("enabled", True):
@@ -309,19 +342,75 @@ def _call_llm_for_model(
 
         provider = model_conf.get("provider")
         real_model_name = model_conf.get("model_name", model_name)
-        temperature = model_conf.get("temperature", temperature)
-        max_tokens = model_conf.get("max_output_tokens") or model_conf.get("max_tokens")
+
+        # 모델 레벨 기본값
+        if "temperature" in model_conf:
+            temperature = model_conf.get("temperature")
+        if "top_p" in model_conf:
+            top_p = model_conf.get("top_p")
+        mt = model_conf.get("max_output_tokens") or model_conf.get("max_tokens")
+        if mt is not None:
+            max_tokens = mt
+
+    # 2) 시스템 전역 기본값(PRACTICE_DEFAULT_GENERATION)과 merge
+    default_gen = getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {}
+    # 기본 preset 이 있으면 가져오고, 없으면 normal 로 둠
+    response_length_preset = default_gen.get("response_length_preset", "normal")
+
+    base_params: Dict[str, Any] = {
+        "temperature": temperature,
+        "top_p": top_p,
+        "max_tokens": max_tokens,
+        "response_length_preset": response_length_preset,
+    }
+    # 시스템 기본값으로 덮어쓰기 (None 값 보완용)
+    for k, v in default_gen.items():
+        if v is not None:
+            base_params[k] = v
+
+    # 3) 세션-모델 generation_params 덮어쓰기
+    gp: Dict[str, Any] = {}
+    if isinstance(generation_params, dict):
+        gp = generation_params
+
+    effective: Dict[str, Any] = {**base_params, **gp}
+
+    # 4) 프리셋 ↔ max_tokens 동기화
+    length_presets: Dict[str, int] = getattr(config, "RESPONSE_LENGTH_PRESETS", {}) or {}
+
+    preset = effective.get("response_length_preset")
+    # max_tokens 가 아예 없는 경우, preset 기반으로 최소 하나는 채워준다.
+    if preset in length_presets and preset != "custom":
+        effective["max_tokens"] = length_presets[preset]
+    elif preset == "custom":
+        # custom 인데 max_tokens 가 없으면, 시스템 기본값 또는 모델 기본값 유지
+        if effective.get("max_tokens") is None:
+            # fallback: default_gen → 모델 conf → 하드코딩
+            if "max_tokens" in default_gen and default_gen["max_tokens"] is not None:
+                effective["max_tokens"] = default_gen["max_tokens"]
+    else:
+        # preset 이 없거나 이상한 값이면, max_tokens 값이 있으면 custom 으로 간주
+        if effective.get("max_tokens") is not None:
+            effective["response_length_preset"] = "custom"
+
+    # 5) 최종 값 꺼내기 (None 이면 fallback 한 번 더)
+    final_temperature = effective.get("temperature", 0.7)
+    final_top_p = effective.get("top_p", 1.0)
+    final_max_tokens = effective.get("max_tokens")
 
     messages = [
         {"role": "user", "content": prompt_text},
     ]
 
+    # call_llm_chat 이 top_p 를 지원한다면 인자로 넘기고,
+    # 아니라면 해당 부분 제거해야 함.
     llm_result = call_llm_chat(
         messages=messages,
         provider=provider,
         model=real_model_name,
-        temperature=temperature,
-        max_tokens=max_tokens,
+        temperature=final_temperature,
+        max_tokens=final_max_tokens,
+        top_p=final_top_p,  # ★ 여기서 top_p 전달 (call_llm_chat 시그니처 확인 필요)
     )
 
     return llm_result.text, llm_result.token_usage, llm_result.latency_ms
@@ -357,6 +446,7 @@ def create_session_with_first_turn(
             session_id=session.session_id,
             model_name=model_name,
             is_primary=True,
+            generation_params=_get_default_generation_params(),  # 기본값 세팅
         ),
     )
 
@@ -435,9 +525,11 @@ def run_practice_turn(
         else:
             full_prompt = prompt_text
 
+        # 세션-모델에 저장된 generation_params 를 함께 전달
         response_text, token_usage, latency_ms = _call_llm_for_model(
             model_name=m.model_name,
             prompt_text=full_prompt,
+            generation_params=getattr(m, "generation_params", None),
         )
 
         resp = practice_response_crud.create(
@@ -488,6 +580,7 @@ def run_practice_turn(
         prompt_text=prompt_text,
         results=results,
     )
+
 
 
 # =========================================
@@ -566,6 +659,7 @@ def _init_session_and_models_from_class(
                 session_id=session.session_id,
                 model_name=name,
                 is_primary=(idx == 0),
+                generation_params=_get_default_generation_params(),  # 기본값 세팅
             ),
         )
         created_models.append(m)
@@ -583,6 +677,7 @@ def _init_session_and_models_from_class(
         models = created_models
 
     return session, models
+
 
 
 def _select_models_for_existing_session(

@@ -1,7 +1,7 @@
 # models/user/practice.py
 from sqlalchemy import (
-    Column, BigInteger, Text, Integer, DateTime, Boolean,
-    ForeignKey, Index, text,
+    Column, BigInteger, Text, Integer, DateTime, Numeric, Boolean,
+    ForeignKey, UniqueConstraint, CheckConstraint, Index, text
 )
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -97,6 +97,13 @@ class PracticeSessionModel(Base):
     # provider 는 config.PRACTICE_MODELS 로 해석하니까 ORM에서는 제거
     is_primary = Column(Boolean, nullable=False, server_default=text("false"))
 
+    # LLM 생성 옵션
+    generation_params = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),  # 기존 row 케이스용
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -119,6 +126,7 @@ class PracticeSessionModel(Base):
         Index("idx_practice_session_models_session", "session_id"),
         {"schema": "user"},
     )
+
 
 
 # ========== user.practice_responses ==========

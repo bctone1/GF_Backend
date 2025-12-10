@@ -10,10 +10,12 @@ from fastapi import (
     Query,
     Path,
     status,
+    Body,
 )
 from sqlalchemy.orm import Session
 
 from core.deps import get_db, get_current_user
+from core import config
 from models.user.account import AppUser
 
 from crud.user.practice import (
@@ -35,6 +37,7 @@ from schemas.user.practice import (
     PracticeResponseResponse,
     PracticeTurnRequest,
     PracticeTurnResponse,
+    GenerationParams,
 )
 
 from service.user.practice import (
@@ -100,16 +103,6 @@ def create_practice_session(
 # =========================================
 # LLM /chat 엔드포인트
 # =========================================
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    Query,
-    Path,
-    status,
-    Body,
-)
-
 @router.post(
     "/sessions/{session_id}/chat",
     response_model=PracticeTurnResponse,
@@ -264,6 +257,81 @@ def create_practice_session_model(
     data_in = data.model_copy(update={"session_id": session_id})
     model = practice_session_model_crud.create(db, data_in)
     db.commit()
+    return PracticeSessionModelResponse.model_validate(model)
+
+# =========================================
+# Practice Session Models
+# =========================================
+@router.get(
+    "/sessions/{session_id}/models",
+    response_model=List[PracticeSessionModelResponse],
+    operation_id="user_list_practice_session_models",
+)
+def list_practice_session_models(
+    session_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = ensure_my_session(db, session_id, me)
+    models = practice_session_model_crud.list_by_session(db, session_id=session_id)
+    return [PracticeSessionModelResponse.model_validate(m) for m in models]
+
+
+@router.post(
+    "/sessions/{session_id}/models",
+    response_model=PracticeSessionModelResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="user_create_practice_session_model",
+    summary="세션에 모델 추가",
+)
+def create_practice_session_model(
+    session_id: int = Path(..., ge=1),
+    data: PracticeSessionModelCreate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = ensure_my_session(db, session_id, me)
+    data_in = data.model_copy(update={"session_id": session_id})
+    model = practice_session_model_crud.create(db, data_in)
+    db.commit()
+    return PracticeSessionModelResponse.model_validate(model)
+
+
+@router.patch(
+    "/models/{session_model_id}",
+    response_model=PracticeSessionModelResponse,
+    operation_id="user_update_practice_session_model",
+)
+def update_practice_session_model(
+    session_model_id: int = Path(..., ge=1),
+    data: PracticeSessionModelUpdate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    model, _session = ensure_my_session_model(db, session_model_id, me)
+
+    # 1) is_primary=True 인 경우: primary 토글 흐름
+    if data.is_primary is True:
+        target = set_primary_model_for_session(
+            db,
+            me=me,
+            session_id=model.session_id,
+            target_session_model_id=session_model_id,
+        )
+        return PracticeSessionModelResponse.model_validate(target)
+
+    # 2) is_primary=False 또는 안 온 경우: 일반 필드만 수정
+    update_data = data.model_dump(exclude_unset=True)
+    update_data.pop("is_primary", None)
+
+    if update_data:
+        model = practice_session_model_crud.update(
+            db,
+            session_model_id=session_model_id,
+            data=update_data,
+        )
+        db.commit()
+
     return PracticeSessionModelResponse.model_validate(model)
 
 @router.patch(
