@@ -1,6 +1,6 @@
 # service/supervisor/promotion.py
 from __future__ import annotations
-
+import logging
 from datetime import datetime, timezone
 from typing import Optional, Sequence
 
@@ -13,11 +13,12 @@ from models.partner.partner_core import Partner
 from crud.supervisor import core as sup_core
 from crud.partner import partner_core as partner_crud
 from crud.partner.partner_core import OrgConflict
-
+from service.email import send_email, EmailSendError
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
+logger = logging.getLogger(__name__)
 
 # ==============================
 # 조회 계열 (crud 위임)
@@ -174,6 +175,35 @@ def approve_partner_request(
     db.add(req)
     db.commit()
     db.refresh(req)
+
+    # 8) 승인 완료 후 이메일 발송 (실패해도 승인 롤백하지 않음)
+    try:
+        if user.email:
+            subject = "[GrowFit] 강사 승인이 완료되었습니다."
+            body = (
+                f"{full_name}님,\n\n"
+                "GrowFit 강사 신청이 승인되었습니다.\n"
+                "이제 강의를 개설하고 학생을 초대할 수 있어요.\n\n"
+                "로그인 후 강의 관리 화면에서 클래스를 만들어보세요.\n\n"
+                "- GrowFit 운영팀 드림"
+            )
+            send_email(
+                to_email=user.email,
+                subject=subject,
+                body=body,
+                is_html=False,
+            )
+    except EmailSendError:
+        # 이메일 때문에 비즈니스 로직을 깨뜨리면 안 되므로 로깅만
+        logger.exception(
+            "Failed to send partner approval email",
+            extra={
+                "promotion_request_id": request_id,
+                "user_id": user.user_id,
+                "partner_id": partner.id,
+            },
+        )
+
     return req
 
 

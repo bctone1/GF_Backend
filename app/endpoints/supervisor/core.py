@@ -75,7 +75,7 @@ def approve_partner_promotion_request(
     request_id: int,
     body: PromotionDecision,
     db: Session = Depends(get_db),
-    # me = Depends(require_supervisor_admin),
+
 ):
     """
     승격 요청 승인
