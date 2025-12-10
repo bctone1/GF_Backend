@@ -156,15 +156,15 @@ PRACTICE_MODELS = {
         "enabled": True,
         "default": False,
     },
+    "gemini-2.5-flash": {
+        "provider": "google",
+        "model_name": "gemini-2.5-flash",
+        "display_name": "Gemini 2.5 Flash",
+        "enabled": True,
+        "default": False,
+    },
 }
 
-    # "gemini-2.5-flash": {
-    #     "provider": "google",
-    #     "model_name": "gemini-2.5-flash",
-    #     "display_name": "Gemini 2.5 Flash",
-    #     "enabled": True,
-    #     "default": False,
-    # },
     # "exaone-4.0": {
     #     "provider": "lg",
     #     "model_name": "exaone-4.0",
