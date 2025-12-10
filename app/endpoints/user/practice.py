@@ -136,7 +136,7 @@ def run_practice_turn_endpoint(
     - session_id == 0: 새 세션 생성 + class LLM 설정 기반 모델 구성 후 첫 턴 실행
       (이때 project_id 가 있으면 해당 프로젝트에 세션을 묶음)
     - session_id > 0: 기존 세션/클래스 검증 + 세션에 등록된 모델 중 선택 실행
-    모델 : "gpt-4o-mini", "gpt-5-nano" , "gpt-3.5-turbo" , "claude-3-haiku-20240307" , "gemini-2.5-flash"
+        모델 : `gpt-4o-mini`, `gpt-5-nano` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
     """
     turn_result = run_practice_turn_for_session(
         db=db,

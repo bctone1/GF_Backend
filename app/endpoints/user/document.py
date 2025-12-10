@@ -173,7 +173,6 @@ def upload_document(
     return DocumentResponse.model_validate(doc)
 
 
-
 @router.get(
     "/document/{knowledge_id}",
     response_model=DocumentResponse,

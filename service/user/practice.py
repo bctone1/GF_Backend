@@ -317,7 +317,7 @@ def resolve_models_for_class(
 def _call_llm_for_model(
     model_name: str,
     prompt_text: str,
-    generation_params: Dict[str, Any] | None = None,  # ★ 추가
+    generation_params: Dict[str, Any] | None = None,
 ) -> tuple[str, Dict[str, Any] | None, int | None]:
     """
     - config.PRACTICE_MODELS 에 정의된 provider/model 기본값을 읽고
@@ -398,19 +398,42 @@ def _call_llm_for_model(
     final_top_p = effective.get("top_p", 1.0)
     final_max_tokens = effective.get("max_tokens")
 
-    messages = [
-        {"role": "user", "content": prompt_text},
-    ]
+    # ============================
+    # 6) Few-shot 예시 + 실제 질문
+    # ============================
+    messages: list[dict[str, str]] = []
 
-    # call_llm_chat 이 top_p 를 지원한다면 인자로 넘기고,
-    # 아니라면 해당 부분 제거해야 함.
+    # gp 안에 들어있는 few_shot_examples 사용
+    few_shot_raw = None
+    if isinstance(gp, dict):
+        few_shot_raw = gp.get("few_shot_examples")
+
+    if isinstance(few_shot_raw, list):
+        for ex in few_shot_raw:
+            # dict 형태 또는 Pydantic 객체 둘 다 허용
+            if isinstance(ex, dict):
+                input_text = (ex.get("input") or "").strip()
+                output_text = (ex.get("output") or "").strip()
+            else:
+                input_text = (getattr(ex, "input", "") or "").strip()
+                output_text = (getattr(ex, "output", "") or "").strip()
+
+            if input_text:
+                messages.append({"role": "user", "content": input_text})
+            if output_text:
+                messages.append({"role": "assistant", "content": output_text})
+
+    # 마지막에 실제 사용자 질문
+    messages.append({"role": "user", "content": prompt_text})
+
+    # call_llm_chat 이 top_p 를 지원한다면 인자로 넘기고, 아니라면 해당 부분 제거
     llm_result = call_llm_chat(
         messages=messages,
         provider=provider,
         model=real_model_name,
         temperature=final_temperature,
         max_tokens=final_max_tokens,
-        top_p=final_top_p,  # ★ 여기서 top_p 전달 (call_llm_chat 시그니처 확인 필요)
+        top_p=final_top_p,
     )
 
     return llm_result.text, llm_result.token_usage, llm_result.latency_ms
@@ -773,8 +796,7 @@ def run_practice_turn_for_session(
                     detail="요청한 project_id와 세션이 속한 project_id가 일치하지 않습니다.",
                 )
             # session.project_id 가 None 이고 project_id 가 온 경우
-            # 여기서 attach 해도 되고, 별도 API로만 수정해도 됨.
-            # 지금은 보수적으로 그대로 둔다.
+            # 여기서 attach 해도 되고, 별도 API로만 수정해도 됨. 지금은 보수적으로 그대로
 
     if not models:
         raise HTTPException(

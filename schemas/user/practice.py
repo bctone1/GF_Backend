@@ -1,3 +1,4 @@
+# schemas/user/practice.py
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Any, Dict, List
@@ -6,6 +7,20 @@ from pydantic import ConfigDict, Field
 
 from schemas.base import ORMBase
 
+
+# =========================================
+# 공통: Few-shot 예시
+# =========================================
+class FewShotExample(ORMBase):
+    """
+    Few-shot 예시 한 쌍(Q/A).
+    - generation_params JSONB 안에 배열로 들어감.
+    """
+    # from_attributes 필요 없으니까 False 로 둬도 되고,
+    model_config = ConfigDict(from_attributes=False)
+
+    input: str   # 예시 질문
+    output: str  # 예시 답변
 
 # =========================================
 # 공통: 세션-모델 generation 옵션
@@ -19,8 +34,10 @@ class GenerationParams(ORMBase):
 
     temperature: Optional[float] = None
     top_p: Optional[float] = None
-    response_length_preset: Optional[str] = None  # "short" | "normal" | "long" | "custom" 등
+    response_length_preset: Optional[str] = None  # "short" | "normal" | "long" | "custom"
     max_tokens: Optional[int] = None
+
+    few_shot_examples: Optional[List[FewShotExample]] = None
 
 
 # =========================================
