@@ -183,8 +183,8 @@ def _promote_user_to_partner_internal(
     partner_user = (
         db.query(PartnerUser)
         .filter(
-            PartnerUser.org_id == org.id,          # ★ 여기서 org_id 사용
-            PartnerUser.user_id == user.user_id,   # ★ AppUser.user_id 연결
+            PartnerUser.org_id == org.id,          # 여기서 org_id 사용
+            PartnerUser.user_id == user.user_id,
         )
         .order_by(PartnerUser.id)
         .first()
@@ -198,7 +198,7 @@ def _promote_user_to_partner_internal(
         )
         partner_user = PartnerUser(
             org_id=org.id,
-            user_id=user.user_id,          # ★ 네가 원하던 user_id 연결
+            user_id=user.user_id,
             full_name=full_name,
             email=user.email,
             role=partner_user_role or "partner",
