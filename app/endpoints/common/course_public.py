@@ -37,3 +37,32 @@ def list_public_courses(
         "page": page,
         "size": limit,
     }
+
+
+
+from pydantic import BaseModel
+import requests
+
+class SMSRequest(BaseModel):
+    to: str
+    message: str
+
+@router.post("/sms", summary="sms테스트")
+def send_sms(data: SMSRequest):
+
+    API_KEY = "8936a01db6367d0494a386c1b48a5977be6289db118465eb"
+
+    url = "https://api.smsmobileapi.com/sendsms/"
+    payload = {
+        "recipients": data.to,
+        "message": data.message,
+        "apikey": API_KEY
+    }
+
+    response = requests.post(url, data=payload)
+
+
+    try:
+        return response.json()
+    except:
+        return {"status": response.status_code, "response": response.text}
