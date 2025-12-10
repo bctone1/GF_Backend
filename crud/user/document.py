@@ -116,10 +116,7 @@ class DocumentCRUD:
         db.execute(stmt)
         db.flush()
 
-
 document_crud = DocumentCRUD()
-
-
 
 # =========================================================
 # Document Tags CRUD

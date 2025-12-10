@@ -15,6 +15,9 @@ UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", str(BASE_DIR / "file" / "upload"))
 # 2) 확장자
 DOCUMENT_EXTENSION = os.getenv("DOCUMENT_EXTENSION", ".txt,.pdf,.docx,.doc,.csv")
 IMAGE_EXTENSION = os.getenv("IMAGE_EXTENSION", ".png,.jpg")
+# 10메가 제한
+DOCUMENT_MAX_SIZE_MB = int(os.getenv("DOCUMENT_MAX_SIZE_MB", "10"))
+DOCUMENT_MAX_SIZE_BYTES = DOCUMENT_MAX_SIZE_MB * 1024 * 1024
 
 # 3) 키·토큰
 DEFAULT_API_KEY = os.getenv("DEFAULT_API_KEY")

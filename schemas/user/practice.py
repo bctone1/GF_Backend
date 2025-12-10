@@ -253,6 +253,9 @@ class PracticeTurnModelResult(ORMBase):
     created_at: datetime
     is_primary: Optional[bool] = None  # 필요 없으면 제거 가능
 
+    # 프론트에서 받게 이 턴에서 사용된 LLM 생성 파라미터 쏴주기
+    generation_params: Optional[GenerationParams] = None
+
 
 class PracticeTurnResponse(ORMBase):
     """

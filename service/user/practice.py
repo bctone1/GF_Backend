@@ -556,6 +556,7 @@ def run_practice_turn(
                 latency_ms=resp.latency_ms,
                 created_at=resp.created_at,
                 is_primary=m.is_primary,
+                generation_params=getattr(m, "generation_params", None),
             )
         )
 

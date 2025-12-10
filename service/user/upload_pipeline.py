@@ -62,6 +62,11 @@ class UploadPipeline:
         self.folder_rel = os.path.join(str(self.user_id), "document")
         self.base_dir = getattr(config, "UPLOAD_FOLDER", "./uploads")
 
+        self.max_file_size_bytes: int = getattr(
+            config,
+            "DOCUMENT_MAX_SIZE_BYTES",
+            10 * 1024 * 1024,
+        )
     # ---------------------------
     # 공용 유틸
     # ---------------------------
@@ -199,14 +204,14 @@ class UploadPipeline:
         - 무거운 파싱/임베딩은 아직 안 함
         """
         fpath, fname = self._save_file(file)
-        file_size = os.path.getsize(fpath)
+        file_size_bytes = os.path.getsize(fpath)
         file_format = file.content_type or "application/octet-stream"
 
         doc_in = DocumentCreate(
             owner_id=self.user_id,
             name=fname,
             file_format=file_format,
-            file_size_bytes=file_size,
+            file_size_bytes=file_size_bytes,
             folder_path=self.folder_rel,
             status="uploading",
             chunk_count=0,

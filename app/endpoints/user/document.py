@@ -16,7 +16,7 @@ from fastapi import (
 )
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-
+from core import config
 from core.deps import get_db, get_current_user
 from models.user.account import AppUser
 
@@ -139,22 +139,37 @@ def upload_document(
             detail="file required",
         )
 
-    # 1) 파일 저장 + Document row 생성 (status='uploading', progress=0)
+    # === 1) 파일 사이즈 체크 (10MB 제한) ===
+    max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
+
+    # SpooledTemporaryFile 기준: 끝으로 이동해서 크기 재고, 다시 처음으로 돌려놓기
+    file.file.seek(0, 2)     # 파일 끝으로
+    size = file.file.tell()  # 현재 위치 = 파일 크기
+    file.file.seek(0)        # 다시 처음으로
+
+    if size > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
+        )
+
+    # 2) 파일 저장 + Document row 생성 (status='uploading', progress=0)
     pipeline = UploadPipeline(db, user_id=me.user_id)
+    # 여기서 size를 같이 넘겨서 file_size_bytes로 쓰게 하면 좋음
     doc = pipeline.init_document(file)
 
-    # 2) 일단 여기까지 커밋해서 Document가 확정되도록 함
+    # 3) 일단 여기까지 커밋해서 Document가 확정되도록 함
     db.commit()
     db.refresh(doc)
 
-    # 3) 백그라운드에서 무거운 처리 실행
+    # 4) 백그라운드에서 무거운 처리 실행
     background_tasks.add_task(
         run_document_pipeline_background,
         me.user_id,
         doc.knowledge_id,
     )
 
-    # 4) 지금 시점의 Document 상태 반환 (uploading / 0%)
+    # 5) 지금 시점의 Document 상태 반환 (uploading / 0%)
     return DocumentResponse.model_validate(doc)
 
 
