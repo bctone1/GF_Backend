@@ -303,7 +303,6 @@ def update_org(db: Session, org_id: int, **fields) -> Optional[Organization]:
     db.commit()
     return row[0]
 
-
 def delete_org(db: Session, org_id: int) -> bool:
     res = db.execute(delete(Organization).where(Organization.organization_id == org_id))
     db.commit()
