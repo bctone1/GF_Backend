@@ -141,15 +141,45 @@ def call_llm_chat(
 
         client = OpenAIClient(api_key=key, base_url=base_url)
 
+        # --- 여기부터 파라미터 매핑 로직 ---
+        send_kwargs: Dict[str, Any] = dict(kwargs)
+
+        # gpt-5-nano 계열은 temperature / top_p 등 샘플링 파라미터 미지원
+        is_nano = False
+        if provider_name == "openai":
+            lm = resolved_model.lower()
+            if lm.startswith("gpt-5-nano"):
+                is_nano = True
+
+        if is_nano:
+            # nano는 샘플링 관련 옵션 안 보냄
+            for k in (
+                "temperature",
+                "top_p",
+                "frequency_penalty",
+                "presence_penalty",
+            ):
+                send_kwargs.pop(k, None)
+        else:
+            # nano가 아니면 temperature 기본값만 세팅 (kwargs에 없을 때)
+            if "temperature" not in send_kwargs:
+                send_kwargs["temperature"] = temperature
+
+        # max_tokens → OpenAI / Friendli 분기
+        if max_tokens is not None:
+            if provider_name == "openai":
+                send_kwargs["max_completion_tokens"] = max_tokens
+            else:
+                send_kwargs["max_tokens"] = max_tokens
+
         start = time.perf_counter()
         resp = client.chat.completions.create(
             model=resolved_model,
             messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
+            **send_kwargs,
         )
         latency_ms = int((time.perf_counter() - start) * 1000)
+
 
         text = ""
         if resp.choices:

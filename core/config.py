@@ -182,7 +182,7 @@ PRACTICE_DEFAULT_GENERATION = {
     "temperature": 0.7,
     "top_p": 0.9,
     "response_length_preset": "normal",
-    "max_tokens": 512,
+    "max_completion_tokens": 512,
 }
 
 RESPONSE_LENGTH_PRESETS = {
