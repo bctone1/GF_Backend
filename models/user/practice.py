@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from models.base import Base
+from models.user.document import Document
 
 
 # ========== user.practice_sessions ==========
@@ -34,6 +35,13 @@ class PracticeSession(Base):
         nullable=True,
     )
 
+    # NEW: 세션이 기본으로 사용할 지식베이스
+    knowledge_id = Column(
+        BigInteger,
+        ForeignKey("user.documents.knowledge_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     title = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
 
@@ -55,28 +63,33 @@ class PracticeSession(Base):
         back_populates="session",
         passive_deletes=True,
     )
-
     responses = relationship(
         "PracticeResponse",
         back_populates="session",
         passive_deletes=True,
     )
-
     comparisons = relationship(
         "ModelComparison",
         back_populates="session",
         passive_deletes=True,
     )
 
-    # 프로젝트와의 관계
+    # (선택) Document 모델과의 관계
+    # knowledge = relationship(
+    #     "Document",
+    #     back_populates="practice_sessions",
+    #     passive_deletes=True,
+    # )
+
     project = relationship(
         "UserProject",
-        back_populates="sessions",  # UserProject.sessions 가 있어야 함
+        back_populates="sessions",
         passive_deletes=True,
     )
 
     __table_args__ = (
         Index("idx_practice_sessions_user", "user_id"),
+        Index("idx_practice_sessions_knowledge", "knowledge_id"),
         {"schema": "user"},
     )
 

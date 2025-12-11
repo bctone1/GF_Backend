@@ -89,7 +89,7 @@ def create_practice_session(
     me: AppUser = Depends(get_current_user),
 ):
     """
-    - body: class_id / project_id / title / notes (전부 optional)
+    - body: class_id / project_id / knowledge_id / title / notes (전부 optional)
     - user_id 는 여기서 me.user_id 로 강제 주입
     """
     session = practice_session_crud.create(
@@ -124,8 +124,10 @@ def run_practice_turn_endpoint(
     project_id: int | None = Query(
         None,
         ge=1,
-        description="이 연습 세션이 속한 Project ID (user.projects.project_id). "
-                    "session_id == 0 인 새 세션 생성 시에만 사용.",
+        description=(
+            "이 연습 세션이 속한 Project ID (user.projects.project_id). "
+            "session_id == 0 인 새 세션 생성 시에만 사용."
+        ),
     ),
     body: PracticeTurnRequest = Body(...),
     db: Session = Depends(get_db),
@@ -135,8 +137,10 @@ def run_practice_turn_endpoint(
     멀티 LLM 실습 턴 실행:
     - session_id == 0: 새 세션 생성 + class LLM 설정 기반 모델 구성 후 첫 턴 실행
       (이때 project_id 가 있으면 해당 프로젝트에 세션을 묶음)
+      (body.knowledge_id 가 있으면 세션의 기본 지식베이스로 저장)
     - session_id > 0: 기존 세션/클래스 검증 + 세션에 등록된 모델 중 선택 실행
         모델 : `gpt-4o-mini`, `gpt-5-nano` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
+      (body.knowledge_id 가 있으면 이번 턴에서 사용할 지식베이스를 변경/설정)
     """
     turn_result = run_practice_turn_for_session(
         db=db,
@@ -148,7 +152,6 @@ def run_practice_turn_endpoint(
     )
     db.commit()
     return turn_result
-
 
 
 @router.get(
@@ -178,6 +181,8 @@ def get_practice_session(
         user_id=session.user_id,
         class_id=session.class_id,
         project_id=session.project_id,
+        # NEW: 세션에 연결된 지식베이스도 응답에 포함
+        knowledge_id=getattr(session, "knowledge_id", None),
         title=session.title,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -190,7 +195,7 @@ def get_practice_session(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="update_practice_session",
-    summary="세션 제목 수정"
+    summary="세션 제목/메타 수정"
 )
 def update_practice_session(
     session_id: int = Path(..., ge=1),
@@ -198,6 +203,9 @@ def update_practice_session(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    - body: class_id / project_id / knowledge_id / title / notes 중 일부만 PATCH
+    """
     _ = ensure_my_session(db, session_id, me)
     updated = practice_session_crud.update(db, session_id=session_id, data=data)
     db.commit()
@@ -362,7 +370,6 @@ def create_practice_response(
     resp = practice_response_crud.create(db, data_in)
     db.commit()
     return PracticeResponseResponse.model_validate(resp)
-
 
 
 @router.get(

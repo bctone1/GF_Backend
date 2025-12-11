@@ -48,6 +48,8 @@ class PracticeSessionCreate(ORMBase):
 
     class_id: Optional[int] = None          # 어떤 class 에서 시작된 실습인지 연결용
     project_id: Optional[int] = None        # 어떤 프로젝트(폴더)에 속한 세션인지
+    # NEW: 이 세션의 기본 지식베이스
+    knowledge_id: Optional[int] = None      # user.documents.knowledge_id
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -57,6 +59,8 @@ class PracticeSessionUpdate(ORMBase):
 
     class_id: Optional[int] = None
     project_id: Optional[int] = None        # 프로젝트 이동/해제할 때 사용 가능
+    # NEW: 지식베이스 변경/해제
+    knowledge_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -68,6 +72,9 @@ class PracticeSessionResponse(ORMBase):
     user_id: int
     class_id: Optional[int] = None
     project_id: Optional[int] = None
+
+    # NEW: 세션에 연결된 지식베이스
+    knowledge_id: Optional[int] = None
 
     title: Optional[str] = None
     created_at: datetime
@@ -241,6 +248,8 @@ class PracticeTurnRequest(ORMBase):
         * 새 세션 시작 시, 특정 모델들만 선택해서 돌리고 싶을 때
     - document_ids:
         * 선택한 문서들 (RAG 컨텍스트로 사용할 문서 id 리스트)
+    - knowledge_id:
+        * 이 턴에서 사용할 기본 지식베이스 (없으면 세션에 저장된 값 사용)
     """
     model_config = ConfigDict(from_attributes=False)
 
@@ -249,7 +258,9 @@ class PracticeTurnRequest(ORMBase):
         None,
         description="이 세션에서 호출할 논리 모델 이름 목록 (예: ['gpt-4o-mini', 'gpt-5-nano'])",
     )
-    document_ids: Optional[list[int]] = None  # 내가 선택한 문서들
+    document_ids: Optional[list[int]] = None  # 세부 문서 리스트
+    knowledge_id: Optional[int] = None        # 기본 지식베이스(세션 기본값 override 용)
+
 
 
 class PracticeTurnModelResult(ORMBase):

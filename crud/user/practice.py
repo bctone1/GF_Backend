@@ -40,10 +40,15 @@ class PracticeSessionCRUD:
         data: PracticeSessionCreate,
         user_id: int,
     ) -> PracticeSession:
+        """
+        새 PracticeSession 생성.
+        - knowledge_id 포함해서 세션 레벨 기본 지식베이스 저장
+        """
         obj = PracticeSession(
             user_id=user_id,
             class_id=data.class_id,
             project_id=data.project_id,
+            knowledge_id=data.knowledge_id,  # NEW
             title=data.title,
             notes=data.notes,
         )
@@ -51,7 +56,6 @@ class PracticeSessionCRUD:
         db.flush()
         db.refresh(obj)
         return obj
-
 
     def get(self, db: Session, session_id: int) -> Optional[PracticeSession]:
         stmt = select(PracticeSession).where(PracticeSession.session_id == session_id)
@@ -79,13 +83,16 @@ class PracticeSessionCRUD:
         rows = db.scalars(stmt).all()
         return rows, total
 
-
     def update(
         self,
         db: Session,
         session_id: int,
         data: PracticeSessionUpdate,
     ) -> Optional[PracticeSession]:
+        """
+        PracticeSession 업데이트.
+        - class_id / project_id / knowledge_id / title / notes 등 일부 필드만 변경
+        """
         values = {
             k: v
             for k, v in data.model_dump(exclude_unset=True).items()
@@ -105,10 +112,14 @@ class PracticeSessionCRUD:
     def delete(
         self,
         db: Session,
-        session_model_id: int,
+        session_id: int,
     ) -> None:
-        stmt = delete(PracticeSessionModel).where(
-            PracticeSessionModel.session_model_id == session_model_id
+        """
+        PracticeSession 삭제.
+        - ondelete='CASCADE' 로 걸린 PracticeResponse 등은 DB 레벨에서 함께 삭제.
+        """
+        stmt = delete(PracticeSession).where(
+            PracticeSession.session_id == session_id
         )
         db.execute(stmt)
         db.flush()
@@ -126,10 +137,22 @@ class PracticeSessionModelCRUD:
         db: Session,
         data: PracticeSessionModelCreate,
     ) -> PracticeSessionModel:
+        """
+        세션에 모델 추가.
+        - generation_params 를 JSON(dict) 로 저장
+        """
+        if data.generation_params is not None:
+            gen_params: dict[str, Any] = data.generation_params.model_dump(
+                exclude_unset=True
+            )
+        else:
+            gen_params = {}  # DB default '{}' 와 동일한 의미
+
         obj = PracticeSessionModel(
             session_id=data.session_id,
             model_name=data.model_name,
             is_primary=data.is_primary if data.is_primary is not None else False,
+            generation_params=gen_params,
         )
         db.add(obj)
         db.flush()
@@ -193,7 +216,8 @@ class PracticeSessionModelCRUD:
             setattr(obj, k, v)
 
         db.add(obj)
-        db.commit()
+        # 여기서는 commit 이 아니라 상위 레벨에서 commit 처리 (엔드포인트/서비스)
+        db.flush()
         db.refresh(obj)
         return obj
 
