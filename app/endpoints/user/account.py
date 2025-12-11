@@ -159,6 +159,30 @@ def list_my_classes(
         size=limit,
     )
 
+# ==============================
+# Me: 내 수강 삭제(수강 취소)
+# ==============================
+@router.delete(
+    "/class/enrollments/{enrollment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="내 수강 삭제(수강 취소)",
+)
+def delete_my_enrollment(
+    enrollment_id: int,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    ok = user_crud.delete_enrollment_for_user(
+        db,
+        enrollment_id=enrollment_id,
+        user_id=me.user_id,
+    )
+    if not ok:
+        # 내 수강이 아니거나 존재하지 않으면 404
+        raise HTTPException(status_code=404, detail="enrollment not found")
+    return None
+
+
 
 # ==============================
 # Auth: 이메일 코드 발송 / 인증
@@ -476,4 +500,5 @@ def redeem_invite_code(
         raw_code=payload.code,
     )
     return EnrollmentResponse.model_validate(enrollment)
+
 

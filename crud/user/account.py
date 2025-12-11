@@ -14,6 +14,7 @@ from models.user.account import (
     UserLoginSession,
     UserPrivacySetting,
 )
+from models.partner.student import Student, Enrollment
 
 
 # =============================================================================
@@ -425,3 +426,52 @@ def delete_privacy_setting(
         return
     db.delete(obj)
     db.commit()
+
+# =============================================================================
+# Student / Enrollment helpers (for "내 강의" 관리)
+# =============================================================================
+def get_enrollment_for_user(
+    db: Session,
+    *,
+    enrollment_id: int,
+    user_id: int,
+) -> Optional[Enrollment]:
+    """
+    특정 enrollment_id 가 현재 유저(user_id)의 수강인지 검증하며 조회.
+    - Enrollment.id 로 찾되, Student.user_id 가 일치하는 경우에만 반환.
+    """
+    stmt: Select[Enrollment] = (
+        select(Enrollment)
+        .join(Student, Student.id == Enrollment.student_id)
+        .where(
+            Enrollment.id == enrollment_id,
+            Student.user_id == user_id,
+        )
+    )
+    return db.execute(stmt).scalars().first()
+
+
+def delete_enrollment_for_user(
+    db: Session,
+    *,
+    enrollment_id: int,
+    user_id: int,
+) -> bool:
+    """
+    현재 유저 소유의 수강(enrollment)만 삭제.
+    - 소유권이 확인되지 않으면 False 반환
+    - 성공적으로 삭제되면 True 반환
+    - 현재는 hard delete (실제 row 삭제)
+      → 소프트 삭제로 바꾸고 싶으면 여기서 status 업데이트로 변경하면 됨.
+    """
+    enr = get_enrollment_for_user(
+        db,
+        enrollment_id=enrollment_id,
+        user_id=user_id,
+    )
+    if enr is None:
+        return False
+
+    db.delete(enr)
+    db.commit()
+    return True
