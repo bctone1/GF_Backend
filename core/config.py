@@ -61,7 +61,7 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 CHROMA_PERSIST_DIRECTORY = os.getenv("CHROMA_PERSIST_DIRECTORY", "./chroma_db")
 
 # 8) 모델 카탈로그
-OPENAI_MODELS = os.getenv("OPENAI_MODELS", "gpt-4,gpt-4o,gpt-4-turbo")
+OPENAI_MODELS = os.getenv("OPENAI_MODELS", "gpt-4o-mini,gpt-5-mini,gpt-3.5-turbo")
 CLAUDE_MODELS = os.getenv("CLAUDE_MODELS", "")
 ANTHROPIC_MODELS = os.getenv("ANTHROPIC_MODELS", "")
 GOOGLE_MODELS = os.getenv("GOOGLE_MODELS", "")
@@ -116,7 +116,7 @@ ENABLE_API_USAGE_LOG = False  # 기본은 로그 비활성화
 # CLOVA STT 과금 규칙
 CLOVA_STT_BILLING_UNIT_SECONDS = 6   # 6초 단위 과금
 CLOVA_STT_PRICE_PER_UNIT_KRW = 1.6      # 15초당 4원
-FX_KRW_PER_USD = 1400                 # 원→달러 환산. 미사용 시 None
+FX_KRW_PER_USD = 1450                 # 원→달러 환산. 미사용 시 None
 
 DEFAULT_ORGANIZATION_ID = "1"
 

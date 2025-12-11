@@ -28,6 +28,10 @@ def ensure_my_project(
     project_id: int,
     me: AppUser,
 ) -> UserProject:
+    """
+    단순 존재/권한 체크용.
+    (집계 통계는 안 붙이고, update/delete 등에서 사용)
+    """
     project = user_project_crud.get(db, id=project_id)
     if not project or project.owner_id != me.user_id:
         raise HTTPException(
@@ -70,12 +74,13 @@ def create_project_for_me(
     *,
     me: AppUser,
     obj_in: UserProjectCreate,
-) -> UserProject:
-    return user_project_crud.create(
+) -> UserProjectResponse:
+    project = user_project_crud.create(
         db,
         obj_in=obj_in,
         owner_id=me.user_id,
     )
+    return UserProjectResponse.model_validate(project)
 
 
 def list_my_projects(
@@ -85,20 +90,21 @@ def list_my_projects(
     class_id: Optional[int] = None,
     skip: int = 0,
     limit: int = 20,
-) -> tuple[List[UserProject], int]:
+) -> tuple[List[UserProjectResponse], int]:
     """
     내 프로젝트 목록 + total 개수 반환 (Page 응답용).
+    - 목록은 user_project_crud.get_multi_by_owner 사용
+    - conversation_count 는 프로젝트별 세션 수로 계산해서 동적으로 붙여줌
     """
-    base = select(UserProject).where(UserProject.owner_id == me.user_id)
-    if class_id is not None:
-        base = base.where(UserProject.class_id == class_id)
-
     # total
-    count_stmt = select(func.count()).select_from(base.subquery())
-    total = db.execute(count_stmt).scalar_one()
+    total = user_project_crud.count_by_owner(
+        db,
+        owner_id=me.user_id,
+        class_id=class_id,
+    )
 
     # items
-    items = user_project_crud.get_multi_by_owner(
+    items_orm = user_project_crud.get_multi_by_owner(
         db,
         owner_id=me.user_id,
         class_id=class_id,
@@ -106,13 +112,12 @@ def list_my_projects(
         limit=limit,
     )
 
-    # 세션 카운트 붙이기
-    if not items:
-        return items, total
+    if not items_orm:
+        return [], total
 
-    project_ids = [p.project_id for p in items]
+    project_ids = [p.project_id for p in items_orm]
 
-    # project_id + user_id 기준으로 세션 수 집계
+    # project_id + user_id 기준으로 "세션 수" 집계
     count_stmt = (
         select(
             PracticeSession.project_id,
@@ -124,14 +129,14 @@ def list_my_projects(
         )
         .group_by(PracticeSession.project_id)
     )
-
     rows = db.execute(count_stmt).all()
     count_map = {project_id: cnt for project_id, cnt in rows}
 
     # ORM 객체에 동적으로 conversation_count 속성 부여
-    for p in items:
+    for p in items_orm:
         setattr(p, "conversation_count", count_map.get(p.project_id, 0))
 
+    items = [UserProjectResponse.model_validate(p) for p in items_orm]
     return items, total
 
 
@@ -140,8 +145,22 @@ def get_my_project(
     *,
     project_id: int,
     me: AppUser,
-) -> UserProject:
-    return ensure_my_project(db, project_id, me)
+) -> UserProjectResponse:
+    """
+    단건 조회 시 집계 통계(conversation_count, last_activity_at) 포함해서 리턴.
+    - 패턴 A: 조회 시점에 PracticeResponse 기준으로 집계해서 붙임.
+    """
+    project = user_project_crud.get_with_stats_for_owner(
+        db,
+        project_id=project_id,
+        owner_id=me.user_id,
+    )
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="프로젝트를 찾을 수 없습니다.",
+        )
+    return UserProjectResponse.model_validate(project)
 
 
 def update_my_project(
@@ -150,10 +169,10 @@ def update_my_project(
     project_id: int,
     me: AppUser,
     obj_in: UserProjectUpdate,
-) -> UserProject:
+) -> UserProjectResponse:
     project = ensure_my_project(db, project_id, me)
     project = user_project_crud.update(db, db_obj=project, obj_in=obj_in)
-    return project
+    return UserProjectResponse.model_validate(project)
 
 
 def delete_my_project(
@@ -165,7 +184,6 @@ def delete_my_project(
     project = ensure_my_project(db, project_id, me)
     user_project_crud.remove(db, id=project.project_id)
     db.commit()
-
 
 
 # =========================================

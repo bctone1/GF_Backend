@@ -2,7 +2,7 @@
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func
 
 from crud.base import CRUDBase
 from models.user.project import (
@@ -75,10 +75,7 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
         """
         내 프로젝트 목록 조회 (옵션: 특정 class 안의 프로젝트만).
         """
-        stmt = (
-            select(self.model)
-            .where(self.model.owner_id == owner_id)
-        )
+        stmt = select(self.model).where(self.model.owner_id == owner_id)
 
         if class_id is not None:
             stmt = stmt.where(self.model.class_id == class_id)
@@ -94,15 +91,33 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
 
         return db.execute(stmt).scalars().all()
 
+    def count_by_owner(
+        self,
+        db: Session,
+        *,
+        owner_id: int,
+        class_id: Optional[int] = None,
+    ) -> int:
+        """
+        내 프로젝트 개수 카운트 (페이징 total 용).
+        """
+        stmt = select(func.count()).select_from(self.model).where(
+            self.model.owner_id == owner_id
+        )
+        if class_id is not None:
+            stmt = stmt.where(self.model.class_id == class_id)
+
+        return db.execute(stmt).scalar_one()
+
     def list_session_summaries(
-            self,
-            db: Session,
-            *,
-            project_id: int,
-            user_id: int,  # owner_id → user_id 로 통일
-            skip: int = 0,
-            limit: int = 50,
-            preview_length: int = 80,
+        self,
+        db: Session,
+        *,
+        project_id: int,
+        user_id: int,  # owner_id → user_id 로 통일
+        skip: int = 0,
+        limit: int = 50,
+        preview_length: int = 80,
     ) -> List[Dict[str, Any]]:
         """
         특정 프로젝트에 속한 practice_session 들을 카드용 요약 형태로 조회.
@@ -154,7 +169,7 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
             )
             .where(
                 PracticeSession.project_id == project_id,
-                PracticeSession.user_id == user_id,  # ← 실제 컬럼 이름
+                PracticeSession.user_id == user_id,  # 실제 컬럼 이름 기준
             )
             .order_by(last_resp_subq.c.max_created_at.desc())
             .offset(skip)
@@ -176,6 +191,60 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
             for r in rows
         ]
 
+    def get_with_stats_for_owner(
+        self,
+        db: Session,
+        *,
+        project_id: int,
+        owner_id: int,
+    ) -> Optional[UserProject]:
+        """
+        단일 프로젝트 + 집계 통계(conversation_count, last_activity_at) 함께 조회.
+        """
+        stats_subq = (
+            select(
+                PracticeSession.project_id.label("project_id"),
+                func.count(PracticeResponse.response_id).label("conversation_count"),
+                func.max(PracticeResponse.created_at).label("last_activity_at"),
+            )
+            .join(
+                PracticeResponse,
+                PracticeResponse.session_id == PracticeSession.session_id,
+            )
+            .where(PracticeSession.project_id == project_id)
+            .group_by(PracticeSession.project_id)
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                self.model,
+                func.coalesce(stats_subq.c.conversation_count, 0).label("conv_cnt"),
+                stats_subq.c.last_activity_at.label("last_act"),
+            )
+            .outerjoin(
+                stats_subq,
+                stats_subq.c.project_id == self.model.project_id,
+            )
+            .where(
+                self.model.project_id == project_id,
+                self.model.owner_id == owner_id,
+            )
+        )
+
+        row = db.execute(stmt).first()
+        if not row:
+            return None
+
+        project: UserProject = row[0]
+        conv_cnt = row.conv_cnt or 0
+        last_act = row.last_act
+
+        # 조회용 덮어쓰기
+        project.conversation_count = conv_cnt
+        project.last_activity_at = last_act
+        return project
+
     # 프로젝트 삭제
     def remove(self, db: Session, *, id: int) -> None:
         """
@@ -188,6 +257,7 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
 
         db.delete(obj)
         db.flush()
+
 
 user_project_crud = CRUDUserProject(UserProject)
 
