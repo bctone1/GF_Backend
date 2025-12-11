@@ -138,10 +138,10 @@ PRACTICE_MODELS = {
         "enabled": True,
         "default": True,
     },
-    "gpt-5-nano": {
+    "gpt-5-mini": {
         "provider": "openai",
-        "model_name": "gpt-5-nano",
-        "display_name": "GPT-5 nano",
+        "model_name": "gpt-5-mini",
+        "display_name": "GPT-5 mini",
         "enabled": True,
         "default": False,
     },

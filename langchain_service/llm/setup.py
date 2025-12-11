@@ -141,49 +141,48 @@ def call_llm_chat(
 
         client = OpenAIClient(api_key=key, base_url=base_url)
 
-        # --- 여기부터 파라미터 매핑 로직 ---
-        send_kwargs: Dict[str, Any] = dict(kwargs)
+        # --- 파라미터 매핑 ---
+        base_kwargs: Dict[str, Any] = dict(kwargs)
 
-        # gpt-5-nano 계열은 temperature / top_p 등 샘플링 파라미터 미지원
-        is_nano = False
-        if provider_name == "openai":
-            lm = resolved_model.lower()
-            if lm.startswith("gpt-5-nano"):
-                is_nano = True
+        lm = resolved_model.lower()
+        # GPT-5 계열: temperature/top_p/penalty 옵션 미지원 → 전부 제거
+        # (gpt-5, gpt-5-mini 등)
+        is_gpt5_family = provider_name == "openai" and lm.startswith("gpt-5")
 
-        if is_nano:
-            # nano는 샘플링 관련 옵션 안 보냄
+        if is_gpt5_family:
+            # 혹시 프론트/서버에서 넘긴 값이 있으면 싹 제거
             for k in (
                 "temperature",
                 "top_p",
                 "frequency_penalty",
                 "presence_penalty",
             ):
-                send_kwargs.pop(k, None)
+                base_kwargs.pop(k, None)
         else:
-            # nano가 아니면 temperature 기본값만 세팅 (kwargs에 없을 때)
-            if "temperature" not in send_kwargs:
-                send_kwargs["temperature"] = temperature
+            # gpt-4 / gpt-4o / gpt-4o-mini 등은 기존처럼 temperature 사용
+            if "temperature" not in base_kwargs and temperature is not None:
+                base_kwargs["temperature"] = temperature
 
         # max_tokens → OpenAI / Friendli 분기
         if max_tokens is not None:
             if provider_name == "openai":
-                send_kwargs["max_completion_tokens"] = max_tokens
+                # OpenAI chat.completions는 max_completion_tokens 사용
+                base_kwargs["max_completion_tokens"] = max_tokens
             else:
-                send_kwargs["max_tokens"] = max_tokens
+                # Friendli(OpenAI 호환)는 여전히 max_tokens 사용
+                base_kwargs["max_tokens"] = max_tokens
 
+        # 실제 호출
         start = time.perf_counter()
         resp = client.chat.completions.create(
             model=resolved_model,
             messages=messages,
-            **send_kwargs,
+            **base_kwargs,
         )
         latency_ms = int((time.perf_counter() - start) * 1000)
 
-
         text = ""
         if resp.choices:
-            # openai>=1.x: resp.choices[0].message.content 가 str 또는 list일 수 있음
             msg_content = resp.choices[0].message.content
             if isinstance(msg_content, str):
                 text = msg_content
@@ -197,8 +196,6 @@ def call_llm_chat(
         usage_obj = getattr(resp, "usage", None)
         token_usage: Optional[Dict[str, Any]] = None
         if usage_obj is not None:
-            # openai: prompt_tokens / completion_tokens / total_tokens
-            # 일부 호환 구현체는 input_tokens/output_tokens 로만 줄 수도 있어서 보완
             prompt_tokens = getattr(usage_obj, "prompt_tokens", None) or getattr(
                 usage_obj, "input_tokens", None
             )
@@ -222,7 +219,6 @@ def call_llm_chat(
         )
 
     # ------------------------- 기타(provider별 세부 usage 미지원) -------------------------
-    # 일단 LangChain LLM으로 fallback (token_usage는 None)
     start = time.perf_counter()
     llm = get_llm(
         provider=provider,
@@ -251,6 +247,7 @@ def call_llm_chat(
         latency_ms=latency_ms,
         raw=res,
     )
+
 
 
 # =========================================================
