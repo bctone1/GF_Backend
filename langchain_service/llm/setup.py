@@ -161,9 +161,66 @@ def _extract_text_from_openai_chat(resp: Any, model_name: str) -> str:
             _collect_text(resp_dict, collected)
 
     text = "\n".join(collected).strip()
-
-    # 마지막까지도 없으면 그냥 빈 문자열 리턴 (str(message)로 어설프게 캐스팅하지 않음)
     return text
+
+
+def _extract_text_from_response(resp: Any) -> str:
+    """
+    Responses API 응답(Response 객체)에서 텍스트만 추출.
+    - resp.output[*].content[*].text.value 형태를 최대한 따라가서 수집
+    """
+
+    def _collect_text(obj: Any, buf: List[str], depth: int = 0, max_depth: int = 8) -> None:
+        if obj is None or depth > max_depth:
+            return
+
+        # 문자열
+        if isinstance(obj, str):
+            s = obj.strip()
+            if s:
+                buf.append(s)
+            return
+
+        # list/tuple
+        if isinstance(obj, (list, tuple)):
+            for item in obj:
+                _collect_text(item, buf, depth + 1, max_depth)
+            return
+
+        # dict
+        if isinstance(obj, dict):
+            # Responses 구조에서 자주 나오는 키들 우선
+            for key in ("text", "value", "content", "output_text"):
+                if key in obj:
+                    _collect_text(obj[key], buf, depth + 1, max_depth)
+            # 그 외 나머지도 한 번 쭉 훑기
+            for v in obj.values():
+                _collect_text(v, buf, depth + 1, max_depth)
+            return
+
+        # SDK 객체류: text / value / content / output_text 속성 재귀 탐색
+        for attr in ("text", "value", "content", "output_text"):
+            if hasattr(obj, attr):
+                try:
+                    val = getattr(obj, attr)
+                except Exception:
+                    continue
+                _collect_text(val, buf, depth + 1, max_depth)
+
+    collected: List[str] = []
+
+    # 보통 resp.output 이 리스트
+    outputs = getattr(resp, "output", None)
+    if outputs is None:
+        outputs = getattr(resp, "outputs", None)
+
+    if outputs is not None:
+        _collect_text(outputs, collected)
+    else:
+        # 그래도 없으면 resp 전체에서 한 번 시도
+        _collect_text(resp, collected)
+
+    return "\n".join(collected).strip()
 
 
 # =========================================================
@@ -231,8 +288,7 @@ def call_llm_chat(
         base_kwargs: Dict[str, Any] = dict(kwargs)
 
         lm = resolved_model.lower()
-        # GPT-5 계열: temperature/top_p/penalty 옵션 미지원 → 전부 제거
-        # (gpt-5, gpt-5-mini 등)
+        # GPT-5 계열: temperature/top_p/penalty 옵션 미지원 → 제거
         is_gpt5_family = provider_name == "openai" and lm.startswith("gpt-5")
 
         if is_gpt5_family:
@@ -242,14 +298,51 @@ def call_llm_chat(
             if "temperature" not in base_kwargs and temperature is not None:
                 base_kwargs["temperature"] = temperature
 
-        # max_tokens → OpenAI / Friendli 분기
+        # max_tokens 매핑 (OpenAI vs Friendli, GPT-5 Responses 고려)
         if max_tokens is not None:
             if provider_name == "openai":
-                base_kwargs["max_completion_tokens"] = max_tokens
+                if is_gpt5_family:
+                    # Responses API용
+                    base_kwargs["max_output_tokens"] = max_tokens
+                else:
+                    # chat.completions용
+                    base_kwargs["max_completion_tokens"] = max_tokens
             else:
+                # Friendli(OpenAI 호환)는 여전히 max_tokens 사용
                 base_kwargs["max_tokens"] = max_tokens
 
-        # 실제 호출
+        # ===== GPT-5 계열: Responses API 사용 =====
+        if is_gpt5_family:
+            # messages → Responses API input 포맷으로 그대로 전달 (SDK가 변환해줌)
+            start = time.perf_counter()
+            resp = client.responses.create(
+                model=resolved_model,
+                input=messages,
+                **base_kwargs,
+            )
+            latency_ms = int((time.perf_counter() - start) * 1000)
+
+            text = _extract_text_from_response(resp)
+            usage_obj = getattr(resp, "usage", None)
+
+            token_usage: Optional[Dict[str, Any]] = None
+            if usage_obj is not None:
+                token_usage = {
+                    "provider": provider_name,
+                    "model": resolved_model,
+                    "prompt_tokens": getattr(usage_obj, "input_tokens", None),
+                    "completion_tokens": getattr(usage_obj, "output_tokens", None),
+                    "total_tokens": getattr(usage_obj, "total_tokens", None),
+                }
+
+            return LLMCallResult(
+                text=text,
+                token_usage=token_usage,
+                latency_ms=latency_ms,
+                raw=resp,
+            )
+
+        # ===== 나머지 모델: 기존처럼 chat.completions 사용 =====
         start = time.perf_counter()
         resp = client.chat.completions.create(
             model=resolved_model,
@@ -259,23 +352,7 @@ def call_llm_chat(
         latency_ms = int((time.perf_counter() - start) * 1000)
 
         usage_obj = getattr(resp, "usage", None)
-
-        # ====== 응답 텍스트 추출 (헬퍼 사용) ======
         text = _extract_text_from_openai_chat(resp, resolved_model)
-
-        # GPT-5 계열인데 텍스트가 완전히 비어 있고, completion_tokens 는 있는 경우
-        if (
-            not text
-            and isinstance(resolved_model, str)
-            and resolved_model.lower().startswith("gpt-5")
-            and usage_obj is not None
-        ):
-            completion_tokens = getattr(usage_obj, "completion_tokens", None) or getattr(
-                usage_obj, "output_tokens", None
-            )
-            if completion_tokens and completion_tokens > 0:
-                text = "[gpt-5 계열 응답에서 표시할 텍스트를 찾지 못했습니다.]"
-        # ====== 텍스트 추출 끝 ======
 
         token_usage: Optional[Dict[str, Any]] = None
         if usage_obj is not None:
