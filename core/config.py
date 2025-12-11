@@ -181,13 +181,13 @@ PRACTICE_MODELS = {
 PRACTICE_DEFAULT_GENERATION = {
     "temperature": 0.7,
     "top_p": 0.9,
-    "response_length_preset": "normal",
-    "max_completion_tokens": 512,
+    "response_length_preset": None,
+    "max_completion_tokens": 10240,    ##<- 여기서 맥스값 관리 지금 좀 넉넉하게 줌
 }
 
 RESPONSE_LENGTH_PRESETS = {
     "short": 256,
     "normal": 512,
-    "long": 1024,
+    "long": 2048,
 }
 

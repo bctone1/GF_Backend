@@ -139,7 +139,7 @@ def run_practice_turn_endpoint(
       (이때 project_id 가 있으면 해당 프로젝트에 세션을 묶음)
       (body.knowledge_id 가 있으면 세션의 기본 지식베이스로 저장)
     - session_id > 0: 기존 세션/클래스 검증 + 세션에 등록된 모델 중 선택 실행
-        모델 : `gpt-4o-mini`, `gpt-5-nano` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
+        모델 : `gpt-4o-mini`, `gpt-5-mini` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
       (body.knowledge_id 가 있으면 이번 턴에서 사용할 지식베이스를 변경/설정)
     """
     turn_result = run_practice_turn_for_session(
