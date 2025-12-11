@@ -2,7 +2,7 @@
 from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 
 from crud.base import CRUDBase
 from models.user.project import (
@@ -176,6 +176,18 @@ class CRUDUserProject(CRUDBase[UserProject, UserProjectCreate, UserProjectUpdate
             for r in rows
         ]
 
+    # 프로젝트 삭제
+    def remove(self, db: Session, *, id: int) -> None:
+        """
+        UserProject 삭제.
+        - 실제 commit 은 서비스/엔드포인트 단에서 처리.
+        """
+        obj = db.get(self.model, id)
+        if obj is None:
+            return
+
+        db.delete(obj)
+        db.flush()
 
 user_project_crud = CRUDUserProject(UserProject)
 

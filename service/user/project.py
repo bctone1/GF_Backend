@@ -164,6 +164,8 @@ def delete_my_project(
 ) -> None:
     project = ensure_my_project(db, project_id, me)
     user_project_crud.remove(db, id=project.project_id)
+    db.commit()
+
 
 
 # =========================================
