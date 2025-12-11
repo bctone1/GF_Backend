@@ -166,61 +166,136 @@ def _extract_text_from_openai_chat(resp: Any, model_name: str) -> str:
 
 def _extract_text_from_response(resp: Any) -> str:
     """
-    Responses API 응답(Response 객체)에서 텍스트만 추출.
-    - resp.output[*].content[*].text.value 형태를 최대한 따라가서 수집
+    OpenAI Responses API 응답에서 텍스트만 깔끔하게 추출.
+    보통 구조 (예상):
+      resp.output[0].content[*] = {
+        "type": "reasoning" | "output_text" | ...,
+        "text": { "value": "..." , ... }
+      }
+    - type == "reasoning" 인 블록은 건너뛴다.
     """
 
-    def _collect_text(obj: Any, buf: List[str], depth: int = 0, max_depth: int = 8) -> None:
-        if obj is None or depth > max_depth:
-            return
+    parts: List[str] = []
 
-        # 문자열
-        if isinstance(obj, str):
-            s = obj.strip()
-            if s:
-                buf.append(s)
-            return
-
-        # list/tuple
-        if isinstance(obj, (list, tuple)):
-            for item in obj:
-                _collect_text(item, buf, depth + 1, max_depth)
-            return
-
-        # dict
-        if isinstance(obj, dict):
-            # Responses 구조에서 자주 나오는 키들 우선
-            for key in ("text", "value", "content", "output_text"):
-                if key in obj:
-                    _collect_text(obj[key], buf, depth + 1, max_depth)
-            # 그 외 나머지도 한 번 쭉 훑기
-            for v in obj.values():
-                _collect_text(v, buf, depth + 1, max_depth)
-            return
-
-        # SDK 객체류: text / value / content / output_text 속성 재귀 탐색
-        for attr in ("text", "value", "content", "output_text"):
-            if hasattr(obj, attr):
-                try:
-                    val = getattr(obj, attr)
-                except Exception:
-                    continue
-                _collect_text(val, buf, depth + 1, max_depth)
-
-    collected: List[str] = []
-
-    # 보통 resp.output 이 리스트
+    # 1) output / outputs 가져오기
     outputs = getattr(resp, "output", None)
     if outputs is None:
         outputs = getattr(resp, "outputs", None)
 
-    if outputs is not None:
-        _collect_text(outputs, collected)
-    else:
-        # 그래도 없으면 resp 전체에서 한 번 시도
-        _collect_text(resp, collected)
+    if outputs is None:
+        return ""
 
-    return "\n".join(collected).strip()
+    # 단일 객체일 수도 있어서 리스트로 정규화
+    if not isinstance(outputs, (list, tuple)):
+        outputs = [outputs]
+
+    for out in outputs:
+        # out 이 dict 인지, SDK 객체인지 모두 처리
+        if isinstance(out, dict):
+            content_list = out.get("content") or []
+        else:
+            content_list = getattr(out, "content", None) or []
+
+        for c in content_list:
+            # dict 형태
+            if isinstance(c, dict):
+                c_type = c.get("type")
+                # reasoning 타입은 건너뛰기
+                if c_type == "reasoning":
+                    continue
+
+                text_block = c.get("text")
+                val: Any = None
+
+                if isinstance(text_block, dict):
+                    # value 우선, 없으면 text 키
+                    val = text_block.get("value") or text_block.get("text")
+                elif isinstance(text_block, str):
+                    val = text_block
+                else:
+                    # 혹시 dict 안에 또 content/value 가 중첩된 경우
+                    val = text_block
+
+                if isinstance(val, str):
+                    s = val.strip()
+                    if s:
+                        parts.append(s)
+                elif isinstance(val, dict):
+                    inner_val = val.get("value") or val.get("text")
+                    if isinstance(inner_val, str):
+                        s = inner_val.strip()
+                        if s:
+                            parts.append(s)
+                continue
+
+            # SDK 객체 형태
+            text_obj = getattr(c, "text", None)
+            if text_obj is None:
+                continue
+
+            val: Any = None
+            if isinstance(text_obj, dict):
+                val = text_obj.get("value") or text_obj.get("text")
+            else:
+                # .value 속성이 있으면 사용
+                v = getattr(text_obj, "value", None)
+                if isinstance(v, str):
+                    val = v
+                else:
+                    # 그래도 없으면 str() 로 캐스팅
+                    try:
+                        val = str(text_obj)
+                    except Exception:
+                        val = None
+
+            if isinstance(val, str):
+                s = val.strip()
+                if s and not s.startswith("rs_"):
+                    parts.append(s)
+
+    text = "\n\n".join(parts).strip()
+
+    # 2) 메인 경로에서 아무것도 못 찾았을 때만 fallback
+    if not text:
+        try:
+            resp_dict = resp.model_dump(exclude_none=True)  # type: ignore[attr-defined]
+        except Exception:
+            resp_dict = resp if isinstance(resp, dict) else None
+
+        if isinstance(resp_dict, dict):
+            def _collect_all_strings(o: Any, buf: List[str], depth: int = 0, max_depth: int = 6):
+                if o is None or depth > max_depth:
+                    return
+                if isinstance(o, str):
+                    s = o.strip()
+                    if not s:
+                        return
+                    # 내부 id / 태그로 보이는 문자열은 스킵
+                    if s.startswith("rs_") and len(s) > 10:
+                        return
+                    if s in {"reasoning", "output_text"}:
+                        return
+                    buf.append(s)
+                    return
+                if isinstance(o, (list, tuple)):
+                    for item in o:
+                        _collect_all_strings(item, buf, depth + 1, max_depth)
+                    return
+                if isinstance(o, dict):
+                    # output / outputs 안쪽만 타도록 제한
+                    for k in ("output", "outputs", "content", "text", "value"):
+                        if k in o:
+                            _collect_all_strings(o[k], buf, depth + 1, max_depth)
+                    return
+
+            buf: List[str] = []
+            _collect_all_strings(
+                resp_dict.get("output") or resp_dict.get("outputs"),
+                buf,
+            )
+            text = "\n\n".join(buf).strip()
+
+    return text
 
 
 # =========================================================
