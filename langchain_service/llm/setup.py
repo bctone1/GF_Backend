@@ -1,6 +1,7 @@
 # langchain_service/llm/setup.py
 import os
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Optional, Dict, List
 
@@ -19,11 +20,26 @@ try:
 except ImportError:
     ChatGoogleGenerativeAI = None  # type: ignore
 
-# OpenAI 공식 클라이언트 (token_usage, latency 계산용)
+# OpenAI 공식 클라이언트 (token_usage, latency 계산용 + GPT-5 Responses)
 try:
     from openai import OpenAI as OpenAIClient
 except ImportError:
     OpenAIClient = None  # type: ignore
+
+# LangSmith 수동 트레이싱용
+try:
+    from langsmith import Client as LangSmithClient  # type: ignore
+except ImportError:
+    LangSmithClient = None  # type: ignore
+
+ls_client: Any
+if LangSmithClient is not None:
+    try:
+        ls_client = LangSmithClient()
+    except Exception:
+        ls_client = None
+else:
+    ls_client = None
 
 
 @dataclass
@@ -318,77 +334,52 @@ def call_llm_chat(
     - output: LLMCallResult(text, token_usage, latency_ms, raw)
     """
     provider, resolved_model = _resolve_provider_and_model(provider, model)
+    lm = resolved_model.lower()
 
-    # ------------------------- OpenAI / Friendli(EXAONE) : OpenAI 호환 -------------------------
-    if provider in ("openai", "friendli", "lg", "lgai", "exaone"):
+    # ------------------------- OpenAI GPT-5 계열: Responses API + LangSmith 수동 트레이싱 -------------------------
+    if provider == "openai" and lm.startswith("gpt-5"):
         if OpenAIClient is None:
             raise RuntimeError(
                 "openai 패키지가 설치되어 있지 않습니다. 'pip install openai' 후 다시 시도하세요."
             )
 
-        if provider == "openai":
-            key = _pick_key(
-                api_key,
-                getattr(config, "OPENAI_API", None),
-                os.getenv("OPENAI_API"),
-                os.getenv("OPENAI_API_KEY"),
-            )
-            base_url = None
-            provider_name = "openai"
-        else:
-            key = _pick_key(
-                api_key,
-                getattr(config, "FRIENDLI_API", None),
-                getattr(config, "FRIENDLI_TOKEN", None),
-                os.getenv("FRIENDLI_API"),
-                os.getenv("FRIENDLI_TOKEN"),
-            )
-            base_url = getattr(config, "FRIENDLI_BASE_URL", None) or getattr(
-                config, "EXAONE_URL", None
-            )
-            provider_name = "friendli"
-
+        key = _pick_key(
+            api_key,
+            getattr(config, "OPENAI_API", None),
+            os.getenv("OPENAI_API"),
+            os.getenv("OPENAI_API_KEY"),
+        )
         if not key:
-            if provider_name == "openai":
-                raise RuntimeError("OPENAI_API/OPENAI_API_KEY가 설정되지 않았습니다.")
-            else:
-                raise RuntimeError(
-                    "Friendli/EXAONE API 키가 설정되지 않았습니다. "
-                    "FRIENDLI_API 또는 FRIENDLI_TOKEN을 설정하세요."
-                )
+            raise RuntimeError("OPENAI_API/OPENAI_API_KEY가 설정되지 않았습니다.")
 
-        client = OpenAIClient(api_key=key, base_url=base_url)
+        client = OpenAIClient(api_key=key)
 
-        # --- 파라미터 매핑 ---
+        # GPT-5 Responses API: 일부 샘플링 옵션 미지원 → 제거
         base_kwargs: Dict[str, Any] = dict(kwargs)
+        for k in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
+            base_kwargs.pop(k, None)
 
-        lm = resolved_model.lower()
-        # GPT-5 계열: temperature/top_p/penalty 옵션 미지원 → 제거
-        is_gpt5_family = provider_name == "openai" and lm.startswith("gpt-5")
-
-        if is_gpt5_family:
-            for k in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
-                base_kwargs.pop(k, None)
-        else:
-            if "temperature" not in base_kwargs and temperature is not None:
-                base_kwargs["temperature"] = temperature
-
-        # max_tokens 매핑 (OpenAI vs Friendli, GPT-5 Responses 고려)
         if max_tokens is not None:
-            if provider_name == "openai":
-                if is_gpt5_family:
-                    # Responses API용
-                    base_kwargs["max_output_tokens"] = max_tokens
-                else:
-                    # chat.completions용
-                    base_kwargs["max_completion_tokens"] = max_tokens
-            else:
-                # Friendli(OpenAI 호환)는 여전히 max_tokens 사용
-                base_kwargs["max_tokens"] = max_tokens
+            base_kwargs["max_output_tokens"] = max_tokens
 
-        # ===== GPT-5 계열: Responses API 사용 =====
-        if is_gpt5_family:
-            # messages → Responses API input 포맷으로 그대로 전달 (SDK가 변환해줌)
+        # LangSmith run 생성 (가능할 때만)
+        run = None
+        if ls_client is not None:
+            try:
+                run = ls_client.create_run(
+                    name="gpt5_llm_call",
+                    run_type="llm",
+                    inputs={
+                        "messages": messages,
+                        "model": resolved_model,
+                        "provider": provider,
+                    },
+                    tags=["gpt5", "openai"],
+                )
+            except Exception:
+                run = None
+
+        try:
             start = time.perf_counter()
             resp = client.responses.create(
                 model=resolved_model,
@@ -403,12 +394,26 @@ def call_llm_chat(
             token_usage: Optional[Dict[str, Any]] = None
             if usage_obj is not None:
                 token_usage = {
-                    "provider": provider_name,
+                    "provider": "openai",
                     "model": resolved_model,
                     "prompt_tokens": getattr(usage_obj, "input_tokens", None),
                     "completion_tokens": getattr(usage_obj, "output_tokens", None),
                     "total_tokens": getattr(usage_obj, "total_tokens", None),
                 }
+
+            # LangSmith run 업데이트
+            if run is not None:
+                try:
+                    ls_client.update_run(
+                        run.id,
+                        outputs={
+                            "text": text,
+                            "token_usage": token_usage,
+                        },
+                        end_time=datetime.now(timezone.utc),
+                    )
+                except Exception:
+                    pass
 
             return LLMCallResult(
                 text=text,
@@ -417,7 +422,52 @@ def call_llm_chat(
                 raw=resp,
             )
 
-        # ===== 나머지 모델: 기존처럼 chat.completions 사용 =====
+        except Exception as e:
+            if run is not None:
+                try:
+                    ls_client.update_run(
+                        run.id,
+                        error=str(e),
+                        end_time=datetime.now(timezone.utc),
+                    )
+                except Exception:
+                    pass
+            raise
+
+    # ------------------------- Friendli / EXAONE: OpenAI 호환 엔드포인트 -------------------------
+    if provider in ("friendli", "lg", "lgai", "exaone"):
+        if OpenAIClient is None:
+            raise RuntimeError(
+                "openai 패키지가 설치되어 있지 않습니다. 'pip install openai' 후 다시 시도하세요."
+            )
+
+        key = _pick_key(
+            api_key,
+            getattr(config, "FRIENDLI_API", None),
+            getattr(config, "FRIENDLI_TOKEN", None),
+            os.getenv("FRIENDLI_API"),
+            os.getenv("FRIENDLI_TOKEN"),
+        )
+        if not key:
+            raise RuntimeError(
+                "Friendli/EXAONE API 키가 설정되지 않았습니다. "
+                "FRIENDLI_API 또는 FRIENDLI_TOKEN을 설정하세요."
+            )
+
+        base_url = getattr(config, "FRIENDLI_BASE_URL", None) or getattr(
+            config, "EXAONE_URL", None
+        )
+
+        client = OpenAIClient(api_key=key, base_url=base_url)
+
+        base_kwargs: Dict[str, Any] = dict(kwargs)
+
+        if "temperature" not in base_kwargs and temperature is not None:
+            base_kwargs["temperature"] = temperature
+
+        if max_tokens is not None:
+            base_kwargs["max_tokens"] = max_tokens
+
         start = time.perf_counter()
         resp = client.chat.completions.create(
             model=resolved_model,
@@ -439,7 +489,7 @@ def call_llm_chat(
             ) or getattr(usage_obj, "output_tokens", None)
             total_tokens = getattr(usage_obj, "total_tokens", None)
             token_usage = {
-                "provider": provider_name,
+                "provider": "friendli",
                 "model": resolved_model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
@@ -453,14 +503,19 @@ def call_llm_chat(
             raw=resp,
         )
 
-    # ------------------------- 기타(provider별 세부 usage 미지원) -------------------------
+    # ------------------------- 나머지: LangChain LLM 사용 (OpenAI 일반 + Anthropic + Google 등) -------------------------
     start = time.perf_counter()
+
+    lc_kwargs: Dict[str, Any] = dict(kwargs)
+    if max_tokens is not None and "max_tokens" not in lc_kwargs:
+        lc_kwargs["max_tokens"] = max_tokens
+
     llm = get_llm(
         provider=provider,
         model=resolved_model,
         api_key=api_key,
         temperature=temperature,
-        **kwargs,
+        **lc_kwargs,
     )
 
     # messages → 하나의 프롬프트 문자열로 단순 변환
@@ -476,9 +531,34 @@ def call_llm_chat(
 
     text = getattr(res, "content", None) or str(res)
 
+    # 토큰 사용량: usage_metadata / response_metadata 에 있으면 최대한 추출
+    token_usage: Optional[Dict[str, Any]] = None
+    meta: Any = getattr(res, "usage_metadata", None)
+
+    if not meta:
+        meta = getattr(res, "response_metadata", None)
+        if isinstance(meta, dict) and "token_usage" in meta and isinstance(
+            meta["token_usage"], dict
+        ):
+            meta = meta["token_usage"]
+
+    if isinstance(meta, dict):
+        prompt_tokens = meta.get("input_tokens") or meta.get("prompt_tokens")
+        completion_tokens = meta.get("output_tokens") or meta.get("completion_tokens")
+        total_tokens = meta.get("total_tokens")
+
+        if any(v is not None for v in (prompt_tokens, completion_tokens, total_tokens)):
+            token_usage = {
+                "provider": provider,
+                "model": resolved_model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+            }
+
     return LLMCallResult(
         text=text,
-        token_usage=None,
+        token_usage=token_usage,
         latency_ms=latency_ms,
         raw=res,
     )
@@ -639,7 +719,7 @@ def get_backend_agent(
             os.getenv("OPENAI_API"),
         )
         if not key:
-            raise RuntimeError("EMBEDDING_API/OPENAI_API 키가 설정되지 않았습니다.")
+            raise RuntimeError("EMBEDDING_API/OPENAI_API 키가 설정되어 있지 않습니다.")
 
         return get_llm(
             provider="openai",
@@ -657,7 +737,7 @@ def get_backend_agent(
             os.getenv("FRIENDLI_TOKEN"),
         )
         if not key:
-            raise RuntimeError("FRIENDLI_API/FRIENDLI_TOKEN 키가 설정되지 않았습니다.")
+            raise RuntimeError("FRIENDLI_API/FRIENDLI_TOKEN 키가 설정되어 있지 않습니다.")
 
         return get_llm(
             provider="friendli",
@@ -673,7 +753,7 @@ def get_backend_agent(
             os.getenv("CLAUDE_API"),
         )
         if not key:
-            raise RuntimeError("CLAUDE_API(Anthropic) 키가 설정되지 않았습니다.")
+            raise RuntimeError("CLAUDE_API(Anthropic) 키가 설정되어 있지 않습니다.")
 
         return get_llm(
             provider="anthropic",
@@ -689,7 +769,7 @@ def get_backend_agent(
             os.getenv("GOOGLE_API"),
         )
         if not key:
-            raise RuntimeError("GOOGLE_API(Gemini) 키가 설정되지 않았습니다.")
+            raise RuntimeError("GOOGLE_API(Gemini) 키가 설정되어 있지 않습니다.")
 
         return get_llm(
             provider="google",
