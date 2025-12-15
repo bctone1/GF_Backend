@@ -1,7 +1,7 @@
 # crud/user/practice.py
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple, Any, Mapping, Union
+from typing import Optional, Sequence, Tuple, Any, Mapping, Union, List, Dict
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
@@ -28,9 +28,36 @@ from schemas.user.practice import (
     PracticeRatingUpdate,
     ModelComparisonCreate,
     ModelComparisonUpdate,
-    # ✅ NEW (스키마 단계에서 만들 예정)
     PracticeSessionSettingUpdate,
 )
+
+
+# =========================================================
+# internal helpers
+# =========================================================
+def _dump_pydantic(value: Any) -> Any:
+    """pydantic 모델이면 dict로 dump, 아니면 그대로."""
+    if hasattr(value, "model_dump"):
+        return value.model_dump(exclude_unset=True)
+    return value
+
+
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    """dict 또는 pydantic -> dict, 아니면 {}"""
+    v = _dump_pydantic(value)
+    return dict(v) if isinstance(v, dict) else {}
+
+
+def _coerce_list_of_dict(value: Any) -> list[dict[str, Any]]:
+    """list[dict|pydantic] -> list[dict]"""
+    if not isinstance(value, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in value:
+        d = _dump_pydantic(item)
+        if isinstance(d, dict):
+            out.append(dict(d))
+    return out
 
 
 # =========================================================
@@ -70,7 +97,6 @@ class PracticeSessionCRUD:
         size: int = 50,
     ) -> Tuple[Sequence[PracticeSession], int]:
         stmt = select(PracticeSession).where(PracticeSession.user_id == user_id)
-
         total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
         stmt = (
@@ -134,6 +160,11 @@ class PracticeSessionSettingCRUD:
         default_few_shot_examples: Optional[list[Any]] = None,
         style_preset: Optional[str] = None,
     ) -> PracticeSessionSetting:
+        """
+        세션당 settings 1개 보장.
+        - 없으면 생성
+        - UNIQUE(session_id) 레이스컨디션은 SAVEPOINT로 안전 처리
+        """
         row = self.get_by_session(db, session_id=session_id)
         if row:
             return row
@@ -146,14 +177,17 @@ class PracticeSessionSettingCRUD:
         style = default_style_params if isinstance(default_style_params, dict) else {}
         few = default_few_shot_examples if isinstance(default_few_shot_examples, list) else []
 
+        # few_shot_examples 요소가 pydantic이면 dict로 변환
+        few_dicts = _coerce_list_of_dict(few)
+
         try:
             with db.begin_nested():
                 obj = PracticeSessionSetting(
                     session_id=session_id,
                     style_preset=style_preset,
-                    style_params=style,
+                    style_params=dict(style),
                     generation_params=gen,
-                    few_shot_examples=few,
+                    few_shot_examples=few_dicts,
                 )
                 db.add(obj)
                 db.flush()
@@ -168,7 +202,6 @@ class PracticeSessionSettingCRUD:
     def ensure_default(self, db: Session, *, session_id: int) -> PracticeSessionSetting:
         return self.get_or_create_default(db, session_id=session_id)
 
-    # ✅ NEW: endpoints에서 필요
     def update_by_session_id(
         self,
         db: Session,
@@ -178,8 +211,9 @@ class PracticeSessionSettingCRUD:
     ) -> Optional[PracticeSessionSetting]:
         """
         session_id 기준으로 settings PATCH.
-        - 없으면 None (endpoint에서 ensure_default 후 호출하는 패턴 권장)
-        - data: Pydantic 스키마 또는 dict 허용
+        - 없으면 None (endpoint에서 ensure_default 후 호출 권장)
+        - generation_params/style_params 는 "merge"로 동작 (부분 PATCH 안전)
+        - few_shot_examples 는 "replace"로 동작
         """
         row = self.get_by_session(db, session_id=session_id)
         if not row:
@@ -193,9 +227,27 @@ class PracticeSessionSettingCRUD:
         if not values:
             return row
 
-        # 명시적 set (ORM update)
-        for k, v in values.items():
-            setattr(row, k, v)
+        # style_preset: 단순 치환
+        if "style_preset" in values:
+            row.style_preset = values.get("style_preset")
+
+        # style_params: merge
+        if "style_params" in values:
+            incoming_style = _coerce_dict(values.get("style_params"))
+            base_style = dict(getattr(row, "style_params", None) or {})
+            base_style.update(incoming_style)
+            row.style_params = base_style
+
+        # generation_params: merge
+        if "generation_params" in values:
+            incoming_gen = _coerce_dict(values.get("generation_params"))
+            base_gen = dict(getattr(row, "generation_params", None) or {})
+            base_gen.update(incoming_gen)
+            row.generation_params = base_gen
+
+        # few_shot_examples: replace
+        if "few_shot_examples" in values:
+            row.few_shot_examples = _coerce_list_of_dict(values.get("few_shot_examples"))
 
         db.add(row)
         db.flush()
@@ -211,16 +263,14 @@ practice_session_setting_crud = PracticeSessionSettingCRUD()
 # =========================================================
 class PracticeSessionModelCRUD:
     def create(self, db: Session, data: PracticeSessionModelCreate) -> PracticeSessionModel:
-        if data.generation_params is not None:
-            gen_params: dict[str, Any] = data.generation_params.model_dump(exclude_unset=True)
-        else:
-            gen_params = {}
+        raw_gp = getattr(data, "generation_params", None)
+        gp = _coerce_dict(raw_gp) if raw_gp is not None else {}
 
         obj = PracticeSessionModel(
             session_id=data.session_id,
             model_name=data.model_name,
             is_primary=data.is_primary if data.is_primary is not None else False,
-            generation_params=gen_params,
+            generation_params=gp,
         )
         db.add(obj)
         db.flush()
@@ -263,6 +313,10 @@ class PracticeSessionModelCRUD:
         if obj is None:
             return None
 
+        # generation_params 들어오면 dict로 변환
+        if "generation_params" in update_data:
+            update_data["generation_params"] = _coerce_dict(update_data.get("generation_params"))
+
         for k, v in update_data.items():
             setattr(obj, k, v)
 
@@ -276,6 +330,66 @@ class PracticeSessionModelCRUD:
         if obj:
             db.delete(obj)
             db.flush()
+
+    # settings → 세션의 모든 모델에 generation_params 동기화
+    def bulk_sync_generation_params_by_session(
+        self,
+        db: Session,
+        *,
+        session_id: int,
+        generation_params: Mapping[str, Any] | Any,
+        merge: bool = True,
+        overwrite_keys: Optional[list[str]] = None,
+        only_fill_missing_few_shots: bool = False,
+    ) -> list[PracticeSessionModel]:
+        """
+        session_id에 속한 모든 PracticeSessionModel.generation_params를 동기화.
+
+        - merge=True:
+            기존 모델 dict에 settings dict를 "덮어쓰기"로 합침(모델별 추가 키는 유지)
+        - merge=False:
+            모델 generation_params를 settings dict로 통째로 교체
+        - overwrite_keys:
+            특정 키만 동기화하고 싶을 때 사용 (None이면 gp 전체)
+        - only_fill_missing_few_shots:
+            True면 few_shot_examples는 기존 모델에 값이 없을 때만 채움
+        """
+        gp = _coerce_dict(generation_params)
+        if not gp:
+            # 아무것도 안 하면 그대로 반환
+            return list(self.list_by_session(db, session_id=session_id))
+
+        models = list(self.list_by_session(db, session_id=session_id))
+
+        keys = overwrite_keys[:] if overwrite_keys else None
+
+        for m in models:
+            current = dict(getattr(m, "generation_params", None) or {})
+
+            if merge:
+                next_gp = dict(current)
+            else:
+                next_gp = {}
+
+            def apply_key(k: str, v: Any):
+                if k == "few_shot_examples" and only_fill_missing_few_shots:
+                    if current.get("few_shot_examples"):
+                        return
+                next_gp[k] = v
+
+            if keys is None:
+                for k, v in gp.items():
+                    apply_key(k, v)
+            else:
+                for k in keys:
+                    if k in gp:
+                        apply_key(k, gp[k])
+
+            m.generation_params = next_gp
+            db.add(m)
+
+        db.flush()
+        return models
 
 
 practice_session_model_crud = PracticeSessionModelCRUD()
