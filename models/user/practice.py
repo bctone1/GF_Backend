@@ -73,6 +73,12 @@ class PracticeSession(Base):
         back_populates="session",
         passive_deletes=True,
     )
+    settings = relationship(
+        "PracticeSessionSetting",
+        back_populates="session",
+        uselist=False,
+        passive_deletes=True,
+    )
 
     # (선택) Document 모델과의 관계
     # knowledge = relationship(
@@ -90,6 +96,63 @@ class PracticeSession(Base):
     __table_args__ = (
         Index("idx_practice_sessions_user", "user_id"),
         Index("idx_practice_sessions_knowledge", "knowledge_id"),
+        {"schema": "user"},
+    )
+
+
+# ========== user.practice_session_settings ==========
+class PracticeSessionSetting(Base):
+    __tablename__ = "practice_session_settings"
+
+    setting_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    session_id = Column(
+        BigInteger,
+        ForeignKey("user.practice_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,  # 세션당 1개 보장
+    )
+
+    # UI 프리셋(정확한/균형잡힌/창의적/사용자정의)
+    style_preset = Column(Text, nullable=True)
+
+    # 스타일 옵션(답변 형식, persona 강도, 힌트/정답, self-check 등)
+    style_params = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    # 세션 기본 파라미터(temperature/top_p/max_tokens/stop 등)
+    generation_params = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    # 세션 공통 few-shot 예시 목록 [{input, output}, ...]
+    few_shot_examples = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    )
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    session = relationship(
+        "PracticeSession",
+        back_populates="settings",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        Index("idx_practice_session_settings_session", "session_id"),
         {"schema": "user"},
     )
 

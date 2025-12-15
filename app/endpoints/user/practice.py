@@ -1,7 +1,7 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
 
-from typing import List, Any
+from typing import List
 
 from fastapi import (
     APIRouter,
@@ -22,6 +22,7 @@ from crud.user.practice import (
     practice_session_crud,
     practice_session_model_crud,
     practice_response_crud,
+    practice_session_setting_crud,
 )
 
 from schemas.base import Page
@@ -37,7 +38,9 @@ from schemas.user.practice import (
     PracticeResponseResponse,
     PracticeTurnRequest,
     PracticeTurnResponse,
-    GenerationParams,
+    # ✅ NEW (스키마 단계에서 만들 것)
+    PracticeSessionSettingResponse,
+    PracticeSessionSettingUpdate,
 )
 
 from service.user.practice import (
@@ -51,27 +54,54 @@ from service.user.practice import (
 router = APIRouter()
 
 
-def _init_default_models_for_session(db: Session, *, session_id: int) -> None:
+def _get_default_generation_params_dict() -> dict:
+    base = getattr(config, "PRACTICE_DEFAULT_GENERATION", None)
+    if isinstance(base, dict):
+        return dict(base)
+    return {}
+
+
+def _ensure_session_settings_row(db: Session, *, session_id: int):
+    """
+    세션당 settings 1개 보장.
+    """
+    default_gen = _get_default_generation_params_dict()
+    return practice_session_setting_crud.get_or_create_default(
+        db,
+        session_id=session_id,
+        default_generation_params=default_gen,
+    )
+
+
+def _init_default_models_for_session(
+    db: Session,
+    *,
+    session_id: int,
+    base_generation_params: dict,
+) -> None:
     """
     세션 생성 직후, 튜닝 UI가 바로 뜰 수 있게 기본 모델들을 미리 생성해둠.
     - config.PRACTICE_MODELS 중 enabled=True 모델들을 전부 생성
-    - primary는 default=True인 모델(없으면 첫 모델)로 1개만 보장
+    - primary는 default=True인 모델(없으면 첫 enabled)로 1개만 보장
+    - 각 모델 generation_params는 세션 settings의 generation_params를 복사해서 넣음
     """
     existing = practice_session_model_crud.list_by_session(db, session_id=session_id)
     if existing:
         return
 
+    practice_models = getattr(config, "PRACTICE_MODELS", {}) or {}
     enabled = [
-        (k, v) for k, v in config.PRACTICE_MODELS.items()
-        if v.get("enabled") is True
+        (k, v)
+        for k, v in practice_models.items()
+        if isinstance(v, dict) and v.get("enabled") is True
     ]
+
     if not enabled:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="no_enabled_practice_models",
         )
 
-    # primary 후보: default=True 우선, 없으면 첫 enabled
     primary_key = None
     for k, v in enabled:
         if v.get("default") is True:
@@ -80,32 +110,17 @@ def _init_default_models_for_session(db: Session, *, session_id: int) -> None:
     if primary_key is None:
         primary_key = enabled[0][0]
 
-    primary_candidate_id: int | None = None
+    base_gen = dict(base_generation_params or {})
 
     for k, v in enabled:
         model_name = v.get("model_name") or k
         data_in = PracticeSessionModelCreate(
             session_id=session_id,
             model_name=model_name,
-            # 일단 False로 만들고, 아래에서 set_primary로 1개만 보장
-            is_primary=False,
-            generation_params=dict(config.PRACTICE_DEFAULT_GENERATION),
+            is_primary=(k == primary_key),
+            generation_params=base_gen,
         )
-        created = practice_session_model_crud.create(db, data_in)
-        if k == primary_key and primary_candidate_id is None:
-            # CRUD가 반환하는 PK 이름이 session_model_id라고 가정(프로젝트 기존 흐름)
-            primary_candidate_id = getattr(created, "session_model_id", None)
-
-    db.commit()
-
-    if primary_candidate_id:
-        set_primary_model_for_session(
-            db,
-            me=None,  # 서비스가 me를 꼭 쓰면 여기서 쓰지 말고 아래처럼 endpoint에서 처리해
-            session_id=session_id,
-            target_session_model_id=primary_candidate_id,
-        )
-        db.commit()
+        practice_session_model_crud.create(db, data_in)
 
 
 # =========================================
@@ -138,21 +153,19 @@ def list_my_practice_sessions(
     response_model=PracticeSessionResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session",
-    summary="새 대화(세션): 세션 생성 + 기본 모델 미리 생성",
+    summary="새 채팅(세션): 세션 생성 + settings 생성 + 기본 모델 미리 생성",
 )
 def create_practice_session(
     data: PracticeSessionCreate,
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    새 대화 버튼 UX:
-    1) 세션 생성
-    2) 기본 세션모델(여러개) 미리 생성 -> 바로 PATCH로 튜닝 가능
-    """
     class_id = getattr(data, "class_id", None)
     if not class_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id_required")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="class_id_required",
+        )
 
     session = practice_session_crud.create(
         db=db,
@@ -160,16 +173,23 @@ def create_practice_session(
         user_id=me.user_id,
     )
 
-    # 기본 모델들 생성(튜닝 UI 즉시 가능)
-    # NOTE: set_primary_model_for_session가 me를 꼭 요구하면,
-    # 여기 helper에서 me=None 쓰지 말고 endpoint에서 primary 보장 로직을 직접 처리해.
-    _init_default_models_for_session(db, session_id=session.session_id)
+    # settings 보장(없으면 생성)
+    setting = _ensure_session_settings_row(db, session_id=session.session_id)
 
+    # 기본 모델들 생성(튜닝 UI 즉시 가능)
+    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
+    _init_default_models_for_session(
+        db,
+        session_id=session.session_id,
+        base_generation_params=base_gen,
+    )
+
+    db.commit()
     return PracticeSessionResponse.model_validate(session)
 
 
 # =========================================
-# Quick Run (바로 입력) - session_id==0 제거 대체
+# Quick Run (바로 입력) - session_id==0 대체
 # =========================================
 @router.post(
     "/sessions/run",
@@ -189,19 +209,18 @@ def run_practice_turn_new_session_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    - 새 세션 생성 + 모델 구성 + 첫 턴 실행을 한번에 처리(빠른 시작)
-    - 기존의 session_id==0  외부 API에서 제거(내부에서 돌림)
-    `gpt-4o-mini`, `gpt-5-mini` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
-    """
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
-        session_id=0,          # 내부적으로만 사용(외부 API에서 숨김)
+        session_id=0,  # 내부적으로만 사용
         class_id=class_id,
         project_id=project_id,
         body=body,
     )
+
+    # 생성된 세션에 settings row 보장(레거시/안전)
+    _ensure_session_settings_row(db, session_id=turn_result.session_id)
+
     db.commit()
     return turn_result
 
@@ -222,14 +241,16 @@ def run_practice_turn_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    - session_id > 0: 기존 세션에서 실행
-    - class_id는 세션에 저장된 값을 사용(쿼리로 안 받음)
-    - body.knowledge_id가 있으면 이번 턴에서만 override 가능
-     세션에 등록된 모델 중 선택 실행 모델 :
-        `gpt-4o-mini`, `gpt-5-mini` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
-    """
     session = ensure_my_session(db, session_id, me)
+
+    if session.class_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_has_no_class_id",
+        )
+
+    # settings row 보장(레거시 세션 대비)
+    _ensure_session_settings_row(db, session_id=session.session_id)
 
     turn_result = run_practice_turn_for_session(
         db=db,
@@ -243,13 +264,11 @@ def run_practice_turn_endpoint(
     return turn_result
 
 
-
-
 @router.get(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="get_practice_session",
-    summary="세션 대화목록"
+    summary="세션 채팅목록",
 )
 def get_practice_session(
     session_id: int = Path(..., ge=1),
@@ -258,21 +277,17 @@ def get_practice_session(
 ):
     session = ensure_my_session(db, session_id, me)
 
-    # 이 세션에 속한 모든 응답 조회
     resp_rows = practice_response_crud.list_by_session(
         db,
         session_id=session.session_id,
     )
-    resp_items = [
-        PracticeResponseResponse.model_validate(r) for r in resp_rows
-    ]
+    resp_items = [PracticeResponseResponse.model_validate(r) for r in resp_rows]
 
     return PracticeSessionResponse(
         session_id=session.session_id,
         user_id=session.user_id,
         class_id=session.class_id,
         project_id=session.project_id,
-        # NEW: 세션에 연결된 지식베이스도 응답에 포함
         knowledge_id=getattr(session, "knowledge_id", None),
         title=session.title,
         created_at=session.created_at,
@@ -286,7 +301,7 @@ def get_practice_session(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="update_practice_session",
-    summary="세션 제목/메타 수정"
+    summary="세션 제목/메타 수정",
 )
 def update_practice_session(
     session_id: int = Path(..., ge=1),
@@ -294,9 +309,6 @@ def update_practice_session(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    - body: class_id / project_id / knowledge_id / title / notes 중 일부만 PATCH
-    """
     _ = ensure_my_session(db, session_id, me)
     updated = practice_session_crud.update(db, session_id=session_id, data=data)
     db.commit()
@@ -309,7 +321,7 @@ def update_practice_session(
     "/sessions/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_session",
-    summary="세션 삭제"
+    summary="세션 삭제",
 )
 def delete_practice_session(
     session_id: int = Path(..., ge=1),
@@ -320,6 +332,62 @@ def delete_practice_session(
     practice_session_crud.delete(db, session_id=session_id)
     db.commit()
     return None
+
+# ===== Practice Session Settings =====
+@router.get(
+    "/sessions/{session_id}/settings",
+    response_model=PracticeSessionSettingResponse,
+    operation_id="get_practice_session_settings",
+    summary="세션 settings 조회",
+)
+def get_practice_session_settings(
+    session_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = ensure_my_session(db, session_id, me)
+
+    setting = _ensure_session_settings_row(db, session_id=session_id)
+    db.commit()  # 없어서 생성된 경우 반영
+
+    return PracticeSessionSettingResponse.model_validate(setting)
+
+
+@router.patch(
+    "/sessions/{session_id}/settings",
+    response_model=PracticeSessionSettingResponse,
+    operation_id="update_practice_session_settings",
+    summary="세션 settings 수정",
+)
+def update_practice_session_settings(
+    session_id: int = Path(..., ge=1),
+    data: PracticeSessionSettingUpdate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = ensure_my_session(db, session_id, me)
+
+    # row 보장
+    _ensure_session_settings_row(db, session_id=session_id)
+
+    # 변경값 없으면 현재값 그대로
+    if not data.model_dump(exclude_unset=True):
+        current = practice_session_setting_crud.get_by_session(db, session_id=session_id)
+        if not current:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings not found")
+        return PracticeSessionSettingResponse.model_validate(current)
+
+    updated = practice_session_setting_crud.update_by_session_id(
+        db,
+        session_id=session_id,
+        data=data,
+    )
+    db.commit()
+
+    if not updated:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings not found")
+
+    return PracticeSessionSettingResponse.model_validate(updated)
 
 
 # =========================================
@@ -374,7 +442,6 @@ def update_practice_session_model(
 ):
     model, _session = ensure_my_session_model(db, session_model_id, me)
 
-    # 1) is_primary=True 인 경우: primary 토글 흐름
     if data.is_primary is True:
         target = set_primary_model_for_session(
             db,
@@ -382,9 +449,9 @@ def update_practice_session_model(
             session_id=model.session_id,
             target_session_model_id=session_model_id,
         )
+        db.commit()
         return PracticeSessionModelResponse.model_validate(target)
 
-    # 2) is_primary=False 또는 안 온 경우: 일반 필드만 수정
     update_data = data.model_dump(exclude_unset=True)
     update_data.pop("is_primary", None)
 
@@ -473,9 +540,6 @@ def get_practice_response(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    특정 응답 1개 상세 열기(예: 히스토리에서 응답 카드 클릭 → 상세/공유/디버그 화면)
-    """
     resp, _model, _session = ensure_my_response(db, response_id, me)
     return PracticeResponseResponse.model_validate(resp)
 
@@ -491,11 +555,6 @@ def update_practice_response(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    응답 레코드의 일부를 수정(예: 사용자가 별점/메모/태그 같은 필드를 응답에 붙이거나,
-    관리자/파트너가 “검수 상태” 같은 메타를 업데이트할 때)
-    ※ LLM 텍스트 자체를 수정하게 할지 여부는 정책 선택.
-    """
     _resp, _model, _session = ensure_my_response(db, response_id, me)
     updated = practice_response_crud.update(db, response_id=response_id, data=data)
     db.commit()
@@ -514,9 +573,6 @@ def delete_practice_response(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    특정 턴만 삭제(예: 실수로 민감정보를 넣어서 해당 턴만 지우고 싶을 때, 혹은 대화 전체는 남기고 일부 턴만 제거).
-    """
     _resp, _model, _session = ensure_my_response(db, response_id, me)
     practice_response_crud.delete(db, response_id=response_id)
     db.commit()
