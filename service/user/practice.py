@@ -41,6 +41,79 @@ from schemas.user.practice import (
     PracticeTurnResponse,
 )
 
+def init_models_for_session_from_class(
+    db: Session,
+    *,
+    me: AppUser,
+    session: PracticeSession,
+    class_id: int,
+    requested_model_names: list[str] | None = None,
+    generation_overrides: dict[str, dict[str, Any]] | None = None,
+) -> list[PracticeSessionModel]:
+    # 이미 있으면 그대로 반환(중복 생성 방지)
+    existing = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+    if existing:
+        if requested_model_names:
+            s = set(requested_model_names)
+            picked = [m for m in existing if m.model_name in s]
+            if not picked:
+                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
+            return picked
+        return existing
+
+    class_obj = classes_crud.get_class(db, class_id=class_id)
+    if not class_obj or class_obj.status != "active":
+        raise HTTPException(status_code=400, detail="유효하지 않은 class_id 입니다.")
+
+    # class 모델 목록(기존 로직 재사용)
+    model_catalog_ids: list[int] = []
+    if class_obj.primary_model_id:
+        model_catalog_ids.append(class_obj.primary_model_id)
+    if class_obj.allowed_model_ids:
+        for mid in class_obj.allowed_model_ids:
+            if mid not in model_catalog_ids:
+                model_catalog_ids.append(mid)
+
+    if not model_catalog_ids:
+        raise HTTPException(status_code=400, detail="이 class 에 설정된 모델이 없습니다.")
+
+    allowed_names: list[str] = []
+    for mc_id in model_catalog_ids:
+        catalog = db.get(ModelCatalog, mc_id)
+        if not catalog:
+            raise HTTPException(status_code=400, detail=f"유효하지 않은 model_catalog id: {mc_id}")
+        name = getattr(catalog, "logical_name", None) or catalog.model_name
+        allowed_names.append(name)
+
+    # 요청으로 모델을 제한하는 경우(빠른실행/또는 B안)
+    final_names = allowed_names
+    if requested_model_names:
+        s = set(requested_model_names)
+        final_names = [n for n in allowed_names if n in s]
+        if not final_names:
+            raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
+
+    overrides = generation_overrides or {}
+
+    created: list[PracticeSessionModel] = []
+    for idx, name in enumerate(final_names):
+        gp = overrides.get(name) or _get_default_generation_params()
+        m = practice_session_model_crud.create(
+            db,
+            PracticeSessionModelCreate(
+                session_id=session.session_id,
+                model_name=name,
+                is_primary=(idx == 0),
+                generation_params=gp,
+            ),
+        )
+        created.append(m)
+
+    db.flush()
+    return created
+
+
+
 
 # =========================================
 # 기본 generation params 헬퍼
@@ -708,48 +781,30 @@ def _select_models_for_existing_session(
     db: Session,
     *,
     session: PracticeSession,
-    class_id: int,
     body: PracticeTurnRequest,
     me: AppUser,
+    class_id: int | None = None,  # (레거시 호환) 있으면 검증만
 ) -> List[PracticeSessionModel]:
-    """
-    session_id > 0 인 경우:
-    - 세션 ↔ class 바인딩 검증
-    - 세션에 등록된 모델 중에서 model_names 로 필터링
-    """
     if session.class_id is None:
-        session.class_id = class_id
-        db.add(session)
-        db.commit()
-    elif session.class_id != class_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="class_id does not match this session",
-        )
+        # 새 설계에선 여기로 오면 안 됨(세션 생성 시 class_id 필수)
+        raise HTTPException(status_code=400, detail="session has no class_id")
 
-    all_models: list[PracticeSessionModel] = practice_session_model_crud.list_by_session(
-        db,
-        session_id=session.session_id,
-    )
+    if class_id is not None and session.class_id != class_id:
+        raise HTTPException(status_code=400, detail="class_id does not match this session")
+
+    all_models = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
     if not all_models:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="no models configured for this session",
-        )
+        raise HTTPException(status_code=400, detail="no models configured for this session")
 
     if body.model_names:
-        requested_names = set(body.model_names)
-        models = [m for m in all_models if m.model_name in requested_names]
+        s = set(body.model_names)
+        picked = [m for m in all_models if m.model_name in s]
+        if not picked:
+            raise HTTPException(status_code=400, detail="requested model_names not found in this session")
+        return picked
 
-        if not models:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="requested model_names not found in this session",
-            )
-    else:
-        models = all_models
+    return all_models
 
-    return models
 
 
 def run_practice_turn_for_session(
@@ -757,52 +812,55 @@ def run_practice_turn_for_session(
     *,
     me: AppUser,
     session_id: int,
-    class_id: int,
+    class_id: int | None,
     body: PracticeTurnRequest,
     project_id: Optional[int] = None,
 ) -> PracticeTurnResponse:
-    """
-    - session_id == 0:
-      새 세션 + class 기반 모델 구성
-      + (옵션) project_id 로 프로젝트에 세션을 귀속
-
-    - session_id > 0:
-      기존 세션 + 모델 선택
-      project_id 가 넘어온 경우, 기존 세션의 project_id 와 불일치하면 400
-    """
     if session_id == 0:
-        session, models = _init_session_and_models_from_class(
+        if class_id is None:
+            raise HTTPException(status_code=400, detail="class_id_required")
+
+        session = practice_session_crud.create(
+            db,
+            data=PracticeSessionCreate(
+                class_id=class_id,
+                project_id=project_id,
+                title=None,
+                notes=None,
+            ),
+            user_id=me.user_id,
+        )
+
+        created_models = init_models_for_session_from_class(
             db,
             me=me,
+            session=session,
             class_id=class_id,
-            body=body,
-            project_id=project_id,
+            requested_model_names=None,  # 모델은 전부 만들어두고
+            generation_overrides=None,   # session 생성할 때 모델/파라미터까지 한번에 받기
         )
+
+        # 이번 턴에서만 model_names로 호출 모델을 제한할 수 있게
+        models = created_models
+        if body.model_names:
+            s = set(body.model_names)
+            models = [m for m in created_models if m.model_name in s]
+            if not models:
+                raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
+
     else:
         session = ensure_my_session(db, session_id, me)
 
         models = _select_models_for_existing_session(
             db,
             session=session,
-            class_id=class_id,
             body=body,
             me=me,
+            class_id=class_id,  # 보통 None으로 호출
         )
 
-        if project_id is not None:
-            if session.project_id is not None and session.project_id != project_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="요청한 project_id와 세션이 속한 project_id가 일치하지 않습니다.",
-                )
-            # session.project_id 가 None 이고 project_id 가 온 경우
-            # 여기서 attach 해도 되고, 별도 API로만 수정해도 됨. 지금은 보수적으로 그대로
-
-    if not models:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="no models configured for this session",
-        )
+        if project_id is not None and session.project_id is not None and session.project_id != project_id:
+            raise HTTPException(status_code=400, detail="요청한 project_id와 세션의 project_id가 일치하지 않습니다.")
 
     return run_practice_turn(
         db=db,
@@ -812,3 +870,4 @@ def run_practice_turn_for_session(
         user=me,
         document_ids=body.document_ids,
     )
+

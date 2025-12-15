@@ -51,6 +51,63 @@ from service.user.practice import (
 router = APIRouter()
 
 
+def _init_default_models_for_session(db: Session, *, session_id: int) -> None:
+    """
+    세션 생성 직후, 튜닝 UI가 바로 뜰 수 있게 기본 모델들을 미리 생성해둠.
+    - config.PRACTICE_MODELS 중 enabled=True 모델들을 전부 생성
+    - primary는 default=True인 모델(없으면 첫 모델)로 1개만 보장
+    """
+    existing = practice_session_model_crud.list_by_session(db, session_id=session_id)
+    if existing:
+        return
+
+    enabled = [
+        (k, v) for k, v in config.PRACTICE_MODELS.items()
+        if v.get("enabled") is True
+    ]
+    if not enabled:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="no_enabled_practice_models",
+        )
+
+    # primary 후보: default=True 우선, 없으면 첫 enabled
+    primary_key = None
+    for k, v in enabled:
+        if v.get("default") is True:
+            primary_key = k
+            break
+    if primary_key is None:
+        primary_key = enabled[0][0]
+
+    primary_candidate_id: int | None = None
+
+    for k, v in enabled:
+        model_name = v.get("model_name") or k
+        data_in = PracticeSessionModelCreate(
+            session_id=session_id,
+            model_name=model_name,
+            # 일단 False로 만들고, 아래에서 set_primary로 1개만 보장
+            is_primary=False,
+            generation_params=dict(config.PRACTICE_DEFAULT_GENERATION),
+        )
+        created = practice_session_model_crud.create(db, data_in)
+        if k == primary_key and primary_candidate_id is None:
+            # CRUD가 반환하는 PK 이름이 session_model_id라고 가정(프로젝트 기존 흐름)
+            primary_candidate_id = getattr(created, "session_model_id", None)
+
+    db.commit()
+
+    if primary_candidate_id:
+        set_primary_model_for_session(
+            db,
+            me=None,  # 서비스가 me를 꼭 쓰면 여기서 쓰지 말고 아래처럼 endpoint에서 처리해
+            session_id=session_id,
+            target_session_model_id=primary_candidate_id,
+        )
+        db.commit()
+
+
 # =========================================
 # Practice Sessions
 # =========================================
@@ -81,7 +138,7 @@ def list_my_practice_sessions(
     response_model=PracticeSessionResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session",
-    summary="새 대화(세션)",
+    summary="새 대화(세션): 세션 생성 + 기본 모델 미리 생성",
 )
 def create_practice_session(
     data: PracticeSessionCreate,
@@ -89,69 +146,103 @@ def create_practice_session(
     me: AppUser = Depends(get_current_user),
 ):
     """
-    - body: class_id / project_id / knowledge_id / title / notes (전부 optional)
-    - user_id 는 여기서 me.user_id 로 강제 주입
+    새 대화 버튼 UX:
+    1) 세션 생성
+    2) 기본 세션모델(여러개) 미리 생성 -> 바로 PATCH로 튜닝 가능
     """
+    class_id = getattr(data, "class_id", None)
+    if not class_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id_required")
+
     session = practice_session_crud.create(
         db=db,
         data=data,
         user_id=me.user_id,
     )
+
+    # 기본 모델들 생성(튜닝 UI 즉시 가능)
+    # NOTE: set_primary_model_for_session가 me를 꼭 요구하면,
+    # 여기 helper에서 me=None 쓰지 말고 endpoint에서 primary 보장 로직을 직접 처리해.
+    _init_default_models_for_session(db, session_id=session.session_id)
+
     return PracticeSessionResponse.model_validate(session)
 
 
 # =========================================
-# LLM /chat 엔드포인트
+# Quick Run (바로 입력) - session_id==0 제거 대체
 # =========================================
 @router.post(
-    "/sessions/{session_id}/chat",
+    "/sessions/run",
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
-    operation_id="run_practice_turn_for_session",
-    summary="실제 LLM 실습 턴 실행(if==0, 새 세션 생성)",
+    operation_id="run_practice_turn_for_new_session",
+    summary="바로 입력: 새 세션 생성 + 첫 턴 실행",
 )
-def run_practice_turn_endpoint(
-    session_id: int = Path(
-        ...,
-        ge=0,
-        description="0이면 자동으로 새 세션을 생성 실행, 1 이상이면 해당 세션에서 이어서 대화",
-    ),
-    class_id: int = Query(
-        ...,
-        ge=1,
-        description="이 연습 세션이 속한 Class ID (partner.classes.id)",
-    ),
+def run_practice_turn_new_session_endpoint(
+    class_id: int = Query(..., ge=1, description="이 연습 세션이 속한 Class ID (partner.classes.id)"),
     project_id: int | None = Query(
         None,
         ge=1,
-        description=(
-            "이 연습 세션이 속한 Project ID (user.projects.project_id). "
-            "session_id == 0 인 새 세션 생성 시에만 사용."
-        ),
+        description="새 세션 생성 시 연결할 Project ID (user.projects.project_id)",
     ),
     body: PracticeTurnRequest = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
     """
-    멀티 LLM 실습 턴 실행:
-    - session_id == 0: 새 세션 생성 + class LLM 설정 기반 모델 구성 후 첫 턴 실행
-      (이때 project_id 가 있으면 해당 프로젝트에 세션을 묶음)
-      (body.knowledge_id 가 있으면 세션의 기본 지식베이스로 저장)
-    - session_id > 0: 기존 세션/클래스 검증 + 세션에 등록된 모델 중 선택 실행
-        모델 : `gpt-4o-mini`, `gpt-5-mini` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
-      (body.knowledge_id 가 있으면 이번 턴에서 사용할 지식베이스를 변경/설정)
+    - 새 세션 생성 + 모델 구성 + 첫 턴 실행을 한번에 처리(빠른 시작)
+    - 기존의 session_id==0  외부 API에서 제거(내부에서 돌림)
+    `gpt-4o-mini`, `gpt-5-mini` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
     """
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
-        session_id=session_id,
+        session_id=0,          # 내부적으로만 사용(외부 API에서 숨김)
         class_id=class_id,
         project_id=project_id,
         body=body,
     )
     db.commit()
     return turn_result
+
+
+# =========================================
+# LLM /chat (기존 세션 전용)
+# =========================================
+@router.post(
+    "/sessions/{session_id}/chat",
+    response_model=PracticeTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="run_practice_turn_for_existing_session",
+    summary="기존 세션에서 실습 턴 실행",
+)
+def run_practice_turn_endpoint(
+    session_id: int = Path(..., ge=1, description="1 이상: 해당 세션에서 이어서 대화"),
+    body: PracticeTurnRequest = Body(...),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """
+    - session_id > 0: 기존 세션에서 실행
+    - class_id는 세션에 저장된 값을 사용(쿼리로 안 받음)
+    - body.knowledge_id가 있으면 이번 턴에서만 override 가능
+     세션에 등록된 모델 중 선택 실행 모델 :
+        `gpt-4o-mini`, `gpt-5-mini` , `gpt-3.5-turbo` , `claude-3-haiku-20240307` , `gemini-2.5-flash`
+    """
+    session = ensure_my_session(db, session_id, me)
+
+    turn_result = run_practice_turn_for_session(
+        db=db,
+        me=me,
+        session_id=session_id,
+        class_id=session.class_id,
+        project_id=session.project_id,
+        body=body,
+    )
+    db.commit()
+    return turn_result
+
+
 
 
 @router.get(
@@ -382,6 +473,9 @@ def get_practice_response(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    특정 응답 1개 상세 열기(예: 히스토리에서 응답 카드 클릭 → 상세/공유/디버그 화면)
+    """
     resp, _model, _session = ensure_my_response(db, response_id, me)
     return PracticeResponseResponse.model_validate(resp)
 
@@ -397,6 +491,11 @@ def update_practice_response(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    응답 레코드의 일부를 수정(예: 사용자가 별점/메모/태그 같은 필드를 응답에 붙이거나,
+    관리자/파트너가 “검수 상태” 같은 메타를 업데이트할 때)
+    ※ LLM 텍스트 자체를 수정하게 할지 여부는 정책 선택.
+    """
     _resp, _model, _session = ensure_my_response(db, response_id, me)
     updated = practice_response_crud.update(db, response_id=response_id, data=data)
     db.commit()
@@ -415,6 +514,9 @@ def delete_practice_response(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    특정 턴만 삭제(예: 실수로 민감정보를 넣어서 해당 턴만 지우고 싶을 때, 혹은 대화 전체는 남기고 일부 턴만 제거).
+    """
     _resp, _model, _session = ensure_my_response(db, response_id, me)
     practice_response_crud.delete(db, response_id=response_id)
     db.commit()
