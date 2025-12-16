@@ -1,7 +1,7 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
 
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 from fastapi import (
     APIRouter,
@@ -12,17 +12,24 @@ from fastapi import (
     status,
     Body,
 )
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import select, func
 
 from core.deps import get_db, get_current_user
 from core import config
 from models.user.account import AppUser
+from models.user.practice import (
+    PracticeSessionSetting,
+    PracticeSessionSettingFewShot,
+    UserFewShotExample,
+)
 
 from crud.user.practice import (
     practice_session_crud,
     practice_session_model_crud,
     practice_response_crud,
     practice_session_setting_crud,
+    user_few_shot_example_crud,
 )
 
 from schemas.base import Page
@@ -40,6 +47,9 @@ from schemas.user.practice import (
     PracticeTurnResponse,
     PracticeSessionSettingResponse,
     PracticeSessionSettingUpdate,
+    UserFewShotExampleCreate,
+    UserFewShotExampleUpdate,
+    UserFewShotExampleResponse,
 )
 
 from service.user.practice import (
@@ -63,10 +73,7 @@ def _get_default_generation_params_dict() -> dict:
     return {}
 
 
-def _ensure_session_settings_row(db: Session, *, session_id: int):
-    """
-    세션당 settings 1개 보장.
-    """
+def _ensure_session_settings_row(db: Session, *, session_id: int) -> PracticeSessionSetting:
     default_gen = _get_default_generation_params_dict()
     return practice_session_setting_crud.get_or_create_default(
         db,
@@ -75,16 +82,31 @@ def _ensure_session_settings_row(db: Session, *, session_id: int):
     )
 
 
+def _get_settings_with_links(db: Session, *, session_id: int) -> PracticeSessionSetting:
+    """
+    settings + few_shot_links(+example)까지 같이 로드해서 N+1 완화
+    """
+    stmt = (
+        select(PracticeSessionSetting)
+        .where(PracticeSessionSetting.session_id == session_id)
+        .options(
+            selectinload(PracticeSessionSetting.few_shot_links).selectinload(
+                PracticeSessionSettingFewShot.example
+            )
+        )
+    )
+    row = db.scalar(stmt)
+    if row:
+        return row
+    return _ensure_session_settings_row(db, session_id=session_id)
+
+
 def _init_default_models_for_session(
     db: Session,
     *,
     session_id: int,
     base_generation_params: dict,
 ) -> None:
-    """
-    세션 생성 직후, 튜닝 UI가 바로 뜰 수 있게 기본 모델들을 미리 생성해둠.
-    - model_name은 "논리 모델 이름"(= config 키)을 저장
-    """
     existing = practice_session_model_crud.list_by_session(db, session_id=session_id)
     if existing:
         return
@@ -115,17 +137,14 @@ def _init_default_models_for_session(
     for k, _v in enabled:
         data_in = PracticeSessionModelCreate(
             session_id=session_id,
-            model_name=k,     # 논리 모델 이름(= config 키)
+            model_name=k,
             is_primary=(k == primary_key),
-            generation_params=dict(base_gen),  # 모델별 copy
+            generation_params=dict(base_gen),
         )
         practice_session_model_crud.create(db, data_in)
 
 
 def _ensure_session_models_ready(db: Session, *, session_id: int, base_gen: dict) -> None:
-    """
-    레거시 세션 대비: 모델 row가 없으면 기본 모델 생성.
-    """
     existing = practice_session_model_crud.list_by_session(db, session_id=session_id)
     if not existing:
         _init_default_models_for_session(
@@ -136,14 +155,46 @@ def _ensure_session_models_ready(db: Session, *, session_id: int, base_gen: dict
 
 
 def _extract_generation_patch(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    PracticeSessionSettingUpdate payload에서 generation_params만 뽑아내서
-    None 값은 제거한 "실제 변경분" dict로 만든다.
-    """
     gp = payload.get("generation_params")
     if not isinstance(gp, dict):
         return {}
     return {k: v for k, v in gp.items() if v is not None}
+
+
+def _validate_my_few_shot_example_ids(
+    db: Session,
+    *,
+    me: AppUser,
+    example_ids: list[int],
+) -> None:
+    # 중복 방지(UniqueConstraint 걸려있어서 DB에서 터지기 전에 400으로)
+    if len(example_ids) != len(set(example_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="duplicate_few_shot_example_ids",
+        )
+    if not example_ids:
+        return
+
+    stmt = (
+        select(func.count(UserFewShotExample.example_id))
+        .where(UserFewShotExample.user_id == me.user_id)
+        .where(UserFewShotExample.is_active.is_(True))
+        .where(UserFewShotExample.example_id.in_(example_ids))
+    )
+    cnt = db.scalar(stmt) or 0
+    if cnt != len(example_ids):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="invalid_few_shot_example_ids",
+        )
+
+
+def _ensure_my_few_shot_example(db: Session, *, example_id: int, me: AppUser) -> UserFewShotExample:
+    obj = user_few_shot_example_crud.get(db, example_id)
+    if not obj or obj.user_id != me.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="few_shot_example_not_found")
+    return obj
 
 
 # =========================================================
@@ -196,10 +247,8 @@ def create_practice_session(
         user_id=me.user_id,
     )
 
-    # settings 보장
     setting = _ensure_session_settings_row(db, session_id=session.session_id)
 
-    # 기본 모델들 생성(튜닝 UI 즉시 가능)
     base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
     _init_default_models_for_session(
         db,
@@ -224,8 +273,7 @@ def get_practice_session(
 ):
     session = ensure_my_session(db, session_id, me)
 
-    # settings 같이 내려주면 UX 편해짐
-    setting = _ensure_session_settings_row(db, session_id=session.session_id)
+    setting = _get_settings_with_links(db, session_id=session.session_id)
 
     resp_rows = practice_response_crud.list_by_session(db, session_id=session.session_id)
     resp_items = [PracticeResponseResponse.model_validate(r) for r in resp_rows]
@@ -298,13 +346,12 @@ def get_practice_session_settings(
 ):
     _ = ensure_my_session(db, session_id, me)
 
-    setting = _ensure_session_settings_row(db, session_id=session_id)
+    setting = _get_settings_with_links(db, session_id=session_id)
 
-    # settings는 있는데 모델이 없을 수도 있으니 보장
     base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
     _ensure_session_models_ready(db, session_id=session_id, base_gen=base_gen)
 
-    db.commit()  # settings/model이 없어서 생성된 경우 반영
+    db.commit()
     return PracticeSessionSettingResponse.model_validate(setting)
 
 
@@ -312,7 +359,7 @@ def get_practice_session_settings(
     "/sessions/{session_id}/settings",
     response_model=PracticeSessionSettingResponse,
     operation_id="update_practice_session_settings",
-    summary="세션 settings",
+    summary="세션 settings 수정(style/generation/few-shot 선택)",
 )
 def update_practice_session_settings(
     session_id: int = Path(..., ge=1),
@@ -322,14 +369,20 @@ def update_practice_session_settings(
 ):
     _ = ensure_my_session(db, session_id, me)
 
-    # row 보장
     current = _ensure_session_settings_row(db, session_id=session_id)
 
     payload = data.model_dump(exclude_unset=True)
     if not payload:
-        return PracticeSessionSettingResponse.model_validate(current)
+        setting = _get_settings_with_links(db, session_id=session_id)
+        return PracticeSessionSettingResponse.model_validate(setting)
 
-    # 이번 PATCH에서 "generation_params 변경분"만 뽑음 (없으면 sync 안 함)
+    # few-shot 선택 ids 검증(내 것 + 활성)
+    if "few_shot_example_ids" in payload:
+        ids = payload.get("few_shot_example_ids") or []
+        if not isinstance(ids, list):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="few_shot_example_ids_must_be_list")
+        _validate_my_few_shot_example_ids(db, me=me, example_ids=[int(x) for x in ids])
+
     gen_patch = _extract_generation_patch(payload)
 
     updated = practice_session_setting_crud.update_by_session_id(
@@ -340,21 +393,116 @@ def update_practice_session_settings(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings not found")
 
-    # 레거시 대비: 모델 없으면 만들어두고
     base_gen = getattr(updated, "generation_params", None) or _get_default_generation_params_dict()
     _ensure_session_models_ready(db, session_id=session_id, base_gen=base_gen)
 
-    # generation_params가 바뀐 경우에만 동기화 수행
     if gen_patch:
         practice_session_model_crud.bulk_sync_generation_params_by_session(
             db,
             session_id=session_id,
-            generation_params=gen_patch,  # "변경분"만 반영
+            generation_params=gen_patch,
             merge=True,
         )
 
     db.commit()
-    return PracticeSessionSettingResponse.model_validate(updated)
+    setting = _get_settings_with_links(db, session_id=session_id)
+    return PracticeSessionSettingResponse.model_validate(setting)
+
+
+# =========================================================
+# Few-shot Example Library (개인)
+# =========================================================
+@router.get(
+    "/few-shot-examples",
+    response_model=Page[UserFewShotExampleResponse],
+    operation_id="list_my_few_shot_examples",
+    summary="내 few-shot 예시 목록",
+)
+def list_my_few_shot_examples(
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    is_active: Optional[bool] = Query(None),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    rows, total = user_few_shot_example_crud.list_by_user(
+        db,
+        user_id=me.user_id,
+        page=page,
+        size=size,
+        is_active=is_active,
+    )
+    items = [UserFewShotExampleResponse.model_validate(r) for r in rows]
+    return {"items": items, "total": total, "page": page, "size": size}
+
+
+@router.post(
+    "/few-shot-examples",
+    response_model=UserFewShotExampleResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_my_few_shot_example",
+    summary="내 few-shot 예시 생성",
+)
+def create_my_few_shot_example(
+    data: UserFewShotExampleCreate,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    obj = user_few_shot_example_crud.create(db, user_id=me.user_id, data=data)
+    db.commit()
+    return UserFewShotExampleResponse.model_validate(obj)
+
+
+@router.get(
+    "/few-shot-examples/{example_id}",
+    response_model=UserFewShotExampleResponse,
+    operation_id="get_my_few_shot_example",
+    summary="내 few-shot 예시 단건",
+)
+def get_my_few_shot_example(
+    example_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    obj = _ensure_my_few_shot_example(db, example_id=example_id, me=me)
+    return UserFewShotExampleResponse.model_validate(obj)
+
+
+@router.patch(
+    "/few-shot-examples/{example_id}",
+    response_model=UserFewShotExampleResponse,
+    operation_id="update_my_few_shot_example",
+    summary="내 few-shot 예시 수정",
+)
+def update_my_few_shot_example(
+    example_id: int = Path(..., ge=1),
+    data: UserFewShotExampleUpdate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = _ensure_my_few_shot_example(db, example_id=example_id, me=me)
+    obj = user_few_shot_example_crud.update(db, example_id=example_id, data=data)
+    db.commit()
+    if not obj:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="few_shot_example_not_found")
+    return UserFewShotExampleResponse.model_validate(obj)
+
+
+@router.delete(
+    "/few-shot-examples/{example_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="delete_my_few_shot_example",
+    summary="내 few-shot 예시 삭제",
+)
+def delete_my_few_shot_example(
+    example_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ = _ensure_my_few_shot_example(db, example_id=example_id, me=me)
+    user_few_shot_example_crud.delete(db, example_id=example_id)
+    db.commit()
+    return None
 
 
 # =========================================================
@@ -391,18 +539,14 @@ def create_practice_session_model(
 ):
     _ = ensure_my_session(db, session_id, me)
 
-    # 새 모델을 추가할 때 generation_params를 안 주면 settings 값을 복사해서 넣어준다
     setting = _ensure_session_settings_row(db, session_id=session_id)
     base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
 
     incoming_gp = getattr(data, "generation_params", None)
 
     if incoming_gp is None:
-        data_in = data.model_copy(
-            update={"session_id": session_id, "generation_params": dict(base_gen)}
-        )
+        data_in = data.model_copy(update={"session_id": session_id, "generation_params": dict(base_gen)})
     else:
-        # base_gen + incoming override
         if hasattr(incoming_gp, "model_dump"):
             gp_dict = incoming_gp.model_dump(exclude_unset=True)
         elif isinstance(incoming_gp, dict):
@@ -412,9 +556,7 @@ def create_practice_session_model(
 
         merged = dict(base_gen)
         merged.update(gp_dict)
-        data_in = data.model_copy(
-            update={"session_id": session_id, "generation_params": merged}
-        )
+        data_in = data.model_copy(update={"session_id": session_id, "generation_params": merged})
 
     model = practice_session_model_crud.create(db, data_in)
     db.commit()
@@ -425,7 +567,7 @@ def create_practice_session_model(
     "/models/{session_model_id}",
     response_model=PracticeSessionModelResponse,
     operation_id="user_update_practice_session_model",
-    summary="모델별 LLM 파라미터 튜닝/primary 변경",
+    summary="LLM 파라미터 튜닝/primary 변경",
 )
 def update_practice_session_model(
     session_model_id: int = Path(..., ge=1),
@@ -487,11 +629,7 @@ def delete_practice_session_model(
 )
 def run_practice_turn_new_session_endpoint(
     class_id: int = Query(..., ge=1, description="이 연습 세션이 속한 Class ID (partner.classes.id)"),
-    project_id: int | None = Query(
-        None,
-        ge=1,
-        description="새 세션 생성 시 연결할 Project ID (user.projects.project_id)",
-    ),
+    project_id: int | None = Query(None, ge=1, description="새 세션 생성 시 연결할 Project ID (user.projects.project_id)"),
     body: PracticeTurnRequest = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -499,14 +637,15 @@ def run_practice_turn_new_session_endpoint(
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
-        session_id=0,  # 내부적으로만 사용
+        session_id=0,
         class_id=class_id,
         project_id=project_id,
         body=body,
     )
 
-    # 생성된 세션에 settings 보장
-    _ensure_session_settings_row(db, session_id=turn_result.session_id)
+    setting = _ensure_session_settings_row(db, session_id=turn_result.session_id)
+    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
+    _ensure_session_models_ready(db, session_id=turn_result.session_id, base_gen=base_gen)
 
     db.commit()
     return turn_result
@@ -533,7 +672,6 @@ def run_practice_turn_endpoint(
             detail="session_has_no_class_id",
         )
 
-    # settings + 모델 row 보장(레거시 대비)
     setting = _ensure_session_settings_row(db, session_id=session.session_id)
     base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
     _ensure_session_models_ready(db, session_id=session.session_id, base_gen=base_gen)
@@ -564,10 +702,7 @@ def list_practice_responses_by_model(
     me: AppUser = Depends(get_current_user),
 ):
     _model, _session = ensure_my_session_model(db, session_model_id, me)
-    responses = practice_response_crud.list_by_session_model(
-        db,
-        session_model_id=session_model_id,
-    )
+    responses = practice_response_crud.list_by_session_model(db, session_model_id=session_model_id)
     return [PracticeResponseResponse.model_validate(r) for r in responses]
 
 

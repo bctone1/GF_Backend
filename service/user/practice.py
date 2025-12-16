@@ -1,9 +1,11 @@
+# service/user/practice.py
 from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from core import config
 from langchain_service.embedding.get_vector import texts_to_vectors
@@ -16,8 +18,6 @@ from crud.user.practice import (
     practice_session_setting_crud,
     practice_session_model_crud,
     practice_response_crud,
-    practice_rating_crud,
-    model_comparison_crud,
 )
 from crud.partner import classes as classes_crud
 
@@ -26,12 +26,14 @@ from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
     PracticeResponse,
+    PracticeSessionSetting,
+    PracticeSessionSettingFewShot,
+    UserFewShotExample,
 )
 from models.partner.catalog import ModelCatalog
 
 from schemas.user.practice import (
     PracticeResponseCreate,
-    ModelComparisonCreate,
     PracticeSessionCreate,
     PracticeSessionModelCreate,
     PracticeSessionUpdate,
@@ -44,8 +46,13 @@ from schemas.user.practice import (
 # =========================================
 # 세션 settings 보장(세션당 1개)
 # =========================================
-def ensure_session_settings(db: Session, *, session_id: int):
-    return practice_session_setting_crud.get_or_create_default(db, session_id=session_id)
+def ensure_session_settings(db: Session, *, session_id: int) -> PracticeSessionSetting:
+    default_gen = _get_default_generation_params()
+    return practice_session_setting_crud.get_or_create_default(
+        db,
+        session_id=session_id,
+        default_generation_params=default_gen,
+    )
 
 
 # =========================================
@@ -62,6 +69,43 @@ def _get_default_generation_params() -> Dict[str, Any]:
         "response_length_preset": "normal",
         "max_tokens": 512,
     }
+
+
+# =========================================
+# settings에 선택된 few-shot 예시 로드
+# - mapping 테이블 기반
+# - sort_order 유지
+# - "내 것 + active"만 사용
+# =========================================
+def _load_selected_few_shots_for_setting(
+    db: Session,
+    *,
+    setting_id: int,
+    me: AppUser,
+) -> List[Dict[str, str]]:
+    stmt = (
+        select(
+            UserFewShotExample.input_text,
+            UserFewShotExample.output_text,
+        )
+        .join(
+            PracticeSessionSettingFewShot,
+            PracticeSessionSettingFewShot.example_id == UserFewShotExample.example_id,
+        )
+        .where(PracticeSessionSettingFewShot.setting_id == setting_id)
+        .where(UserFewShotExample.user_id == me.user_id)
+        .where(UserFewShotExample.is_active.is_(True))
+        .order_by(PracticeSessionSettingFewShot.sort_order.asc())
+    )
+    rows = db.execute(stmt).all()
+
+    out: List[Dict[str, str]] = []
+    for input_text, output_text in rows:
+        it = (input_text or "").strip()
+        ot = (output_text or "").strip()
+        if it and ot:
+            out.append({"input": it, "output": ot})
+    return out
 
 
 # =========================================
@@ -112,27 +156,22 @@ def _build_context_from_documents(
 
         doc = None
 
-        # 1) 우선: knowledge_id로 조회 시도(기존 너 코드 호환)
+        # 1) knowledge_id로 조회 시도
         try:
             doc = document_crud.get(db, knowledge_id=raw_id)
-        except TypeError:
-            doc = None
         except Exception:
             doc = None
 
-        # 2) 실패하면: id로 조회 시도(= document PK)
+        # 2) 실패하면 id로 조회 시도
         if doc is None:
             try:
                 doc = document_crud.get(db, id=raw_id)
-            except TypeError:
-                doc = None
             except Exception:
                 doc = None
 
         if not doc:
             continue
 
-        # 소유권 체크(필드명이 프로젝트마다 달라서 안전하게)
         owner_id = (
             getattr(doc, "owner_id", None)
             or getattr(doc, "user_id", None)
@@ -141,10 +180,8 @@ def _build_context_from_documents(
         if owner_id is not None and owner_id != user.user_id:
             continue
 
-        # 벡터검색 키(보통 knowledge_id)
         kid = getattr(doc, "knowledge_id", None)
         if kid is None:
-            # 그래도 없으면 doc 자체를 top-k에 쓰기 어려우니 스킵
             continue
 
         valid_docs.append(doc)
@@ -167,12 +204,6 @@ def _build_context_from_documents(
                 knowledge_id=kid,
                 top_k=per_doc_top_k,
             )
-        except TypeError:
-            # search_by_vector 시그니처가 다를 수도 있어서 최소 방어
-            try:
-                doc_chunks = document_chunk_crud.search_by_vector(db, query_vector, kid, per_doc_top_k)
-            except Exception:
-                doc_chunks = []
         except Exception:
             doc_chunks = []
 
@@ -271,12 +302,20 @@ def set_primary_model_for_session(
             m.is_primary = False
 
     if target is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="target model does not belong to this session")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="target model does not belong to this session",
+        )
 
     db.flush()
     return target
 
 
+# =========================================
+# class 설정 기반 모델 생성
+# - base_generation_params(= settings.generation_params) 를 기본으로 깔고,
+#   generation_overrides[name] 로 모델별 덮어쓰기
+# =========================================
 def init_models_for_session_from_class(
     db: Session,
     *,
@@ -284,6 +323,7 @@ def init_models_for_session_from_class(
     session: PracticeSession,
     class_id: int,
     requested_model_names: list[str] | None = None,
+    base_generation_params: dict[str, Any] | None = None,
     generation_overrides: dict[str, dict[str, Any]] | None = None,
 ) -> list[PracticeSessionModel]:
     existing = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
@@ -326,11 +366,16 @@ def init_models_for_session_from_class(
         if not final_names:
             raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
 
+    base_gen = dict(base_generation_params or _get_default_generation_params())
     overrides = generation_overrides or {}
 
     created: list[PracticeSessionModel] = []
     for idx, name in enumerate(final_names):
-        gp = overrides.get(name) or _get_default_generation_params()
+        gp = dict(base_gen)
+        ov = overrides.get(name)
+        if isinstance(ov, dict):
+            gp.update(ov)
+
         m = practice_session_model_crud.create(
             db,
             PracticeSessionModelCreate(
@@ -400,7 +445,7 @@ def _call_llm_for_model(
         effective["max_tokens"] = length_presets[preset]
     elif preset == "custom":
         if effective.get("max_tokens") is None:
-            if "max_tokens" in default_gen and default_gen["max_tokens"] is not None:
+            if default_gen.get("max_tokens") is not None:
                 effective["max_tokens"] = default_gen["max_tokens"]
     else:
         if effective.get("max_tokens") is not None:
@@ -412,6 +457,7 @@ def _call_llm_for_model(
 
     messages: list[dict[str, str]] = []
 
+    # (옵션) few_shot_examples: [{"input":..., "output":...}, ...]
     few_shot_raw = gp.get("few_shot_examples") if isinstance(gp, dict) else None
     if isinstance(few_shot_raw, list):
         for ex in few_shot_raw:
@@ -458,7 +504,13 @@ def run_practice_turn(
 
     settings = ensure_session_settings(db, session_id=session.session_id)
     session_base_gen = getattr(settings, "generation_params", None) or {}
-    session_few_shots = getattr(settings, "few_shot_examples", None) or []
+
+    # settings에 선택된 few-shot 예시(매핑 기반)
+    selected_few_shots = _load_selected_few_shots_for_setting(
+        db,
+        setting_id=settings.setting_id,
+        me=user,
+    )
 
     context_text = ""
     if document_ids:
@@ -473,15 +525,19 @@ def run_practice_turn(
 
     for m in models:
         if m.session_id != session.session_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_model does not belong to given session")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="session_model does not belong to given session",
+            )
 
         full_prompt = f"{context_text}\n\n질문: {prompt_text}" if context_text else prompt_text
 
         model_gp = getattr(m, "generation_params", None) or {}
         effective_gp: Dict[str, Any] = {**session_base_gen, **model_gp}
 
-        if not effective_gp.get("few_shot_examples") and session_few_shots:
-            effective_gp["few_shot_examples"] = session_few_shots
+        # 모델이 직접 few_shot_examples를 안 갖고 있으면 settings 선택분 주입
+        if not effective_gp.get("few_shot_examples") and selected_few_shots:
+            effective_gp["few_shot_examples"] = selected_few_shots
 
         response_text, token_usage, latency_ms = _call_llm_for_model(
             model_name=m.model_name,
@@ -524,7 +580,11 @@ def run_practice_turn(
             answer=primary.response_text,
             max_chars=30,
         )
-        practice_session_crud.update(db, session_id=session.session_id, data=PracticeSessionUpdate(title=title))
+        practice_session_crud.update(
+            db,
+            session_id=session.session_id,
+            data=PracticeSessionUpdate(title=title),
+        )
         session.title = title
 
     return PracticeTurnResponse(
@@ -557,7 +617,8 @@ def create_session_with_first_turn(
         user_id=user.user_id,
     )
 
-    ensure_session_settings(db, session_id=session.session_id)
+    settings = ensure_session_settings(db, session_id=session.session_id)
+    base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
 
     session_model = practice_session_model_crud.create(
         db,
@@ -565,7 +626,7 @@ def create_session_with_first_turn(
             session_id=session.session_id,
             model_name=model_name,
             is_primary=True,
-            generation_params=_get_default_generation_params(),
+            generation_params=dict(base_gen),
         ),
     )
 
@@ -596,7 +657,6 @@ def create_session_with_first_turn(
         session_id=session.session_id,
         data=PracticeSessionUpdate(title=title),
     )
-
     return session, response
 
 
@@ -652,7 +712,8 @@ def run_practice_turn_for_session(
             user_id=me.user_id,
         )
 
-        ensure_session_settings(db, session_id=session.session_id)
+        settings = ensure_session_settings(db, session_id=session.session_id)
+        base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
 
         created_models = init_models_for_session_from_class(
             db,
@@ -660,6 +721,7 @@ def run_practice_turn_for_session(
             session=session,
             class_id=class_id,
             requested_model_names=None,
+            base_generation_params=base_gen,
             generation_overrides=None,
         )
 
@@ -672,7 +734,7 @@ def run_practice_turn_for_session(
 
     else:
         session = ensure_my_session(db, session_id, me)
-        ensure_session_settings(db, session_id=session.session_id)
+        _ = ensure_session_settings(db, session_id=session.session_id)
 
         models = _select_models_for_existing_session(
             db,

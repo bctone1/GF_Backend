@@ -1,7 +1,7 @@
 # crud/user/practice.py
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple, Any, Mapping, Union, List, Dict
+from typing import Optional, Sequence, Tuple, Any, Mapping, Union
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
@@ -11,24 +11,22 @@ from core import config
 from models.user.practice import (
     PracticeSession,
     PracticeSessionSetting,
+    PracticeSessionSettingFewShot,
+    UserFewShotExample,
     PracticeSessionModel,
     PracticeResponse,
-    PracticeRating,
-    ModelComparison,
 )
 
 from schemas.user.practice import (
     PracticeSessionCreate,
     PracticeSessionUpdate,
+    PracticeSessionSettingUpdate,
     PracticeSessionModelCreate,
     PracticeSessionModelUpdate,
     PracticeResponseCreate,
     PracticeResponseUpdate,
-    PracticeRatingCreate,
-    PracticeRatingUpdate,
-    ModelComparisonCreate,
-    ModelComparisonUpdate,
-    PracticeSessionSettingUpdate,
+    UserFewShotExampleCreate,
+    UserFewShotExampleUpdate,
 )
 
 
@@ -36,28 +34,14 @@ from schemas.user.practice import (
 # internal helpers
 # =========================================================
 def _dump_pydantic(value: Any) -> Any:
-    """pydantic 모델이면 dict로 dump, 아니면 그대로."""
     if hasattr(value, "model_dump"):
         return value.model_dump(exclude_unset=True)
     return value
 
 
 def _coerce_dict(value: Any) -> dict[str, Any]:
-    """dict 또는 pydantic -> dict, 아니면 {}"""
     v = _dump_pydantic(value)
     return dict(v) if isinstance(v, dict) else {}
-
-
-def _coerce_list_of_dict(value: Any) -> list[dict[str, Any]]:
-    """list[dict|pydantic] -> list[dict]"""
-    if not isinstance(value, list):
-        return []
-    out: list[dict[str, Any]] = []
-    for item in value:
-        d = _dump_pydantic(item)
-        if isinstance(d, dict):
-            out.append(dict(d))
-    return out
 
 
 # =========================================================
@@ -96,11 +80,11 @@ class PracticeSessionCRUD:
         page: int = 1,
         size: int = 50,
     ) -> Tuple[Sequence[PracticeSession], int]:
-        stmt = select(PracticeSession).where(PracticeSession.user_id == user_id)
-        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        base = select(PracticeSession).where(PracticeSession.user_id == user_id)
+        total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
 
         stmt = (
-            stmt.order_by(PracticeSession.created_at.desc())
+            base.order_by(PracticeSession.created_at.desc())
             .offset((page - 1) * size)
             .limit(size)
         )
@@ -139,15 +123,8 @@ practice_session_crud = PracticeSessionCRUD()
 # PracticeSessionSetting CRUD
 # =========================================================
 class PracticeSessionSettingCRUD:
-    def get_by_session(
-        self,
-        db: Session,
-        *,
-        session_id: int,
-    ) -> Optional[PracticeSessionSetting]:
-        stmt = select(PracticeSessionSetting).where(
-            PracticeSessionSetting.session_id == session_id
-        )
+    def get_by_session(self, db: Session, *, session_id: int) -> Optional[PracticeSessionSetting]:
+        stmt = select(PracticeSessionSetting).where(PracticeSessionSetting.session_id == session_id)
         return db.scalar(stmt)
 
     def get_or_create_default(
@@ -157,8 +134,8 @@ class PracticeSessionSettingCRUD:
         session_id: int,
         default_generation_params: Optional[dict[str, Any]] = None,
         default_style_params: Optional[dict[str, Any]] = None,
-        default_few_shot_examples: Optional[list[Any]] = None,
         style_preset: Optional[str] = None,
+        default_few_shot_example_ids: Optional[list[int]] = None,
     ) -> PracticeSessionSetting:
         """
         세션당 settings 1개 보장.
@@ -175,10 +152,6 @@ class PracticeSessionSettingCRUD:
         gen = dict(gen)
 
         style = default_style_params if isinstance(default_style_params, dict) else {}
-        few = default_few_shot_examples if isinstance(default_few_shot_examples, list) else []
-
-        # few_shot_examples 요소가 pydantic이면 dict로 변환
-        few_dicts = _coerce_list_of_dict(few)
 
         try:
             with db.begin_nested():
@@ -187,10 +160,22 @@ class PracticeSessionSettingCRUD:
                     style_preset=style_preset,
                     style_params=dict(style),
                     generation_params=gen,
-                    few_shot_examples=few_dicts,
                 )
                 db.add(obj)
                 db.flush()
+
+                # (선택) 기본 few-shot 링크 세팅
+                if default_few_shot_example_ids:
+                    for i, eid in enumerate(default_few_shot_example_ids):
+                        db.add(
+                            PracticeSessionSettingFewShot(
+                                setting_id=obj.setting_id,
+                                example_id=eid,
+                                sort_order=i,
+                            )
+                        )
+                    db.flush()
+
             db.refresh(obj)
             return obj
         except IntegrityError:
@@ -202,6 +187,29 @@ class PracticeSessionSettingCRUD:
     def ensure_default(self, db: Session, *, session_id: int) -> PracticeSessionSetting:
         return self.get_or_create_default(db, session_id=session_id)
 
+    def _replace_few_shot_links(
+        self,
+        db: Session,
+        *,
+        setting_id: int,
+        example_ids: list[int],
+    ) -> None:
+        db.execute(
+            delete(PracticeSessionSettingFewShot).where(
+                PracticeSessionSettingFewShot.setting_id == setting_id
+            )
+        )
+        # 새 링크 생성 (리스트 순서를 sort_order로)
+        for i, eid in enumerate(example_ids):
+            db.add(
+                PracticeSessionSettingFewShot(
+                    setting_id=setting_id,
+                    example_id=eid,
+                    sort_order=i,
+                )
+            )
+        db.flush()
+
     def update_by_session_id(
         self,
         db: Session,
@@ -210,24 +218,19 @@ class PracticeSessionSettingCRUD:
         data: Union[PracticeSessionSettingUpdate, Mapping[str, Any]],
     ) -> Optional[PracticeSessionSetting]:
         """
-        session_id 기준으로 settings PATCH.
-        - 없으면 None (endpoint에서 ensure_default 후 호출 권장)
-        - generation_params/style_params 는 "merge"로 동작 (부분 PATCH 안전)
-        - few_shot_examples 는 "replace"로 동작
+        session_id 기준 settings PATCH.
+        - style_params/generation_params: merge
+        - few_shot_example_ids: replace(매핑 테이블)
         """
         row = self.get_by_session(db, session_id=session_id)
         if not row:
             return None
 
-        if hasattr(data, "model_dump"):
-            values = data.model_dump(exclude_unset=True)
-        else:
-            values = dict(data)
-
+        values = data.model_dump(exclude_unset=True) if hasattr(data, "model_dump") else dict(data)
         if not values:
             return row
 
-        # style_preset: 단순 치환
+        # style_preset: replace
         if "style_preset" in values:
             row.style_preset = values.get("style_preset")
 
@@ -245,9 +248,12 @@ class PracticeSessionSettingCRUD:
             base_gen.update(incoming_gen)
             row.generation_params = base_gen
 
-        # few_shot_examples: replace
-        if "few_shot_examples" in values:
-            row.few_shot_examples = _coerce_list_of_dict(values.get("few_shot_examples"))
+        # few_shot_example_ids: replace
+        if "few_shot_example_ids" in values:
+            ids = values.get("few_shot_example_ids") or []
+            if not isinstance(ids, list):
+                ids = []
+            self._replace_few_shot_links(db, setting_id=row.setting_id, example_ids=list(ids))
 
         db.add(row)
         db.flush()
@@ -256,6 +262,87 @@ class PracticeSessionSettingCRUD:
 
 
 practice_session_setting_crud = PracticeSessionSettingCRUD()
+
+
+# =========================================================
+# UserFewShotExample CRUD (개인 라이브러리)
+# =========================================================
+class UserFewShotExampleCRUD:
+    def create(self, db: Session, *, user_id: int, data: UserFewShotExampleCreate) -> UserFewShotExample:
+        obj = UserFewShotExample(
+            user_id=user_id,
+            title=data.title,
+            input_text=data.input_text,
+            output_text=data.output_text,
+            meta=_coerce_dict(data.meta),
+            is_active=data.is_active if data.is_active is not None else True,
+        )
+        db.add(obj)
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def get(self, db: Session, example_id: int) -> Optional[UserFewShotExample]:
+        stmt = select(UserFewShotExample).where(UserFewShotExample.example_id == example_id)
+        return db.scalar(stmt)
+
+    def list_by_user(
+        self,
+        db: Session,
+        *,
+        user_id: int,
+        page: int = 1,
+        size: int = 50,
+        is_active: Optional[bool] = None,
+    ) -> Tuple[Sequence[UserFewShotExample], int]:
+        stmt = select(UserFewShotExample).where(UserFewShotExample.user_id == user_id)
+        if is_active is not None:
+            stmt = stmt.where(UserFewShotExample.is_active == is_active)
+
+        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+
+        stmt = (
+            stmt.order_by(UserFewShotExample.created_at.desc(), UserFewShotExample.example_id.desc())
+            .offset((page - 1) * size)
+            .limit(size)
+        )
+        rows = db.scalars(stmt).all()
+        return rows, total
+
+    def update(
+        self,
+        db: Session,
+        *,
+        example_id: int,
+        data: Union[UserFewShotExampleUpdate, Mapping[str, Any]],
+    ) -> Optional[UserFewShotExample]:
+        obj = db.get(UserFewShotExample, example_id)
+        if obj is None:
+            return None
+
+        values = data.model_dump(exclude_unset=True) if hasattr(data, "model_dump") else dict(data)
+        if not values:
+            return obj
+
+        if "meta" in values:
+            values["meta"] = _coerce_dict(values.get("meta"))
+
+        for k, v in values.items():
+            setattr(obj, k, v)
+
+        db.add(obj)
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def delete(self, db: Session, *, example_id: int) -> None:
+        obj = db.get(UserFewShotExample, example_id)
+        if obj:
+            db.delete(obj)
+            db.flush()
+
+
+user_few_shot_example_crud = UserFewShotExampleCRUD()
 
 
 # =========================================================
@@ -278,9 +365,7 @@ class PracticeSessionModelCRUD:
         return obj
 
     def get(self, db: Session, session_model_id: int) -> Optional[PracticeSessionModel]:
-        stmt = select(PracticeSessionModel).where(
-            PracticeSessionModel.session_model_id == session_model_id
-        )
+        stmt = select(PracticeSessionModel).where(PracticeSessionModel.session_model_id == session_model_id)
         return db.scalar(stmt)
 
     def list_by_session(self, db: Session, session_id: int) -> Sequence[PracticeSessionModel]:
@@ -301,19 +386,14 @@ class PracticeSessionModelCRUD:
         session_model_id: int,
         data: Union[PracticeSessionModelUpdate, Mapping[str, Any]],
     ) -> PracticeSessionModel | None:
-        if hasattr(data, "model_dump"):
-            update_data = data.model_dump(exclude_unset=True)
-        else:
-            update_data = dict(data)
-
-        if not update_data:
-            return db.get(PracticeSessionModel, session_model_id)
-
         obj = db.get(PracticeSessionModel, session_model_id)
         if obj is None:
             return None
 
-        # generation_params 들어오면 dict로 변환
+        update_data = data.model_dump(exclude_unset=True) if hasattr(data, "model_dump") else dict(data)
+        if not update_data:
+            return obj
+
         if "generation_params" in update_data:
             update_data["generation_params"] = _coerce_dict(update_data.get("generation_params"))
 
@@ -331,7 +411,6 @@ class PracticeSessionModelCRUD:
             db.delete(obj)
             db.flush()
 
-    # settings → 세션의 모든 모델에 generation_params 동기화
     def bulk_sync_generation_params_by_session(
         self,
         db: Session,
@@ -340,50 +419,24 @@ class PracticeSessionModelCRUD:
         generation_params: Mapping[str, Any] | Any,
         merge: bool = True,
         overwrite_keys: Optional[list[str]] = None,
-        only_fill_missing_few_shots: bool = False,
     ) -> list[PracticeSessionModel]:
-        """
-        session_id에 속한 모든 PracticeSessionModel.generation_params를 동기화.
-
-        - merge=True:
-            기존 모델 dict에 settings dict를 "덮어쓰기"로 합침(모델별 추가 키는 유지)
-        - merge=False:
-            모델 generation_params를 settings dict로 통째로 교체
-        - overwrite_keys:
-            특정 키만 동기화하고 싶을 때 사용 (None이면 gp 전체)
-        - only_fill_missing_few_shots:
-            True면 few_shot_examples는 기존 모델에 값이 없을 때만 채움
-        """
         gp = _coerce_dict(generation_params)
         if not gp:
-            # 아무것도 안 하면 그대로 반환
             return list(self.list_by_session(db, session_id=session_id))
 
         models = list(self.list_by_session(db, session_id=session_id))
-
         keys = overwrite_keys[:] if overwrite_keys else None
 
         for m in models:
             current = dict(getattr(m, "generation_params", None) or {})
-
-            if merge:
-                next_gp = dict(current)
-            else:
-                next_gp = {}
-
-            def apply_key(k: str, v: Any):
-                if k == "few_shot_examples" and only_fill_missing_few_shots:
-                    if current.get("few_shot_examples"):
-                        return
-                next_gp[k] = v
+            next_gp = dict(current) if merge else {}
 
             if keys is None:
-                for k, v in gp.items():
-                    apply_key(k, v)
+                next_gp.update(gp)
             else:
                 for k in keys:
                     if k in gp:
-                        apply_key(k, gp[k])
+                        next_gp[k] = gp[k]
 
             m.generation_params = next_gp
             db.add(m)
@@ -430,10 +483,7 @@ class PracticeResponseCRUD:
         stmt = (
             select(PracticeResponse)
             .where(PracticeResponse.session_id == session_id)
-            .order_by(
-                PracticeResponse.created_at.asc(),
-                PracticeResponse.response_id.asc(),
-            )
+            .order_by(PracticeResponse.created_at.asc(), PracticeResponse.response_id.asc())
         )
         return db.scalars(stmt).all()
 
@@ -458,129 +508,3 @@ class PracticeResponseCRUD:
 
 
 practice_response_crud = PracticeResponseCRUD()
-
-
-# =========================================================
-# PracticeRating CRUD
-# =========================================================
-class PracticeRatingCRUD:
-    def get(self, db: Session, rating_id: int) -> Optional[PracticeRating]:
-        stmt = select(PracticeRating).where(PracticeRating.rating_id == rating_id)
-        return db.scalar(stmt)
-
-    def get_by_response_user(self, db: Session, *, response_id: int, user_id: int) -> Optional[PracticeRating]:
-        stmt = select(PracticeRating).where(
-            PracticeRating.response_id == response_id,
-            PracticeRating.user_id == user_id,
-        )
-        return db.scalar(stmt)
-
-    def upsert(self, db: Session, data: PracticeRatingCreate) -> PracticeRating:
-        if data.user_id is None:
-            raise ValueError("PracticeRatingCreate.user_id must be set before upsert()")
-
-        rating = self.get_by_response_user(db, response_id=data.response_id, user_id=data.user_id)
-        if rating is None:
-            rating = PracticeRating(
-                response_id=data.response_id,
-                user_id=data.user_id,
-                score=data.score,
-                feedback=data.feedback,
-            )
-            db.add(rating)
-            db.flush()
-            db.refresh(rating)
-            return rating
-
-        values = {
-            k: v
-            for k, v in data.model_dump(exclude_unset=True).items()
-            if k in {"score", "feedback"}
-        }
-        for k, v in values.items():
-            setattr(rating, k, v)
-        db.flush()
-        db.refresh(rating)
-        return rating
-
-    def update(self, db: Session, rating_id: int, data: PracticeRatingUpdate) -> Optional[PracticeRating]:
-        rating = self.get(db, rating_id)
-        if not rating:
-            return None
-
-        values = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
-        for k, v in values.items():
-            setattr(rating, k, v)
-        db.flush()
-        db.refresh(rating)
-        return rating
-
-    def list_by_response(self, db: Session, response_id: int) -> Sequence[PracticeRating]:
-        stmt = select(PracticeRating).where(PracticeRating.response_id == response_id)
-        return db.scalars(stmt).all()
-
-    def list_by_user(self, db: Session, user_id: int) -> Sequence[PracticeRating]:
-        stmt = select(PracticeRating).where(PracticeRating.user_id == user_id)
-        return db.scalars(stmt).all()
-
-    def delete(self, db: Session, *, rating_id: int) -> None:
-        stmt = delete(PracticeRating).where(PracticeRating.rating_id == rating_id)
-        db.execute(stmt)
-        db.flush()
-
-
-practice_rating_crud = PracticeRatingCRUD()
-
-
-# =========================================================
-# ModelComparison CRUD
-# =========================================================
-class ModelComparisonCRUD:
-    def create(self, db: Session, data: ModelComparisonCreate) -> ModelComparison:
-        obj = ModelComparison(
-            session_id=data.session_id,
-            model_a=data.model_a,
-            model_b=data.model_b,
-            winner_model=data.winner_model,
-            latency_diff_ms=data.latency_diff_ms,
-            token_diff=data.token_diff,
-            user_feedback=data.user_feedback,
-        )
-        db.add(obj)
-        db.flush()
-        db.refresh(obj)
-        return obj
-
-    def get(self, db: Session, comparison_id: int) -> Optional[ModelComparison]:
-        stmt = select(ModelComparison).where(ModelComparison.comparison_id == comparison_id)
-        return db.scalar(stmt)
-
-    def list_by_session(self, db: Session, session_id: int) -> Sequence[ModelComparison]:
-        stmt = (
-            select(ModelComparison)
-            .where(ModelComparison.session_id == session_id)
-            .order_by(ModelComparison.created_at.asc())
-        )
-        return db.scalars(stmt).all()
-
-    def update(self, db: Session, comparison_id: int, data: ModelComparisonUpdate) -> Optional[ModelComparison]:
-        values = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
-        if not values:
-            return self.get(db, comparison_id)
-
-        stmt = (
-            update(ModelComparison)
-            .where(ModelComparison.comparison_id == comparison_id)
-            .values(**values)
-        )
-        db.execute(stmt)
-        db.flush()
-        return self.get(db, comparison_id)
-
-    def delete(self, db: Session, *, comparison_id: int) -> None:
-        stmt = delete(ModelComparison).where(ModelComparison.comparison_id == comparison_id)
-        db.execute(stmt)
-        db.flush()
-
-
-model_comparison_crud = ModelComparisonCRUD()
