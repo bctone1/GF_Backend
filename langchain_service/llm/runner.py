@@ -113,11 +113,8 @@ def _render_prompt_for_estimate(
     context_text: str,
     style: Optional[str],
     policy_flags: Optional[dict],
+    few_shot_examples: Optional[list[dict]] = None,
 ) -> list[str]:
-    """
-    tokens_for_texts()에 그대로 전달할 '조각 리스트'를 반환.
-    (system / 규칙 / 컨텍스트 / 질문 라벨 포함) → 질문만 세는 문제 차단
-    """
     system_txt = build_system_prompt(style=(style or "friendly"), **(policy_flags or {}))
     rule_txt = (
         "규칙: 제공된 컨텍스트를 우선하여 답하고, 정말 관련이 없을 때만 "
@@ -127,14 +124,27 @@ def _render_prompt_for_estimate(
     context_ftr = "[컨텍스트 끝]"
     question_lbl = "질문: "
 
-    return [
+    parts: list[str] = [
         system_txt,
         rule_txt,
+    ]
+
+    for ex in (few_shot_examples or []):
+        inp = str(ex.get("input", "") or "")
+        out = str(ex.get("output", "") or "")
+        if inp:
+            parts.append("예시 질문: " + inp)
+        if out:
+            parts.append("예시 답변: " + out)
+
+    parts += [
         context_hdr,
         context_text,
         context_ftr,
         question_lbl + question,
     ]
+    return parts
+
 
 
 def _run_qa(
@@ -146,22 +156,13 @@ def _run_qa(
     session_id: Optional[int] = None,
     policy_flags: Optional[dict] = None,
     style: Optional[str] = None,
+    few_shot_examples: Optional[list[dict]] = None,
 ) -> QAResponse:
-    """
-    단일 질의에 대해 RAG 기반 QA 실행 + 비용 집계.
-
-    TODO:
-    - knowledge_id, session_id 를 현재 서비스 도메인(파트너/유저/세션 구조)에 맞게
-      해석해서 넘겨주는 상위 계층(service / endpoint) 설계 필요.
-    """
-    # 질문을 벡터로 변환 (세션 메시지 메모리 / 검색 등에 사용 가능)
     vector = _to_vector(question)
 
-    # 세션이 있다면 마지막 user 메시지에 vector_memory 저장 (지금은 noop)
     if session_id is not None:
         _update_last_user_vector(db, session_id, vector)
 
-    # RAG 컨텍스트 검색 (현재는 TODO 스텁: 빈 리스트 반환)
     sources = _build_sources(db, vector, knowledge_id, top_k)
     context_text = ("\n\n".join(s.text for s in sources))[:MAX_CTX_CHARS] if sources else ""
 
@@ -169,10 +170,10 @@ def _run_qa(
     model = getattr(config, "LLM_MODEL", getattr(config, "DEFAULT_CHAT_MODEL", "gpt-4o-mini"))
 
     raw = ""
+    few = few_shot_examples or []
 
     try:
         if provider == "openai" and get_openai_callback is not None:
-            # OpenAI + 콜백 지원 버전
             with get_openai_callback() as cb:
                 chain = make_qa_chain(
                     db,
@@ -183,9 +184,10 @@ def _run_qa(
                     policy_flags=policy_flags or {},
                     style=style or "friendly",
                     streaming=True,
+                    few_shot_examples=few,
                     callbacks=[cb],
                 )
-                # 콜백을 체인 전체에 강제 주입
+
                 raw = "".join(
                     chain.stream(
                         {"question": question},
@@ -194,12 +196,12 @@ def _run_qa(
                 )
                 resp_text = str(raw or "")
 
-                # 프롬프트 전체(시스템/규칙/컨텍스트/라벨/질문) + 응답 토큰 추정
                 prompt_parts = _render_prompt_for_estimate(
                     question=question,
                     context_text=context_text,
                     style=style,
                     policy_flags=policy_flags,
+                    few_shot_examples=few,
                 )
                 est_tokens = tokens_for_texts(model, prompt_parts + [resp_text])
 
@@ -211,15 +213,16 @@ def _run_qa(
                 usd = max(usd_cb, usd_est)
 
                 log.info(
-                    "api-usage(openai): cb_total=%d est=%d used=%d usd=%s model=%s",
+                    "api-usage(openai): cb_total=%d est=%d used=%d usd=%s model=%s few_shots=%d",
                     cb_total,
                     est_tokens,
                     total_tokens,
                     usd,
                     model,
+                    len(few),
                 )
+
                 try:
-                    # supervisor.api_usage 에 LLM 사용량 기록
                     api_usage.add_event(
                         db,
                         ts_utc=datetime.now(timezone.utc),
@@ -234,7 +237,6 @@ def _run_qa(
                     log.exception("api-usage llm record failed: %s", e)
 
         else:
-            # Fallback: 콜백 미지원(타사 모델 등) → 프롬프트 전체 기준 추정
             chain = make_qa_chain(
                 db,
                 get_llm,
@@ -244,7 +246,9 @@ def _run_qa(
                 policy_flags=policy_flags or {},
                 style=style or "friendly",
                 streaming=True,
+                few_shot_examples=few,
             )
+
             raw = "".join(chain.stream({"question": question}))
             resp_text = str(raw or "")
 
@@ -253,11 +257,19 @@ def _run_qa(
                 context_text=context_text,
                 style=style,
                 policy_flags=policy_flags,
+                few_shot_examples=few,
             )
             total_tokens = tokens_for_texts(model, prompt_parts + [resp_text])
             usd = estimate_llm_cost_usd(model=model, total_tokens=total_tokens)
 
-            log.info("api-usage(fallback): tokens=%d usd=%s model=%s", total_tokens, usd, model)
+            log.info(
+                "api-usage(fallback): tokens=%d usd=%s model=%s few_shots=%d",
+                total_tokens,
+                usd,
+                model,
+                len(few),
+            )
+
             try:
                 api_usage.add_event(
                     db,
@@ -282,9 +294,10 @@ def _run_qa(
         answer=str(raw or ""),
         question=question,
         session_id=session_id,
-        sources=sources,    # NOTE: _build_sources 구현되면 실제 컨텍스트 들어감
-        documents=sources,  # 호환성 유지용 (기존 필드명)
+        sources=sources,
+        documents=sources,
     )
+
 
 
 def generate_session_title_llm(

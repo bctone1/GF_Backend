@@ -76,17 +76,19 @@ def _get_default_generation_params() -> Dict[str, Any]:
 # - mapping 테이블 기반
 # - sort_order 유지
 # - "내 것 + active"만 사용
+# - meta까지 포함 (rule 추출용)
 # =========================================
 def _load_selected_few_shots_for_setting(
     db: Session,
     *,
     setting_id: int,
     me: AppUser,
-) -> List[Dict[str, str]]:
+) -> List[Dict[str, Any]]:
     stmt = (
         select(
             UserFewShotExample.input_text,
             UserFewShotExample.output_text,
+            UserFewShotExample.meta,  # meta 포함
         )
         .join(
             PracticeSessionSettingFewShot,
@@ -99,13 +101,45 @@ def _load_selected_few_shots_for_setting(
     )
     rows = db.execute(stmt).all()
 
-    out: List[Dict[str, str]] = []
-    for input_text, output_text in rows:
+    out: List[Dict[str, Any]] = []
+    for input_text, output_text, meta in rows:
         it = (input_text or "").strip()
         ot = (output_text or "").strip()
         if it and ot:
-            out.append({"input": it, "output": ot})
+            out.append({"input": it, "output": ot, "meta": meta or {}})
     return out
+
+
+# =========================================
+# few-shot meta에서 rule -> system_prompt 생성
+# - meta.additionalProp1.rule 문자열을 우선 사용
+# =========================================
+def _derive_system_prompt_from_few_shots(few_shots: Any) -> Optional[str]:
+    if not isinstance(few_shots, list) or not few_shots:
+        return None
+
+    first = few_shots[0]
+    if not isinstance(first, dict):
+        return None
+
+    meta = first.get("meta")
+    if not isinstance(meta, dict):
+        return None
+
+    ap = meta.get("additionalProp1")
+    if not isinstance(ap, dict):
+        return None
+
+    rule = ap.get("rule")
+    if not isinstance(rule, str) or not rule.strip():
+        return None
+
+    r = rule.strip()
+    return (
+        "아래 규칙을 반드시 지켜라.\n"
+        f"- {r}\n"
+        "규칙 외의 불필요한 설명은 하지 마라."
+    )
 
 
 # =========================================
@@ -457,8 +491,13 @@ def _call_llm_for_model(
 
     messages: list[dict[str, str]] = []
 
-    # (옵션) few_shot_examples: [{"input":..., "output":...}, ...]
-    few_shot_raw = gp.get("few_shot_examples") if isinstance(gp, dict) else None
+    # system_prompt 먼저 주입 (few-shot rule 강제용)
+    system_prompt = effective.get("system_prompt")
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt.strip()})
+
+    # few_shot_examples: [{"input":..., "output":..., "meta":...}, ...]
+    few_shot_raw = effective.get("few_shot_examples")
     if isinstance(few_shot_raw, list):
         for ex in few_shot_raw:
             if isinstance(ex, dict):
@@ -538,6 +577,15 @@ def run_practice_turn(
         # 모델이 직접 few_shot_examples를 안 갖고 있으면 settings 선택분 주입
         if not effective_gp.get("few_shot_examples") and selected_few_shots:
             effective_gp["few_shot_examples"] = selected_few_shots
+
+        # few-shot meta(rule) -> system_prompt로 강제
+        sys_from_fs = _derive_system_prompt_from_few_shots(effective_gp.get("few_shot_examples"))
+        if sys_from_fs:
+            prev = effective_gp.get("system_prompt")
+            if isinstance(prev, str) and prev.strip():
+                effective_gp["system_prompt"] = prev.strip() + "\n\n" + sys_from_fs
+            else:
+                effective_gp["system_prompt"] = sys_from_fs
 
         response_text, token_usage, latency_ms = _call_llm_for_model(
             model_name=m.model_name,
@@ -630,12 +678,22 @@ def create_session_with_first_turn(
         ),
     )
 
+    # settings에 선택된 few-shot 예시 로드 + rule을 질문 앞에 주입(최소 강제)
+    selected_few_shots = _load_selected_few_shots_for_setting(
+        db,
+        setting_id=settings.setting_id,
+        me=user,
+    )
+    sys_from_fs = _derive_system_prompt_from_few_shots(selected_few_shots)
+    qa_question = f"{sys_from_fs}\n\n{prompt_text}" if sys_from_fs else prompt_text
+
     qa = _run_qa(
         db,
-        question=prompt_text,
+        question=qa_question,
         knowledge_id=knowledge_id,
         top_k=3,
         session_id=None,
+        few_shot_examples=selected_few_shots or None,  # qa_chain에서 사용
     )
 
     response = practice_response_crud.create(
