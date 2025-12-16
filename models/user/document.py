@@ -3,11 +3,11 @@ from sqlalchemy import (
     Column, BigInteger, Text, Integer, DateTime,
     ForeignKey, UniqueConstraint, CheckConstraint, Index, text
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 from models.base import Base
+
 
 # ========== user.documents ==========
 class Document(Base):
@@ -53,8 +53,7 @@ class Document(Base):
         nullable=False,
     )
 
-    # 관계들 (jobs 제거)
-    tags = relationship("DocumentTagAssignment", back_populates="document", passive_deletes=True)
+    # 관계들 (tags 제거)
     usages = relationship("DocumentUsage", back_populates="document", passive_deletes=True)
     pages = relationship("DocumentPage", back_populates="document", passive_deletes=True)
     chunks = relationship("DocumentChunk", back_populates="document", passive_deletes=True)
@@ -78,46 +77,6 @@ class Document(Base):
             postgresql_using="gin",
             postgresql_ops={"name": "gin_trgm_ops"},
         ),
-        {"schema": "user"},
-    )
-
-
-# ========== user.document_tags ==========
-class DocumentTag(Base):
-    __tablename__ = "document_tags"
-
-    tag_id = Column(BigInteger, primary_key=True, autoincrement=True)
-    name = Column(Text, nullable=False, unique=True)
-
-    __table_args__ = (
-        Index("idx_document_tags_name", "name"),
-        {"schema": "user"},
-    )
-
-
-# ========== user.document_tag_assignments ==========
-class DocumentTagAssignment(Base):
-    __tablename__ = "document_tag_assignments"
-
-    assignment_id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    knowledge_id = Column(
-        BigInteger,
-        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    tag_id = Column(
-        BigInteger,
-        ForeignKey("user.document_tags.tag_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    document = relationship("Document", back_populates="tags", passive_deletes=True)
-
-    __table_args__ = (
-        UniqueConstraint("knowledge_id", "tag_id", name="uq_document_tag_assignments_doc_tag"),
-        Index("idx_document_tag_assignments_doc", "knowledge_id"),
-        Index("idx_document_tag_assignments_tag", "tag_id"),
         {"schema": "user"},
     )
 
@@ -153,7 +112,7 @@ class DocumentUsage(Base):
     )
 
 
-# ========== user.document_pages (기존 KnowledgePage 리팩토링) ==========
+# ========== user.document_pages ==========
 class DocumentPage(Base):
     __tablename__ = "document_pages"
 
@@ -180,7 +139,7 @@ class DocumentPage(Base):
     )
 
 
-# ========== user.document_chunks (기존 KnowledgeChunk 리팩토링) ==========
+# ========== user.document_chunks ==========
 class DocumentChunk(Base):
     __tablename__ = "document_chunks"
 

@@ -367,6 +367,10 @@ def update_practice_session_settings(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+     style : `accurate` | `balanced` | `creative` |`custom`
+     Length : `short` | `normal` | `long`| `custom`
+    """
     _ = ensure_my_session(db, session_id, me)
 
     current = _ensure_session_settings_row(db, session_id=session_id)

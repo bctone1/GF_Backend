@@ -1,10 +1,12 @@
 # schemas/user/document.py
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
-from pydantic import ConfigDict
-from schemas.base import ORMBase
 
+from pydantic import ConfigDict
+
+from schemas.base import ORMBase
 
 
 # =========================================================
@@ -51,48 +53,6 @@ class DocumentResponse(ORMBase):
     updated_at: datetime
 
 
-
-# =========================================================
-# user.document_tags
-# =========================================================
-class DocumentTagCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-    name: str
-
-
-class DocumentTagUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-    name: Optional[str] = None
-
-
-class DocumentTagResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-    tag_id: int
-    name: str
-
-
-# =========================================================
-# user.document_tag_assignments
-# =========================================================
-class DocumentTagAssignmentCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-    knowledge_id: int
-    tag_id: int
-
-
-class DocumentTagAssignmentUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-    # no updatable fields at the moment
-    pass
-
-
-class DocumentTagAssignmentResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-    assignment_id: int
-    knowledge_id: int
-    tag_id: int
-
-
 # =========================================================
 # user.document_usage
 # =========================================================
@@ -128,7 +88,7 @@ class DocumentUsageResponse(ORMBase):
 class DocumentPageCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     knowledge_id: int
-    page_no: Optional[int] = None         # 1부터, NULL 허용
+    page_no: Optional[int] = None          # 1부터, NULL 허용
     image_url: Optional[str] = None
     created_at: Optional[datetime] = None  # 보통 서버에서 채움
 
@@ -169,7 +129,6 @@ class DocumentChunkUpdate(ORMBase):
     # vector_memory를 갱신하는 경우가 특별히 필요하면 여기 추가 가능
 
 
-
 class DocumentChunkResponse(ORMBase):
     model_config = ConfigDict(from_attributes=True)
     chunk_id: int
@@ -178,5 +137,4 @@ class DocumentChunkResponse(ORMBase):
     chunk_index: int
     chunk_text: str
     created_at: datetime
-    # 벡터는 보통 외부로 내보내지 않지만, 필요하면 아래처럼 타입 추가 가능
-    # vector_memory: list[float] | None = None
+    # vector_memory는 보통 외부로 내보내지 않음
