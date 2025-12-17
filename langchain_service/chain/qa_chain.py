@@ -26,7 +26,7 @@ def make_qa_chain(
     restrict_to_kb: bool = True,  # (현재 미사용) 필요하면 search_chunks_by_vector 쪽에서 사용
     streaming: bool = False,
     callbacks: Optional[List[Any]] = None,  # 비용 집계용 콜백
-    few_shot_examples: Optional[List[Dict[str, str]]] = None,  # ✅ 추가
+    few_shot_examples: Optional[List[Dict[str, str]]] = None,
 ):
     fast_mode = getattr(config, "FAST_RESPONSE_MODE", False)
     style = style if style in STYLE_MAP else "friendly"
@@ -58,7 +58,7 @@ def make_qa_chain(
             SystemMessage(content=system_txt + "\n" + rule_txt),
         ]
 
-        # ✅ few-shot 삽입 (템플릿 안 쓰고 메시지 직접 구성 → JSON {}도 안전)
+        #  few-shot 삽입 (템플릿 안 쓰고 메시지 직접 구성 → JSON {}도 안전)
         for ex in few_shot_examples:
             inp = str(ex.get("input", "") or "").strip()
             out = str(ex.get("output", "") or "").strip()

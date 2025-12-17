@@ -1,16 +1,19 @@
 # crud/user/document.py
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple, List
+from typing import Optional, Sequence, Tuple, List, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models.user.document import (
     Document,
     DocumentUsage,
     DocumentPage,
     DocumentChunk,
+    DocumentIngestionSetting,
+    DocumentSearchSetting,
 )
 from schemas.user.document import (
     DocumentCreate,
@@ -21,6 +24,8 @@ from schemas.user.document import (
     DocumentPageUpdate,
     DocumentChunkCreate,
     DocumentChunkUpdate,
+    DocumentIngestionSettingUpdate,
+    DocumentSearchSettingUpdate,
 )
 
 
@@ -111,6 +116,196 @@ document_crud = DocumentCRUD()
 
 
 # =========================================================
+# Document Settings CRUD (1:1, knowledge_id PK)
+# =========================================================
+class DocumentIngestionSettingCRUD:
+    def get(self, db: Session, knowledge_id: int) -> Optional[DocumentIngestionSetting]:
+        stmt = select(DocumentIngestionSetting).where(
+            DocumentIngestionSetting.knowledge_id == knowledge_id
+        )
+        return db.scalar(stmt)
+
+    def create_default(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentIngestionSetting:
+        """
+        기본 row 생성 (이미 존재하면 IntegrityError 가능)
+        - commit은 바깥에서
+        """
+        obj = DocumentIngestionSetting(
+            knowledge_id=knowledge_id,
+            chunk_size=defaults["chunk_size"],
+            chunk_overlap=defaults["chunk_overlap"],
+            max_chunks=defaults["max_chunks"],
+            chunk_strategy=defaults["chunk_strategy"],
+            embedding_provider=defaults["embedding_provider"],
+            embedding_model=defaults["embedding_model"],
+            embedding_dim=defaults["embedding_dim"],  # DB에서 1536 제약
+            extra=defaults.get("extra") or {},
+        )
+        db.add(obj)
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def ensure_default(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentIngestionSetting:
+        """
+        - “없으면 생성, 있으면 유지” (UPSERT do nothing)
+        - 문서 생성 직후 호출해서 row 존재를 보장하는 용도
+        """
+        values = {
+            "knowledge_id": knowledge_id,
+            "chunk_size": defaults["chunk_size"],
+            "chunk_overlap": defaults["chunk_overlap"],
+            "max_chunks": defaults["max_chunks"],
+            "chunk_strategy": defaults["chunk_strategy"],
+            "embedding_provider": defaults["embedding_provider"],
+            "embedding_model": defaults["embedding_model"],
+            "embedding_dim": defaults["embedding_dim"],
+            "extra": defaults.get("extra") or {},
+        }
+
+        stmt = (
+            pg_insert(DocumentIngestionSetting)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["knowledge_id"])
+        )
+        db.execute(stmt)
+        db.flush()
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+    def update_by_knowledge_id(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        data: DocumentIngestionSettingUpdate,
+    ) -> DocumentIngestionSetting:
+        """
+        부분 수정(PATCH)
+        - schema 단에서 chunk_overlap < chunk_size 등 검증
+        - embedding_dim은 1536만 허용(스키마 + DB 제약)
+        """
+        values = data.model_dump(exclude_unset=True)
+        if not values:
+            obj = self.get(db, knowledge_id)
+            assert obj is not None
+            return obj
+
+        stmt = (
+            update(DocumentIngestionSetting)
+            .where(DocumentIngestionSetting.knowledge_id == knowledge_id)
+            .values(**values)
+        )
+        db.execute(stmt)
+        db.flush()
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+
+class DocumentSearchSettingCRUD:
+    def get(self, db: Session, knowledge_id: int) -> Optional[DocumentSearchSetting]:
+        stmt = select(DocumentSearchSetting).where(
+            DocumentSearchSetting.knowledge_id == knowledge_id
+        )
+        return db.scalar(stmt)
+
+    def create_default(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentSearchSetting:
+        obj = DocumentSearchSetting(
+            knowledge_id=knowledge_id,
+            top_k=defaults["top_k"],
+            min_score=defaults["min_score"],          # 유사도 기준
+            score_type=defaults["score_type"],        # DB에서 cosine_similarity 고정 제약
+            reranker_enabled=defaults["reranker_enabled"],
+            reranker_model=defaults.get("reranker_model"),
+            reranker_top_n=defaults["reranker_top_n"],
+        )
+        db.add(obj)
+        db.flush()
+        db.refresh(obj)
+        return obj
+
+    def ensure_default(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentSearchSetting:
+        values = {
+            "knowledge_id": knowledge_id,
+            "top_k": defaults["top_k"],
+            "min_score": defaults["min_score"],
+            "score_type": defaults["score_type"],
+            "reranker_enabled": defaults["reranker_enabled"],
+            "reranker_model": defaults.get("reranker_model"),
+            "reranker_top_n": defaults["reranker_top_n"],
+        }
+
+        stmt = (
+            pg_insert(DocumentSearchSetting)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["knowledge_id"])
+        )
+        db.execute(stmt)
+        db.flush()
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+    def update_by_knowledge_id(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        data: DocumentSearchSettingUpdate,
+    ) -> DocumentSearchSetting:
+        values = data.model_dump(exclude_unset=True)
+        if not values:
+            obj = self.get(db, knowledge_id)
+            assert obj is not None
+            return obj
+
+        stmt = (
+            update(DocumentSearchSetting)
+            .where(DocumentSearchSetting.knowledge_id == knowledge_id)
+            .values(**values)
+        )
+        db.execute(stmt)
+        db.flush()
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+
+document_ingestion_setting_crud = DocumentIngestionSettingCRUD()
+document_search_setting_crud = DocumentSearchSettingCRUD()
+
+
+# =========================================================
 # Document Usage CRUD
 # =========================================================
 class DocumentUsageCRUD:
@@ -193,7 +388,6 @@ class DocumentPageCRUD:
             knowledge_id=data.knowledge_id,
             page_no=data.page_no,
             image_url=data.image_url,
-            # created_at 은 DB default 사용
         )
         db.add(obj)
         db.flush()
@@ -252,7 +446,6 @@ class DocumentChunkCRUD:
             chunk_index=data.chunk_index,
             chunk_text=data.chunk_text,
             vector_memory=list(vector),
-            # created_at 은 DB default 사용
         )
         db.add(obj)
         db.flush()
@@ -279,6 +472,16 @@ class DocumentChunkCRUD:
         for obj in objs:
             db.refresh(obj)
         return objs
+
+    def delete_by_document(self, db: Session, knowledge_id: int) -> int:
+        """
+        reindex 전에 기존 청크 정리용 (단순 삭제)
+        반환: 삭제된 row 수
+        """
+        stmt = delete(DocumentChunk).where(DocumentChunk.knowledge_id == knowledge_id)
+        res = db.execute(stmt)
+        db.flush()
+        return int(res.rowcount or 0)
 
     def list_by_document(
         self,
@@ -311,17 +514,29 @@ class DocumentChunkCRUD:
         query_vector: Sequence[float],
         knowledge_id: Optional[int] = None,
         top_k: int = 8,
+        min_score: Optional[float] = None,    # 유사도 기준(0~1)
+        score_type: str = "cosine_similarity",
     ) -> List[DocumentChunk]:
+        """
+        score_type은 cosine_similarity만 지원
+        - pgvector는 cosine_distance로 정렬/필터가 쉬워서
+          min_score(유사도) -> max_distance(거리) = 1 - min_score 로 변환해서 필터함
+        """
+        if score_type != "cosine_similarity":
+            raise ValueError("Only cosine_similarity is supported in MVP")
+
         stmt = select(DocumentChunk)
         if knowledge_id is not None:
             stmt = stmt.where(DocumentChunk.knowledge_id == knowledge_id)
 
-        stmt = (
-            stmt.order_by(
-                DocumentChunk.vector_memory.cosine_distance(query_vector)  # type: ignore[attr-defined]
-            )
-            .limit(top_k)
-        )
+        dist = DocumentChunk.vector_memory.cosine_distance(query_vector)  # type: ignore[attr-defined]
+
+        if min_score is not None:
+            # 유사도(min_score) >= x  <=>  거리(distance) <= 1 - x
+            max_distance = 1.0 - float(min_score)
+            stmt = stmt.where(dist <= max_distance)
+
+        stmt = stmt.order_by(dist).limit(top_k)
         chunks = db.scalars(stmt).all()
         return list(chunks)
 
@@ -335,10 +550,14 @@ def search_chunks_by_vector(
     query_vector: Sequence[float],
     knowledge_id: Optional[int] = None,
     top_k: int = 8,
+    min_score: Optional[float] = None,
+    score_type: str = "cosine_similarity",
 ) -> List[DocumentChunk]:
     return document_chunk_crud.search_by_vector(
         db=db,
         query_vector=query_vector,
         knowledge_id=knowledge_id,
         top_k=top_k,
+        min_score=min_score,
+        score_type=score_type,
     )

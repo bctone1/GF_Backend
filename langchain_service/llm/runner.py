@@ -1,7 +1,7 @@
 # langchain_service/llm/runner.py
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Any, Dict
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 
 from crud.partner import session as session_crud
 from crud.user import document as document_crud
-from crud.supervisor.api_usage import api_usage_crud as api_usage  # api 사용량/비용 집계용
+from crud.user.document import document_search_setting_crud
+from crud.supervisor.api_usage import api_usage_crud as api_usage
 
 from schemas.common.llm import QASource, QAResponse
 
@@ -27,7 +28,7 @@ try:
     from langchain_community.callbacks import get_openai_callback
 except Exception:
     try:
-        from langchain_community.callbacks.manager import get_openai_callback  # 일부 버전
+        from langchain_community.callbacks.manager import get_openai_callback
     except Exception:
         get_openai_callback = None
 
@@ -36,74 +37,130 @@ from langchain_core.messages import SystemMessage, HumanMessage
 log = logging.getLogger("api_cost")
 
 MAX_CTX_CHARS = 12000  # qa_chain 기본값과 동일
+_SCORE_TYPE_FIXED = "cosine_similarity"
 
 
 def _update_last_user_vector(db: Session, session_id: int, vector: Iterable[float]) -> None:
-    """
-    마지막 user 메시지에 vector_memory 를 저장하는 로직.
-    """
-    # 마지막 user 메시지 찾기
-    message = session_crud.get_last_message_by_role(
-        db,
-        session_id=session_id,
-        role="user",
-    )
+    message = session_crud.get_last_message_by_role(db, session_id=session_id, role="user")
     if not message:
         return
+    session_crud.update_message(db, message=message, data={"vector_memory": list(vector)})
 
-    # 벡터를 list 로 변환해서 저장
-    session_crud.update_message(
+
+def _get_effective_search_settings(
+    db: Session,
+    *,
+    knowledge_id: Optional[int],
+    top_k_fallback: int,
+) -> Dict[str, Any]:
+    """
+     document_search_settings를 기준으로 검색 파라미터를 확정.
+    - knowledge_id 없으면 config.DEFAULT_SEARCH + fallback top_k로 처리
+    - score_type은 cosine_similarity로 고정
+    """
+    defaults = dict(getattr(config, "DEFAULT_SEARCH"))
+    defaults["score_type"] = _SCORE_TYPE_FIXED
+
+    if knowledge_id is None:
+        defaults["top_k"] = int(top_k_fallback)
+        return defaults
+
+    # row가 없으면 생성(레거시 문서 대비). MVP 원칙: row는 항상 존재
+    setting = document_search_setting_crud.ensure_default(
         db,
-        message=message,
-        data={"vector_memory": list(vector)},
+        knowledge_id=knowledge_id,
+        defaults=defaults,
     )
+
+    top_k = int(getattr(setting, "top_k", defaults["top_k"]))
+    min_score = float(getattr(setting, "min_score", defaults["min_score"]))
+    score_type = str(getattr(setting, "score_type", defaults["score_type"]))
+
+    reranker_enabled = bool(getattr(setting, "reranker_enabled", defaults["reranker_enabled"]))
+    reranker_model = getattr(setting, "reranker_model", defaults.get("reranker_model"))
+    reranker_top_n = int(getattr(setting, "reranker_top_n", defaults["reranker_top_n"]))
+
+    # 기본 정합성
+    if score_type != _SCORE_TYPE_FIXED:
+        score_type = _SCORE_TYPE_FIXED
+    if reranker_top_n > top_k:
+        reranker_top_n = top_k
+
+    return {
+        "top_k": top_k,
+        "min_score": min_score,
+        "score_type": score_type,
+        "reranker_enabled": reranker_enabled,
+        "reranker_model": reranker_model,
+        "reranker_top_n": reranker_top_n,
+    }
 
 
 def _build_sources(
     db: Session,
+    *,
+    question: str,
     vector: list[float],
     knowledge_id: Optional[int],
-    top_k: int,
+    search: Dict[str, Any],
 ) -> list[QASource]:
     """
-    벡터 검색으로 컨텍스트 청크를 가져와 QASource 리스트로 변환.
-
-    - 현재 프로젝트 기준:
-      knowledge_id == knowledge_id 로 해석해서 crud.user.document.search_chunks_by_vector 사용
+    벡터검색 + min_score 적용 + (옵션) rerank 적용 후 QASource 생성
     """
-
     chunks = document_crud.search_chunks_by_vector(
         db,
         query_vector=vector,
-        knowledge_id=knowledge_id,  # 내부에서 knowledge_id 로 매핑
-        top_k=top_k,
+        knowledge_id=knowledge_id,
+        top_k=int(search["top_k"]),
+        min_score=float(search["min_score"]),
+        score_type=str(search["score_type"]),
     )
 
-    sources: list[QASource] = []
+    # rerank (로컬 모델)
+    if (
+        search.get("reranker_enabled")
+        and search.get("reranker_model")
+        and len(chunks) > 1
+        and int(search.get("reranker_top_n", 1)) >= 1
+    ):
+        try:
+            from service.user.rerank import rerank_chunks  # 지연 import
+            chunks = rerank_chunks(
+                question,
+                chunks,
+                model_name=str(search["reranker_model"]),
+                top_n=int(search["reranker_top_n"]),
+            )
+        except Exception as e:
+            # reranker 실패해도 검색은 계속 진행(운영 안정성)
+            log.exception("rerank failed (fallback to vector order): %s", e)
 
+    sources: list[QASource] = []
     for chunk in chunks:
-        # knowledge_id / page_id / chunk_index 등의 필드명은 모델 정의에 맞춰 사용
-        knowledge_id = getattr(chunk, "knowledge_id", None)
+        kid = getattr(chunk, "knowledge_id", None)
         page_id = getattr(chunk, "page_id", None)
         chunk_index = getattr(chunk, "chunk_index", None)
 
-        # 텍스트 컬럼은 프로젝트마다 이름이 다를 수 있어 순서대로 fallback
         text = (
             getattr(chunk, "chunk_text", None)
             or getattr(chunk, "content", None)
             or getattr(chunk, "text", "")
         )
 
+        chunk_id = (
+            getattr(chunk, "chunk_id", None)
+            or getattr(chunk, "id", None)
+        )
+
         sources.append(
             QASource(
-                chunk_id=chunk.id,
-                knowledge_id=knowledge_id,  # QASource 필드명은 그대로 두고 knowledge_id를 넣어줌
+                chunk_id=chunk_id,
+                knowledge_id=kid,
                 page_id=page_id,
                 chunk_index=chunk_index,
                 text=text,
             )
         )
-
     return sources
 
 
@@ -124,10 +181,7 @@ def _render_prompt_for_estimate(
     context_ftr = "[컨텍스트 끝]"
     question_lbl = "질문: "
 
-    parts: list[str] = [
-        system_txt,
-        rule_txt,
-    ]
+    parts: list[str] = [system_txt, rule_txt]
 
     for ex in (few_shot_examples or []):
         inp = str(ex.get("input", "") or "")
@@ -137,14 +191,8 @@ def _render_prompt_for_estimate(
         if out:
             parts.append("예시 답변: " + out)
 
-    parts += [
-        context_hdr,
-        context_text,
-        context_ftr,
-        question_lbl + question,
-    ]
+    parts += [context_hdr, context_text, context_ftr, question_lbl + question]
     return parts
-
 
 
 def _run_qa(
@@ -163,7 +211,17 @@ def _run_qa(
     if session_id is not None:
         _update_last_user_vector(db, session_id, vector)
 
-    sources = _build_sources(db, vector, knowledge_id, top_k)
+    # 검색 설정 확정(문서 설정 우선)
+    search = _get_effective_search_settings(db, knowledge_id=knowledge_id, top_k_fallback=top_k)
+    effective_top_k = int(search["top_k"])
+
+    sources = _build_sources(
+        db,
+        question=question,
+        vector=vector,
+        knowledge_id=knowledge_id,
+        search=search,
+    )
     context_text = ("\n\n".join(s.text for s in sources))[:MAX_CTX_CHARS] if sources else ""
 
     provider = getattr(config, "LLM_PROVIDER", "openai").lower()
@@ -180,7 +238,7 @@ def _run_qa(
                     get_llm,
                     text_to_vector,
                     knowledge_id=knowledge_id,
-                    top_k=top_k,
+                    top_k=effective_top_k,
                     policy_flags=policy_flags or {},
                     style=style or "friendly",
                     streaming=True,
@@ -212,16 +270,6 @@ def _run_qa(
                 usd_est = estimate_llm_cost_usd(model=model, total_tokens=total_tokens)
                 usd = max(usd_cb, usd_est)
 
-                log.info(
-                    "api-usage(openai): cb_total=%d est=%d used=%d usd=%s model=%s few_shots=%d",
-                    cb_total,
-                    est_tokens,
-                    total_tokens,
-                    usd,
-                    model,
-                    len(few),
-                )
-
                 try:
                     api_usage.add_event(
                         db,
@@ -242,7 +290,7 @@ def _run_qa(
                 get_llm,
                 text_to_vector,
                 knowledge_id=knowledge_id,
-                top_k=top_k,
+                top_k=effective_top_k,     # 설정 반영
                 policy_flags=policy_flags or {},
                 style=style or "friendly",
                 streaming=True,
@@ -261,14 +309,6 @@ def _run_qa(
             )
             total_tokens = tokens_for_texts(model, prompt_parts + [resp_text])
             usd = estimate_llm_cost_usd(model=model, total_tokens=total_tokens)
-
-            log.info(
-                "api-usage(fallback): tokens=%d usd=%s model=%s few_shots=%d",
-                total_tokens,
-                usd,
-                model,
-                len(few),
-            )
 
             try:
                 api_usage.add_event(
@@ -299,17 +339,12 @@ def _run_qa(
     )
 
 
-
 def generate_session_title_llm(
     question: str,
     answer: str,
     *,
     max_chars: int = 20,
 ) -> str:
-    """
-    질문/응답 한 턴을 보고 세션 제목을 한 줄로 만들어주는 LLM 헬퍼.
-    - 도메인 객체(DB)는 전혀 모르게 두고, 텍스트만 다룸.
-    """
     llm = get_llm(temperature=0.2, streaming=False)
 
     system = (
@@ -328,4 +363,3 @@ def generate_session_title_llm(
     if len(title) > max_chars:
         title = title[:max_chars]
     return title
-
