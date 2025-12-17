@@ -34,6 +34,11 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         owner_id는 항상 현재 로그인 유저(me.user_id)에서 받아서 넣는다.
         """
         data = obj_in.model_dump(exclude_unset=True)
+
+        # is_active는 Optional이라 None이 들어오면 DB(not null)에서 터질 수 있어서 무시
+        if data.get("is_active", "__missing__") is None:
+            data.pop("is_active", None)
+
         db_obj = AIAgent(
             owner_id=owner_id,
             **data,
@@ -50,18 +55,13 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         owner_id: int,
         limit: int,
         offset: int,
-        project_id: Optional[int] = None,
         q: Optional[str] = None,
     ) -> Tuple[int, List[AIAgent]]:
         """
         owner_id 기준 에이전트 목록 + 페이징/검색.
-        - project_id: 특정 프로젝트에 속한 것만 필터
         - q: name / role_description LIKE 검색
         """
         stmt = select(AIAgent).where(AIAgent.owner_id == owner_id)
-
-        if project_id is not None:
-            stmt = stmt.where(AIAgent.project_id == project_id)
 
         if q:
             like = f"%{q}%"
@@ -120,6 +120,12 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
             return None
 
         update_data = obj_in.model_dump(exclude_unset=True)
+
+        # not-null 컬럼들에 None이 들어오면 DB에서 터지니 무시
+        for key in ("name", "system_prompt", "is_active"):
+            if key in update_data and update_data[key] is None:
+                update_data.pop(key, None)
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
 
@@ -133,7 +139,7 @@ ai_agent_crud = CRUDAIAgent(AIAgent)
 
 
 # =========================================================
-# user.agent_shares 전용 CRUD (기존 코드)
+# user.agent_shares 전용 CRUD
 # =========================================================
 class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
     """
@@ -169,12 +175,9 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         agent_id: int,
         class_id: int,
     ) -> Optional[AgentShare]:
-        stmt = (
-            select(AgentShare)
-            .where(
-                AgentShare.agent_id == agent_id,
-                AgentShare.class_id == class_id,
-            )
+        stmt = select(AgentShare).where(
+            AgentShare.agent_id == agent_id,
+            AgentShare.class_id == class_id,
         )
         return db.execute(stmt).scalar_one_or_none()
 
@@ -234,7 +237,6 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
             class_id=obj_in.class_id,
         )
         if existing:
-            # 이미 존재하는데 비활성 상태였다면 다시 활성화만 해줌
             if not existing.is_active:
                 existing.is_active = True
                 db.add(existing)
