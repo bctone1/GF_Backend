@@ -32,8 +32,7 @@ def _get_cross_encoder(model_name: str):
         from sentence_transformers import CrossEncoder  # type: ignore
     except Exception as e:
         raise RuntimeError(
-            "CrossEncoder reranker를 쓰려면 sentence-transformers가 필요해. "
-            "pip install sentence-transformers"
+            "CrossEncoder reranker를 쓰려면 sentence-transformers가 필요 pip install "
         ) from e
 
     with _LOCK:

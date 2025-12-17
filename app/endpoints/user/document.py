@@ -420,7 +420,7 @@ def patch_document_search_settings(
     - "min_score": 0~1 , 높을수록 까다로움 `0.1=` 좀만 비슷해도 통과,
     - "score_type": "cosine_similarity" (고정)
     - "reranker_enabled": `true` 면 후보 K 청크를 재정렬 함
-    - "reranker_model": `bge-reranker-base` 리랭커 실제 모델
+    - "reranker_model": `BAAI/bge-reranker-v2-m3`(다중언어지원) | `cross-encoder/ms-marco-MiniLM-L-6-v2`(가벼움)
     - "reranker_top_n": 최종 청크 갯수, `top_k=10, reranker_top_n=3` : 10개 뽑고 rerank후 최종 3개 사용
     """
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)

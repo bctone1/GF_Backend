@@ -348,7 +348,7 @@ class UploadPipeline:
     # ---------------------------
     def process_document(self, knowledge_id: int) -> None:
         """
-        ✅ngestion 설정을 읽어서 chunking/embedding에 적용
+        ingestion 설정을 읽어서 chunking/embedding에 적용
         """
         doc = doc_crud.document_crud.get(self.db, knowledge_id)
         if not doc:
