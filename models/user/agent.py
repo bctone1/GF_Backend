@@ -40,7 +40,7 @@ class AIAgent(Base):
     # draft/archived 같은 상태를 안 쓰기로 했으니 단순 boolean
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
 
-    # 내가 만든건지 강사껀지 확인용
+    # 내가 만든건지 강사것인지 확인용
     template_source = Column(Text, nullable=True)
 
     created_at = Column(
