@@ -2,7 +2,7 @@
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select, or_, func
+from sqlalchemy import or_
 
 from crud.base import CRUDBase
 from models.user.agent import AIAgent, AgentShare
@@ -61,28 +61,26 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         owner_id 기준 에이전트 목록 + 페이징/검색.
         - q: name / role_description LIKE 검색
         """
-        stmt = select(AIAgent).where(AIAgent.owner_id == owner_id)
+        query = db.query(AIAgent).filter(AIAgent.owner_id == owner_id)
 
         if q:
             like = f"%{q}%"
-            stmt = stmt.where(
+            query = query.filter(
                 or_(
                     AIAgent.name.ilike(like),
                     AIAgent.role_description.ilike(like),
                 )
             )
 
-        # total count
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        total = db.execute(count_stmt).scalar_one()
+        # total count (정렬 제거하고 count)
+        total = query.order_by(None).count()
 
-        # page items
-        items_stmt = (
-            stmt.order_by(AIAgent.created_at.desc())
+        items = (
+            query.order_by(AIAgent.created_at.desc())
             .offset(offset)
             .limit(limit)
+            .all()
         )
-        items = db.execute(items_stmt).scalars().all()
 
         return total, items
 
@@ -97,11 +95,14 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         owner_id 기준으로 내 에이전트 한 건 조회.
         (없거나 남의 에이전트면 None)
         """
-        stmt = select(AIAgent).where(
-            AIAgent.agent_id == agent_id,
-            AIAgent.owner_id == owner_id,
+        return (
+            db.query(AIAgent)
+            .filter(
+                AIAgent.agent_id == agent_id,
+                AIAgent.owner_id == owner_id,
+            )
+            .first()
         )
-        return db.execute(stmt).scalar_one_or_none()
 
     def update_for_owner(
         self,
@@ -175,11 +176,14 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         agent_id: int,
         class_id: int,
     ) -> Optional[AgentShare]:
-        stmt = select(AgentShare).where(
-            AgentShare.agent_id == agent_id,
-            AgentShare.class_id == class_id,
+        return (
+            db.query(AgentShare)
+            .filter(
+                AgentShare.agent_id == agent_id,
+                AgentShare.class_id == class_id,
+            )
+            .first()
         )
-        return db.execute(stmt).scalar_one_or_none()
 
     def list_by_agent(
         self,
@@ -188,11 +192,10 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         agent_id: int,
         active_only: bool = True,
     ) -> List[AgentShare]:
-        stmt = select(AgentShare).where(AgentShare.agent_id == agent_id)
+        query = db.query(AgentShare).filter(AgentShare.agent_id == agent_id)
         if active_only:
-            stmt = stmt.where(AgentShare.is_active.is_(True))
-        stmt = stmt.order_by(AgentShare.created_at.desc())
-        return db.execute(stmt).scalars().all()
+            query = query.filter(AgentShare.is_active.is_(True))
+        return query.order_by(AgentShare.created_at.desc()).all()
 
     def list_by_class(
         self,
@@ -201,11 +204,10 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         class_id: int,
         active_only: bool = True,
     ) -> List[AgentShare]:
-        stmt = select(AgentShare).where(AgentShare.class_id == class_id)
+        query = db.query(AgentShare).filter(AgentShare.class_id == class_id)
         if active_only:
-            stmt = stmt.where(AgentShare.is_active.is_(True))
-        stmt = stmt.order_by(AgentShare.created_at.desc())
-        return db.execute(stmt).scalars().all()
+            query = query.filter(AgentShare.is_active.is_(True))
+        return query.order_by(AgentShare.created_at.desc()).all()
 
     def set_active(
         self,
