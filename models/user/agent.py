@@ -1,10 +1,21 @@
 # models/user/agent.py
 from sqlalchemy import (
-    Column, BigInteger, Text, Integer, DateTime, Numeric, Boolean,
-    ForeignKey, UniqueConstraint, CheckConstraint, Index, text
+    Column,
+    BigInteger,
+    Text,
+    Integer,
+    DateTime,
+    Numeric,
+    Boolean,
+    ForeignKey,
+    UniqueConstraint,
+    CheckConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+
 from models.base import Base
 
 
@@ -19,65 +30,51 @@ class AIAgent(Base):
         ForeignKey("user.users.user_id", ondelete="CASCADE"),
         nullable=False,
     )
-    # 선택 참조
-    project_id =  Column(BigInteger, nullable=True)
-
-    knowledge_id = Column(
-        BigInteger,
-        ForeignKey("user.documents.knowledge_id", ondelete="SET NULL"),
-        nullable=True,
-    )
 
     name = Column(Text, nullable=False)
     role_description = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, server_default=text("'draft'"))
+
+    # 프롬프트 버전/롤백 없이 "현재 프롬프트 1개"만 유지
+    system_prompt = Column(Text, nullable=False)
+
+    # draft/archived 같은 상태를 안 쓰기로 했으니 단순 boolean
+    is_active = Column(Boolean, nullable=False, server_default=text("true"))
+
+    # 내가 만든건지 강사것인지 확인용
     template_source = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    prompts = relationship("AgentPrompt", back_populates="agent", passive_deletes=True)
-    examples = relationship("AgentExample", back_populates="agent", passive_deletes=True)
-    usage_stat = relationship("AgentUsageStat", back_populates="agent", uselist=False, passive_deletes=True)
-    # class 단위 공유 관계
-    shares = relationship("AgentShare", back_populates="agent", passive_deletes=True)
-
-    __table_args__ = (
-        Index("idx_ai_agents_owner_status", "owner_id", "status"),
-        Index("idx_ai_agents_project", "project_id"),
-        Index("idx_ai_agents_document", "knowledge_id"),
-        {"schema": "user"},
-    )
-
-
-# ========== user.agent_prompts ==========
-class AgentPrompt(Base):
-    __tablename__ = "agent_prompts"
-
-    prompt_id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    agent_id = Column(
-        BigInteger,
-        ForeignKey("user.ai_agents.agent_id", ondelete="CASCADE"),
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
     )
-    version = Column(Integer, nullable=False)
-    system_prompt = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    is_active = Column(Boolean, nullable=False, server_default=text("false"))
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
-    agent = relationship("AIAgent", back_populates="prompts", passive_deletes=True)
+    examples = relationship(
+        "AgentExample",
+        back_populates="agent",
+        passive_deletes=True,
+    )
+    usage_stat = relationship(
+        "AgentUsageStat",
+        back_populates="agent",
+        uselist=False,
+        passive_deletes=True,
+    )
+    shares = relationship(
+        "AgentShare",
+        back_populates="agent",
+        passive_deletes=True,
+    )
 
     __table_args__ = (
-        UniqueConstraint("agent_id", "version", name="uq_agent_prompts_agent_version"),
-        # 활성 버전 단일성(부분 유니크)
-        Index(
-            "uq_agent_prompts_active_once",
-            "agent_id",
-            unique=True,
-            postgresql_where=text("is_active = true"),
-        ),
-        Index("idx_agent_prompts_agent", "agent_id"),
+        Index("idx_ai_agents_owner_active", "owner_id", "is_active"),
+        Index("idx_ai_agents_owner_created_at", "owner_id", "created_at"),
         {"schema": "user"},
     )
 
@@ -93,7 +90,11 @@ class AgentExample(Base):
         ForeignKey("user.ai_agents.agent_id", ondelete="CASCADE"),
         nullable=False,
     )
-    example_type = Column(Text, nullable=False, server_default=text("'few_shot'"))  # few_shot|tool|note 등
+    example_type = Column(
+        Text,
+        nullable=False,
+        server_default=text("'few_shot'"),
+    )  # few_shot|tool|note 등
     input_text = Column(Text, nullable=True)
     output_text = Column(Text, nullable=True)
     position = Column(Integer, nullable=True)
@@ -102,7 +103,10 @@ class AgentExample(Base):
     agent = relationship("AIAgent", back_populates="examples", passive_deletes=True)
 
     __table_args__ = (
-        CheckConstraint("position IS NULL OR position >= 0", name="chk_agent_examples_position_nonneg"),
+        CheckConstraint(
+            "position IS NULL OR position >= 0",
+            name="chk_agent_examples_position_nonneg",
+        ),
         Index("idx_agent_examples_agent_pos", "agent_id", "position"),
         {"schema": "user"},
     )
@@ -122,7 +126,7 @@ class AgentUsageStat(Base):
     )
     usage_count = Column(Integer, nullable=False, server_default=text("0"))
     last_used_at = Column(DateTime(timezone=True), nullable=True)
-    avg_rating = Column(Numeric(3, 2), nullable=True)      # 0.00~5.00 권장
+    avg_rating = Column(Numeric(3, 2), nullable=True)  # 0.00~5.00 권장
     total_tokens = Column(BigInteger, nullable=False, server_default=text("0"))
 
     agent = relationship("AIAgent", back_populates="usage_stat", passive_deletes=True)
@@ -156,13 +160,13 @@ class AgentShare(Base):
         ForeignKey("user.ai_agents.agent_id", ondelete="CASCADE"),
         nullable=False,
     )
-    # 이 에이전트를 공유하는 대상 강의실
     class_id = Column(
         BigInteger,
         ForeignKey("partner.classes.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # 실제 공유를 수행한 유저 (일반적으로 agent.owner_id 와 동일, 감사용)
+
+    # 실제 공유를 수행한 유저 (감사용)
     shared_by_user_id = Column(
         BigInteger,
         ForeignKey("user.users.user_id", ondelete="CASCADE"),
@@ -173,10 +177,8 @@ class AgentShare(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     agent = relationship("AIAgent", back_populates="shares", passive_deletes=True)
-    # shared_by / class 에 대한 relationship 은 필요 시 다른 파일에서 추가해도 됨
 
     __table_args__ = (
-        # 같은 agent 를 같은 class 에 중복 공유하지 않도록
         UniqueConstraint("agent_id", "class_id", name="uq_agent_shares_agent_class"),
         Index("idx_agent_shares_agent", "agent_id"),
         Index("idx_agent_shares_class", "class_id"),

@@ -1,14 +1,21 @@
 # models/user/practice.py
 from sqlalchemy import (
-    Column, BigInteger, Text, Integer, DateTime, Numeric, Boolean,
-    ForeignKey, UniqueConstraint, CheckConstraint, Index, text
+    Column,
+    BigInteger,
+    Text,
+    Integer,
+    DateTime,
+    Boolean,
+    ForeignKey,
+    UniqueConstraint,
+    Index,
+    text,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from models.base import Base
-from models.user.document import Document
 
 
 # ========== user.practice_sessions ==========
@@ -35,7 +42,6 @@ class PracticeSession(Base):
         nullable=True,
     )
 
-    # NEW: 세션이 기본으로 사용할 지식베이스
     knowledge_id = Column(
         BigInteger,
         ForeignKey("user.documents.knowledge_id", ondelete="SET NULL"),
@@ -45,19 +51,9 @@ class PracticeSession(Base):
     title = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
 
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    # 관계들
     models = relationship(
         "PracticeSessionModel",
         back_populates="session",
@@ -68,18 +64,12 @@ class PracticeSession(Base):
         back_populates="session",
         passive_deletes=True,
     )
-    comparisons = relationship(
-        "ModelComparison",
+    settings = relationship(
+        "PracticeSessionSetting",
         back_populates="session",
+        uselist=False,
         passive_deletes=True,
     )
-
-    # (선택) Document 모델과의 관계
-    # knowledge = relationship(
-    #     "Document",
-    #     back_populates="practice_sessions",
-    #     passive_deletes=True,
-    # )
 
     project = relationship(
         "UserProject",
@@ -90,6 +80,137 @@ class PracticeSession(Base):
     __table_args__ = (
         Index("idx_practice_sessions_user", "user_id"),
         Index("idx_practice_sessions_knowledge", "knowledge_id"),
+        {"schema": "user"},
+    )
+
+
+# ========== user.practice_session_settings ==========
+class PracticeSessionSetting(Base):
+    __tablename__ = "practice_session_settings"
+
+    setting_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    session_id = Column(
+        BigInteger,
+        ForeignKey("user.practice_sessions.session_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+
+    style_preset = Column(Text, nullable=True)
+
+    style_params = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    generation_params = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    session = relationship(
+        "PracticeSession",
+        back_populates="settings",
+        passive_deletes=True,
+    )
+
+    few_shot_links = relationship(
+        "PracticeSessionSettingFewShot",
+        back_populates="setting",
+        passive_deletes=True,
+        order_by="PracticeSessionSettingFewShot.sort_order",
+    )
+
+    __table_args__ = (
+        Index("idx_practice_session_settings_session", "session_id"),
+        {"schema": "user"},
+    )
+
+
+# ========== user.few_shot_examples (개인 라이브러리) ==========
+class UserFewShotExample(Base):
+    __tablename__ = "few_shot_examples"
+
+    example_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    user_id = Column(
+        BigInteger,
+        ForeignKey("user.users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    title = Column(Text, nullable=True)
+
+    input_text = Column(Text, nullable=False)
+    output_text = Column(Text, nullable=False)
+
+    meta = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    is_active = Column(Boolean, nullable=False, server_default=text("true"))
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    setting_links = relationship(
+        "PracticeSessionSettingFewShot",
+        back_populates="example",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        Index("idx_few_shot_examples_user", "user_id"),
+        {"schema": "user"},
+    )
+
+
+
+# ========== user.practice_session_setting_few_shots (매핑) ==========
+class PracticeSessionSettingFewShot(Base):
+    __tablename__ = "practice_session_setting_few_shots"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    setting_id = Column(
+        BigInteger,
+        ForeignKey("user.practice_session_settings.setting_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    example_id = Column(
+        BigInteger,
+        ForeignKey("user.few_shot_examples.example_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    sort_order = Column(Integer, nullable=False, server_default=text("0"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    setting = relationship(
+        "PracticeSessionSetting",
+        back_populates="few_shot_links",
+        passive_deletes=True,
+    )
+
+    example = relationship(
+        "UserFewShotExample",
+        back_populates="setting_links",
+        passive_deletes=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("setting_id", "example_id", name="uq_setting_example"),
+        Index("idx_setting_few_shots_setting", "setting_id"),
+        Index("idx_setting_few_shots_example", "example_id"),
         {"schema": "user"},
     )
 
@@ -107,21 +228,15 @@ class PracticeSessionModel(Base):
     )
 
     model_name = Column(Text, nullable=False)
-    # provider 는 config.PRACTICE_MODELS 로 해석하니까 ORM에서는 제거
     is_primary = Column(Boolean, nullable=False, server_default=text("false"))
 
-    # LLM 생성 옵션
     generation_params = Column(
         JSONB,
         nullable=False,
-        server_default=text("'{}'::jsonb"),  # 기존 row 케이스용
+        server_default=text("'{}'::jsonb"),
     )
 
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     session = relationship(
         "PracticeSession",
@@ -139,7 +254,6 @@ class PracticeSessionModel(Base):
         Index("idx_practice_session_models_session", "session_id"),
         {"schema": "user"},
     )
-
 
 
 # ========== user.practice_responses ==========
@@ -163,13 +277,11 @@ class PracticeResponse(Base):
     model_name = Column(Text, nullable=False)
     prompt_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
+
     token_usage = Column(JSONB, nullable=True)
     latency_ms = Column(Integer, nullable=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     session_model = relationship(
         "PracticeSessionModel",
@@ -180,85 +292,6 @@ class PracticeResponse(Base):
     session = relationship(
         "PracticeSession",
         back_populates="responses",
-        passive_deletes=True,
-    )
-
-    ratings = relationship(
-        "PracticeRating",
-        back_populates="response",
-        passive_deletes=True,
-    )
-
-    __table_args__ = (
-        {"schema": "user"},
-    )
-
-
-# ========== user.practice_ratings ==========
-class PracticeRating(Base):
-    __tablename__ = "practice_ratings"
-
-    rating_id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    response_id = Column(
-        BigInteger,
-        ForeignKey("user.practice_responses.response_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    user_id = Column(
-        BigInteger,
-        ForeignKey("user.users.user_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    score = Column(Integer, nullable=False)
-    feedback = Column(Text, nullable=True)
-
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-
-    response = relationship(
-        "PracticeResponse",
-        back_populates="ratings",
-        passive_deletes=True,
-    )
-
-    __table_args__ = (
-        {"schema": "user"},
-    )
-
-
-# ========== user.model_comparisons ==========
-class ModelComparison(Base):
-    __tablename__ = "model_comparisons"
-
-    comparison_id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    session_id = Column(
-        BigInteger,
-        ForeignKey("user.practice_sessions.session_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    model_a = Column(Text, nullable=False)
-    model_b = Column(Text, nullable=False)
-    winner_model = Column(Text, nullable=True)
-    latency_diff_ms = Column(Integer, nullable=True)
-    token_diff = Column(Integer, nullable=True)
-    user_feedback = Column(Text, nullable=True)
-
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-
-    session = relationship(
-        "PracticeSession",
-        back_populates="comparisons",
         passive_deletes=True,
     )
 

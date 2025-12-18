@@ -1,34 +1,31 @@
 # crud/user/document.py
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple, List
+from typing import Optional, Sequence, Tuple, List, Any
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select, update, delete, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models.user.document import (
     Document,
-
-    DocumentTag,
-    DocumentTagAssignment,
     DocumentUsage,
     DocumentPage,
     DocumentChunk,
+    DocumentIngestionSetting,
+    DocumentSearchSetting,
 )
 from schemas.user.document import (
     DocumentCreate,
     DocumentUpdate,
-
-
-    DocumentTagCreate,
-    DocumentTagUpdate,
-    DocumentTagAssignmentCreate,
     DocumentUsageCreate,
     DocumentUsageUpdate,
     DocumentPageCreate,
     DocumentPageUpdate,
     DocumentChunkCreate,
     DocumentChunkUpdate,
+    DocumentIngestionSettingUpdate,
+    DocumentSearchSettingUpdate,
 )
 
 
@@ -76,9 +73,7 @@ class DocumentCRUD:
             like = f"%{q}%"
             stmt = stmt.where(Document.name.ilike(like))
 
-        total = db.scalar(
-            select(func.count()).select_from(stmt.subquery())
-        ) or 0
+        total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
         stmt = (
             stmt.order_by(Document.uploaded_at.desc())
@@ -116,117 +111,198 @@ class DocumentCRUD:
         db.execute(stmt)
         db.flush()
 
+
 document_crud = DocumentCRUD()
 
+
 # =========================================================
-# Document Tags CRUD
+# Document Settings CRUD (1:1, knowledge_id PK)
 # =========================================================
-class DocumentTagCRUD:
-    def get_by_name(self, db: Session, name: str) -> Optional[DocumentTag]:
-        stmt = select(DocumentTag).where(DocumentTag.name == name)
+class DocumentIngestionSettingCRUD:
+    def get(self, db: Session, knowledge_id: int) -> Optional[DocumentIngestionSetting]:
+        stmt = select(DocumentIngestionSetting).where(
+            DocumentIngestionSetting.knowledge_id == knowledge_id
+        )
         return db.scalar(stmt)
 
-    def create(self, db: Session, data: DocumentTagCreate) -> DocumentTag:
-        obj = DocumentTag(name=data.name)
+    def create_default(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentIngestionSetting:
+        """
+        기본 row 생성 (이미 존재하면 IntegrityError 가능)
+        - commit은 바깥에서
+        """
+        obj = DocumentIngestionSetting(
+            knowledge_id=knowledge_id,
+            chunk_size=defaults["chunk_size"],
+            chunk_overlap=defaults["chunk_overlap"],
+            max_chunks=defaults["max_chunks"],
+            chunk_strategy=defaults["chunk_strategy"],
+            embedding_provider=defaults["embedding_provider"],
+            embedding_model=defaults["embedding_model"],
+            embedding_dim=defaults["embedding_dim"],  # DB에서 1536 제약
+            extra=defaults.get("extra") or {},
+        )
         db.add(obj)
         db.flush()
         db.refresh(obj)
         return obj
 
-    def ensure(self, db: Session, name: str) -> DocumentTag:
-        """
-        태그 있으면 반환, 없으면 생성.
-        (동시성까지 완벽하게 보장하진 않고, 단일 트랜잭션 환경 가정)
-        """
-        tag = self.get_by_name(db, name)
-        if tag:
-            return tag
-        tag = DocumentTag(name=name)
-        db.add(tag)
-        db.flush()
-        db.refresh(tag)
-        return tag
-
-    def update(
+    def ensure_default(
         self,
         db: Session,
-        tag_id: int,
-        data: DocumentTagUpdate,
-    ) -> Optional[DocumentTag]:
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentIngestionSetting:
+        """
+        - “없으면 생성, 있으면 유지” (UPSERT do nothing)
+        - 문서 생성 직후 호출해서 row 존재를 보장하는 용도
+        """
         values = {
-            k: v
-            for k, v in data.model_dump(exclude_unset=True).items()
+            "knowledge_id": knowledge_id,
+            "chunk_size": defaults["chunk_size"],
+            "chunk_overlap": defaults["chunk_overlap"],
+            "max_chunks": defaults["max_chunks"],
+            "chunk_strategy": defaults["chunk_strategy"],
+            "embedding_provider": defaults["embedding_provider"],
+            "embedding_model": defaults["embedding_model"],
+            "embedding_dim": defaults["embedding_dim"],
+            "extra": defaults.get("extra") or {},
         }
-        if not values:
-            stmt = select(DocumentTag).where(DocumentTag.tag_id == tag_id)
-            return db.scalar(stmt)
 
         stmt = (
-            update(DocumentTag)
-            .where(DocumentTag.tag_id == tag_id)
+            pg_insert(DocumentIngestionSetting)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["knowledge_id"])
+        )
+        db.execute(stmt)
+        db.flush()
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+    def update_by_knowledge_id(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        data: DocumentIngestionSettingUpdate,
+    ) -> DocumentIngestionSetting:
+        """
+        부분 수정(PATCH)
+        - schema 단에서 chunk_overlap < chunk_size 등 검증
+        - embedding_dim은 1536만 허용(스키마 + DB 제약)
+        """
+        values = data.model_dump(exclude_unset=True)
+        if not values:
+            obj = self.get(db, knowledge_id)
+            assert obj is not None
+            return obj
+
+        stmt = (
+            update(DocumentIngestionSetting)
+            .where(DocumentIngestionSetting.knowledge_id == knowledge_id)
             .values(**values)
         )
         db.execute(stmt)
         db.flush()
-        stmt = select(DocumentTag).where(DocumentTag.tag_id == tag_id)
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+
+class DocumentSearchSettingCRUD:
+    def get(self, db: Session, knowledge_id: int) -> Optional[DocumentSearchSetting]:
+        stmt = select(DocumentSearchSetting).where(
+            DocumentSearchSetting.knowledge_id == knowledge_id
+        )
         return db.scalar(stmt)
 
-
-document_tag_crud = DocumentTagCRUD()
-
-
-# =========================================================
-# Document Tag Assignments CRUD
-# =========================================================
-class DocumentTagAssignmentCRUD:
-    def assign(
+    def create_default(
         self,
         db: Session,
-        data: DocumentTagAssignmentCreate,
-    ) -> DocumentTagAssignment:
-        """
-        (knowledge_id, tag_id) 조합이 이미 있으면 기존 row 반환.
-        """
-        stmt = select(DocumentTagAssignment).where(
-            DocumentTagAssignment.knowledge_id == data.knowledge_id,
-            DocumentTagAssignment.tag_id == data.tag_id,
-        )
-        existing = db.scalar(stmt)
-        if existing:
-            return existing
-
-        obj = DocumentTagAssignment(
-            knowledge_id=data.knowledge_id,
-            tag_id=data.tag_id,
+        *,
+        knowledge_id: int,
+        defaults: dict[str, Any],
+    ) -> DocumentSearchSetting:
+        obj = DocumentSearchSetting(
+            knowledge_id=knowledge_id,
+            top_k=defaults["top_k"],
+            min_score=defaults["min_score"],          # 유사도 기준
+            score_type=defaults["score_type"],        # DB에서 cosine_similarity 고정 제약
+            reranker_enabled=defaults["reranker_enabled"],
+            reranker_model=defaults.get("reranker_model"),
+            reranker_top_n=defaults["reranker_top_n"],
         )
         db.add(obj)
         db.flush()
         db.refresh(obj)
         return obj
 
-    def list_by_document(
+    def ensure_default(
         self,
         db: Session,
+        *,
         knowledge_id: int,
-    ) -> Sequence[DocumentTagAssignment]:
-        stmt = select(DocumentTagAssignment).where(
-            DocumentTagAssignment.knowledge_id == knowledge_id
-        )
-        return db.scalars(stmt).all()
+        defaults: dict[str, Any],
+    ) -> DocumentSearchSetting:
+        values = {
+            "knowledge_id": knowledge_id,
+            "top_k": defaults["top_k"],
+            "min_score": defaults["min_score"],
+            "score_type": defaults["score_type"],
+            "reranker_enabled": defaults["reranker_enabled"],
+            "reranker_model": defaults.get("reranker_model"),
+            "reranker_top_n": defaults["reranker_top_n"],
+        }
 
-    def delete(
-        self,
-        db: Session,
-        assignment_id: int,
-    ) -> None:
-        stmt = delete(DocumentTagAssignment).where(
-            DocumentTagAssignment.assignment_id == assignment_id
+        stmt = (
+            pg_insert(DocumentSearchSetting)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["knowledge_id"])
         )
         db.execute(stmt)
         db.flush()
 
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
 
-document_tag_assignment_crud = DocumentTagAssignmentCRUD()
+    def update_by_knowledge_id(
+        self,
+        db: Session,
+        *,
+        knowledge_id: int,
+        data: DocumentSearchSettingUpdate,
+    ) -> DocumentSearchSetting:
+        values = data.model_dump(exclude_unset=True)
+        if not values:
+            obj = self.get(db, knowledge_id)
+            assert obj is not None
+            return obj
+
+        stmt = (
+            update(DocumentSearchSetting)
+            .where(DocumentSearchSetting.knowledge_id == knowledge_id)
+            .values(**values)
+        )
+        db.execute(stmt)
+        db.flush()
+
+        obj = self.get(db, knowledge_id)
+        assert obj is not None
+        return obj
+
+
+document_ingestion_setting_crud = DocumentIngestionSettingCRUD()
+document_search_setting_crud = DocumentSearchSettingCRUD()
 
 
 # =========================================================
@@ -275,9 +351,7 @@ class DocumentUsageCRUD:
         db: Session,
         knowledge_id: int,
     ) -> Sequence[DocumentUsage]:
-        stmt = select(DocumentUsage).where(
-            DocumentUsage.knowledge_id == knowledge_id
-        )
+        stmt = select(DocumentUsage).where(DocumentUsage.knowledge_id == knowledge_id)
         return db.scalars(stmt).all()
 
     def update(
@@ -286,10 +360,7 @@ class DocumentUsageCRUD:
         usage_id: int,
         data: DocumentUsageUpdate,
     ) -> Optional[DocumentUsage]:
-        values = {
-            k: v
-            for k, v in data.model_dump(exclude_unset=True).items()
-        }
+        values = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
         if not values:
             stmt = select(DocumentUsage).where(DocumentUsage.usage_id == usage_id)
             return db.scalar(stmt)
@@ -317,7 +388,6 @@ class DocumentPageCRUD:
             knowledge_id=data.knowledge_id,
             page_no=data.page_no,
             image_url=data.image_url,
-            # created_at 은 DB default 사용
         )
         db.add(obj)
         db.flush()
@@ -370,23 +440,12 @@ class DocumentChunkCRUD:
         *,
         vector: Sequence[float],
     ) -> DocumentChunk:
-        """
-        vector_memory 는 service 레이어에서 임베딩 계산 후 주입
-
-        예시 (service/user/document_ingest.py)
-        ----------------------------------------------------------------
-        # chunks: list[tuple[DocumentChunkCreate, list[float]]]
-        # for schema_obj, vec in chunks:
-        #     document_chunk_crud.create(db, schema_obj, vector=vec)
-        ----------------------------------------------------------------
-        """
         obj = DocumentChunk(
             knowledge_id=data.knowledge_id,
             page_id=data.page_id,
             chunk_index=data.chunk_index,
             chunk_text=data.chunk_text,
             vector_memory=list(vector),
-            # created_at 은 DB default 사용
         )
         db.add(obj)
         db.flush()
@@ -398,24 +457,6 @@ class DocumentChunkCRUD:
         db: Session,
         items: list[tuple[DocumentChunkCreate, Sequence[float]]],
     ) -> list[DocumentChunk]:
-        """
-        items: (DocumentChunkCreate, vector) 튜플 리스트
-
-        예시 (service/user/document_ingest.py)
-        ----------------------------------------------------------------
-        # items = []
-        # for idx, (text, page_id) in enumerate(parsed_chunks, start=1):
-        #     schema_obj = DocumentChunkCreate(
-        #         knowledge_id=knowledge_id,
-        #         page_id=page_id,
-        #         chunk_index=idx,
-        #         chunk_text=text,
-        #     )
-        #     vec = embedding_client.embed_text(text)
-        #     items.append((schema_obj, vec))
-        # document_chunk_crud.bulk_create(db, items)
-        ----------------------------------------------------------------
-        """
         objs: list[DocumentChunk] = []
         for data, vector in items:
             obj = DocumentChunk(
@@ -431,6 +472,16 @@ class DocumentChunkCRUD:
         for obj in objs:
             db.refresh(obj)
         return objs
+
+    def delete_by_document(self, db: Session, knowledge_id: int) -> int:
+        """
+        reindex 전에 기존 청크 정리용 (단순 삭제)
+        반환: 삭제된 row 수
+        """
+        stmt = delete(DocumentChunk).where(DocumentChunk.knowledge_id == knowledge_id)
+        res = db.execute(stmt)
+        db.flush()
+        return int(res.rowcount or 0)
 
     def list_by_document(
         self,
@@ -450,9 +501,7 @@ class DocumentChunkCRUD:
         knowledge_id: int,
         page_id: Optional[int] = None,
     ) -> Sequence[DocumentChunk]:
-        stmt = select(DocumentChunk).where(
-            DocumentChunk.knowledge_id == knowledge_id
-        )
+        stmt = select(DocumentChunk).where(DocumentChunk.knowledge_id == knowledge_id)
         if page_id is not None:
             stmt = stmt.where(DocumentChunk.page_id == page_id)
         stmt = stmt.order_by(DocumentChunk.chunk_index.asc())
@@ -465,23 +514,32 @@ class DocumentChunkCRUD:
         query_vector: Sequence[float],
         knowledge_id: Optional[int] = None,
         top_k: int = 8,
+        min_score: Optional[float] = None,    # 유사도 기준(0~1)
+        score_type: str = "cosine_similarity",
     ) -> List[DocumentChunk]:
         """
-        pgvector 코사인 거리 기반 상위 N개 청크 검색
-        knowledge_id가 있으면 해당 문서 내에서만 검색
+        score_type은 cosine_similarity만 지원
+        - pgvector는 cosine_distance로 정렬/필터가 쉬워서
+          min_score(유사도) -> max_distance(거리) = 1 - min_score 로 변환해서 필터함
         """
+        if score_type != "cosine_similarity":
+            raise ValueError("Only cosine_similarity is supported in MVP")
+
         stmt = select(DocumentChunk)
         if knowledge_id is not None:
             stmt = stmt.where(DocumentChunk.knowledge_id == knowledge_id)
 
-        stmt = (
-            stmt.order_by(
-                DocumentChunk.vector_memory.cosine_distance(query_vector)  # type: ignore[attr-defined]
-            )
-            .limit(top_k)
-        )
+        dist = DocumentChunk.vector_memory.cosine_distance(query_vector)  # type: ignore[attr-defined]
+
+        if min_score is not None:
+            # 유사도(min_score) >= x  <=>  거리(distance) <= 1 - x
+            max_distance = 1.0 - float(min_score)
+            stmt = stmt.where(dist <= max_distance)
+
+        stmt = stmt.order_by(dist).limit(top_k)
         chunks = db.scalars(stmt).all()
         return list(chunks)
+
 
 document_chunk_crud = DocumentChunkCRUD()
 
@@ -492,15 +550,14 @@ def search_chunks_by_vector(
     query_vector: Sequence[float],
     knowledge_id: Optional[int] = None,
     top_k: int = 8,
+    min_score: Optional[float] = None,
+    score_type: str = "cosine_similarity",
 ) -> List[DocumentChunk]:
-    """
-    qa_chain 등에서 쓰기 위한 헬퍼
-    knowledge_id == knowledge_id 로 해석해서 전달
-    """
     return document_chunk_crud.search_by_vector(
         db=db,
         query_vector=query_vector,
         knowledge_id=knowledge_id,
         top_k=top_k,
+        min_score=min_score,
+        score_type=score_type,
     )
-

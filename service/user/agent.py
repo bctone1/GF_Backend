@@ -4,15 +4,13 @@ from __future__ import annotations
 from typing import Optional, Tuple, List
 
 from fastapi import HTTPException, status
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models.user.account import AppUser
-from models.user.agent import AIAgent, AgentPrompt, AgentShare
+from models.user.agent import AIAgent, AgentShare
 from schemas.user.agent import (
     AIAgentCreate,
     AIAgentUpdate,
-    AgentPromptCreate,
 )
 from crud.user.agent import ai_agent_crud
 from models.partner.student import Student, Enrollment
@@ -77,14 +75,10 @@ def list_shared_agents_for_class(
     """
     특정 class 에 공유된 에이전트 목록 조회.
     - 현재는 '해당 강의에 수강 중인 학생'만 허용.
-      (나중에 강사 권한 허용 로직을 추가해도 됨)
+      (강사 허용 로직은 agent_share 서비스에서 확장 가능)
     """
     # 0) 강의 존재 여부 체크
-    cls = (
-        db.query(Class)
-        .filter(Class.id == class_id)
-        .first()
-    )
+    cls = db.query(Class).filter(Class.id == class_id).first()
     if cls is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -104,14 +98,18 @@ def list_shared_agents_for_class(
         .join(AgentShare, AgentShare.agent_id == AIAgent.agent_id)
         .filter(AgentShare.class_id == class_id)
     )
+
     if active_only:
-        q = q.filter(AgentShare.is_active.is_(True))
+        q = q.filter(
+            AgentShare.is_active.is_(True),
+            AIAgent.is_active.is_(True),
+        )
 
     return q.all()
 
 
 # =========================================
-# AIAgent 메타 CRUD
+# AIAgent CRUD
 # =========================================
 def create_agent(
     db: Session,
@@ -122,6 +120,7 @@ def create_agent(
     """
     새 에이전트 생성.
     - owner_id는 항상 me.user_id 로 강제.
+    - system_prompt는 ai_agents.system_prompt에 저장(버전 없음).
     """
     agent = ai_agent_crud.create(
         db,
@@ -137,7 +136,6 @@ def list_my_agents(
     me: AppUser,
     limit: int,
     offset: int,
-    project_id: Optional[int] = None,
     q: Optional[str] = None,
 ) -> Tuple[int, List[AIAgent]]:
     """
@@ -148,7 +146,6 @@ def list_my_agents(
         owner_id=me.user_id,
         limit=limit,
         offset=offset,
-        project_id=project_id,
         q=q,
     )
     return total, items
@@ -174,7 +171,8 @@ def update_my_agent(
     data: AIAgentUpdate,
 ) -> AIAgent:
     """
-    내 에이전트 메타데이터 수정.
+    내 에이전트 수정.
+    - system_prompt 업데이트는 여기서 직접 반영됨(공유 템플릿 즉시 반영 정책).
     """
     agent = ai_agent_crud.update_for_owner(
         db,
@@ -183,89 +181,11 @@ def update_my_agent(
         obj_in=data,
     )
     if agent is None:
-        # 소유자가 아니거나 존재하지 않는 경우
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="해당 에이전트를 찾을 수 없거나 권한이 없어.",
         )
     return agent
-
-
-# =========================================
-# AgentPrompt (버전 관리)
-# =========================================
-def get_active_prompt_for_agent(
-    db: Session,
-    *,
-    me: AppUser,
-    agent_id: int,
-) -> Optional[AgentPrompt]:
-    """
-    해당 에이전트의 활성 프롬프트 한 개 반환.
-    - 없으면 None
-    """
-    # 권한 체크
-    ensure_my_agent(db, agent_id, me)
-
-    prompt: Optional[AgentPrompt] = (
-        db.query(AgentPrompt)
-        .filter(
-            AgentPrompt.agent_id == agent_id,
-            AgentPrompt.is_active.is_(True),
-        )
-        .order_by(AgentPrompt.version.desc())
-        .first()
-    )
-    return prompt
-
-
-def upsert_prompt_for_agent(
-    db: Session,
-    *,
-    me: AppUser,
-    agent_id: int,
-    data: AgentPromptCreate,
-) -> AgentPrompt:
-    """
-    새로운 프롬프트 버전을 생성하고 활성화한다.
-    - 기존 활성 프롬프트들은 is_active=False 로 비활성화.
-    - version = (agent_id 기준 max(version) + 1)
-    """
-    # 권한 체크
-    ensure_my_agent(db, agent_id, me)
-
-    # 다음 버전 번호 계산
-    max_version: Optional[int] = (
-        db.query(func.max(AgentPrompt.version))
-        .filter(AgentPrompt.agent_id == agent_id)
-        .scalar()
-    )
-    next_version = (max_version or 0) + 1
-
-    # 기존 활성 프롬프트 비활성화
-    (
-        db.query(AgentPrompt)
-        .filter(
-            AgentPrompt.agent_id == agent_id,
-            AgentPrompt.is_active.is_(True),
-        )
-        .update(
-            {"is_active": False},
-            synchronize_session=False,
-        )
-    )
-
-    # 새 버전 생성
-    prompt = AgentPrompt(
-        agent_id=agent_id,
-        version=next_version,
-        system_prompt=data.system_prompt,
-        is_active=True,
-    )
-    db.add(prompt)
-    db.commit()
-    db.refresh(prompt)
-    return prompt
 
 
 # =========================================
@@ -318,45 +238,25 @@ def fork_shared_agent_to_my_agent(
             detail="원본 에이전트를 찾을 수 없어.",
         )
 
-    # 4) 원본 활성 시스템 프롬프트 조회
-    src_prompt: Optional[AgentPrompt] = (
-        db.query(AgentPrompt)
-        .filter(
-            AgentPrompt.agent_id == agent_id,
-            AgentPrompt.is_active.is_(True),
-        )
-        .order_by(AgentPrompt.version.desc())
-        .first()
-    )
-    if src_prompt is None:
+    # 4) 원본 프롬프트 존재 확인(모델상 not-null이지만, 레거시 데이터 방어)
+    if not (src_agent.system_prompt or "").strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="원본 에이전트에 활성 시스템 프롬프트가 없음.",
+            detail="원본 에이전트에 system_prompt가 비어있어.",
         )
 
     # 5) 새 에이전트 생성 (owner_id = me.user_id)
     agent_in = AIAgentCreate(
         name=new_name or f"{src_agent.name} - 내 버전",
         role_description=src_agent.role_description,
-        status="active",
-        template_source="class_shared",  # 원본이 class 공유에서 왔다는 표시
-        project_id=None,
-        knowledge_id=src_agent.knowledge_id,
+        system_prompt=src_agent.system_prompt,
+        template_source="class_shared",
+        is_active=True,
     )
     new_agent = ai_agent_crud.create(
         db,
         obj_in=agent_in,
         owner_id=me.user_id,
-    )
-
-    # 6) 프롬프트 복제: 내 새 에이전트에 활성 버전으로 하나 생성
-    upsert_prompt_for_agent(
-        db=db,
-        me=me,
-        agent_id=new_agent.agent_id,
-        data=AgentPromptCreate(
-            system_prompt=src_prompt.system_prompt,
-        ),
     )
 
     return new_agent

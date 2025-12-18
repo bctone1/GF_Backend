@@ -197,3 +197,19 @@ class MfaMethod(str, Enum):
     totp = "totp"
     sms = "sms"
     email = "email"
+
+# ===== LLM/실습 프리셋 =====
+class StylePreset(str, Enum):
+    accurate = "accurate"
+    balanced = "balanced"
+    creative = "creative"
+    custom = "custom"
+
+
+class ResponseLengthPreset(str, Enum):
+    short = "short"
+    normal = "normal"
+    long = "long"
+    custom = "custom"
+
+

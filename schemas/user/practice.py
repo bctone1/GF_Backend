@@ -1,43 +1,124 @@
 # schemas/user/practice.py
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional, Any, Dict, List
 
 from pydantic import ConfigDict, Field
 
 from schemas.base import ORMBase
+from schemas.enums import StylePreset, ResponseLengthPreset
 
 
 # =========================================
-# 공통: Few-shot 예시
-# =========================================
-class FewShotExample(ORMBase):
-    """
-    Few-shot 예시 한 쌍(Q/A).
-    - generation_params JSONB 안에 배열로 들어감.
-    """
-    # from_attributes 필요 없으니까 False 로 둬도 되고,
-    model_config = ConfigDict(from_attributes=False)
-
-    input: str   # 예시 질문
-    output: str  # 예시 답변
-
-# =========================================
-# 공통: 세션-모델 generation 옵션
+# generation 옵션 (JSONB로 저장되는 옵션 묶음)
 # =========================================
 class GenerationParams(ORMBase):
-    """
-    세션 모델별 LLM 생성 옵션.
-    - DB에서는 JSONB로 저장되고, API에서는 이 구조로 주고받음.
-    """
+    # JSONB 확장 키(예: presence_penalty 등) 허용
+    model_config = ConfigDict(from_attributes=False, extra="allow")
+
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    response_length_preset: Optional[ResponseLengthPreset] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1)
+
+
+# =========================================
+# user.few_shot_examples (개인 라이브러리)
+# =========================================
+class UserFewShotExampleCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    response_length_preset: Optional[str] = None  # "short" | "normal" | "long" | "custom"
-    max_tokens: Optional[int] = None
+    title: Optional[str] = None
+    input_text: str
+    output_text: str
+    meta: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
 
-    few_shot_examples: Optional[List[FewShotExample]] = None
+
+class UserFewShotExampleUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    title: Optional[str] = None
+    input_text: Optional[str] = None
+    output_text: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class UserFewShotExampleResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    example_id: int
+    user_id: int
+    title: Optional[str] = None
+    input_text: str
+    output_text: str
+    meta: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+# =========================================
+# user.practice_session_setting_few_shots (매핑)
+# =========================================
+class PracticeSessionSettingFewShotResponse(ORMBase):
+    """
+    settings.few_shot_links 로 내려오는 매핑 row
+    """
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    setting_id: int
+    example_id: int
+    sort_order: int
+    created_at: datetime
+
+    # relationship: PracticeSessionSettingFewShot.example
+    example: Optional[UserFewShotExampleResponse] = None
+
+
+# =========================================
+# user.practice_session_settings
+# =========================================
+class PracticeSessionSettingCreate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    style_preset: Optional[StylePreset] = None
+    style_params: Optional[Dict[str, Any]] = None
+    generation_params: Optional[GenerationParams] = None
+
+    # JSON 배열 대신 "선택한 예시 ID들"만 받음 (순서는 리스트 순서로 해석 or 서비스에서 sort_order 처리)
+    few_shot_example_ids: Optional[List[int]] = None
+
+
+class PracticeSessionSettingUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    style_preset: Optional[StylePreset] = None
+    style_params: Optional[Dict[str, Any]] = None
+    generation_params: Optional[GenerationParams] = None
+    few_shot_example_ids: Optional[List[int]] = None
+
+
+class PracticeSessionSettingResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    setting_id: int
+    session_id: int
+
+    style_preset: Optional[StylePreset] = None
+    style_params: Dict[str, Any] = Field(default_factory=dict)
+
+    # DB(JSONB) 그대로 내려줌
+    generation_params: Dict[str, Any] = Field(default_factory=dict)
+
+    # 매핑 테이블 기반
+    few_shot_links: List[PracticeSessionSettingFewShotResponse] = Field(default_factory=list)
+
+    created_at: datetime
+    updated_at: datetime
 
 
 # =========================================
@@ -46,10 +127,9 @@ class GenerationParams(ORMBase):
 class PracticeSessionCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
-    class_id: Optional[int] = None          # 어떤 class 에서 시작된 실습인지 연결용
-    project_id: Optional[int] = None        # 어떤 프로젝트(폴더)에 속한 세션인지
-    # NEW: 이 세션의 기본 지식베이스
-    knowledge_id: Optional[int] = None      # user.documents.knowledge_id
+    class_id: Optional[int] = None
+    project_id: Optional[int] = None
+    knowledge_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -58,8 +138,7 @@ class PracticeSessionUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     class_id: Optional[int] = None
-    project_id: Optional[int] = None        # 프로젝트 이동/해제할 때 사용 가능
-    # NEW: 지식베이스 변경/해제
+    project_id: Optional[int] = None
     knowledge_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
@@ -72,8 +151,6 @@ class PracticeSessionResponse(ORMBase):
     user_id: int
     class_id: Optional[int] = None
     project_id: Optional[int] = None
-
-    # NEW: 세션에 연결된 지식베이스
     knowledge_id: Optional[int] = None
 
     title: Optional[str] = None
@@ -81,12 +158,12 @@ class PracticeSessionResponse(ORMBase):
     updated_at: datetime
     notes: Optional[str] = None
 
-    # 편의를 위해 마지막 프롬프트/응답 한 쌍을 세션 레벨에서 보여줄 때 사용
+    settings: Optional[PracticeSessionSettingResponse] = None
+
     prompt_text: Optional[str] = None
     response_text: Optional[str] = None
 
-    # 자세한 턴 목록
-    responses: List["PracticeResponseResponse"] = []
+    responses: List["PracticeResponseResponse"] = Field(default_factory=list)
 
 
 # =========================================
@@ -97,18 +174,11 @@ class PracticeSessionModelCreate(ORMBase):
 
     session_id: int
     model_name: str
-    is_primary: Optional[bool] = None  # server default false
-    # ★ 추가: 생성 옵션(없으면 서버에서 default 채움)
+    is_primary: Optional[bool] = None
     generation_params: Optional[GenerationParams] = None
 
 
 class PracticeSessionModelUpdate(ORMBase):
-    """
-    세션 모델 설정 업데이트.
-
-    - 모델 자체는 바꾸지 않고(is_primary만 수정)
-    - generation_params 는 옵션 변경용(PATCH /options 에서 사용 가능)
-    """
     model_config = ConfigDict(from_attributes=False)
 
     is_primary: Optional[bool] = None
@@ -122,8 +192,7 @@ class PracticeSessionModelResponse(ORMBase):
     session_id: int
     model_name: str
     is_primary: bool
-    # ★ 추가: 현재 세션-모델에 설정된 LLM 생성 옵션
-    generation_params: Optional[GenerationParams] = None
+    generation_params: Optional[Dict[str, Any]] = None
 
 
 # =========================================
@@ -148,7 +217,6 @@ class PracticeResponseUpdate(ORMBase):
     response_text: Optional[str] = None
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
-    # model_name 은 보통 수정 안 해도 되니까 굳이 안 넣어도 됨
 
 
 class PracticeResponseResponse(ORMBase):
@@ -156,7 +224,7 @@ class PracticeResponseResponse(ORMBase):
 
     response_id: int
     session_model_id: int
-    session_id: int          # NEW: FK 붙인 컬럼까지 응답에 포함
+    session_id: int
     model_name: str
     prompt_text: str
     response_text: str
@@ -166,107 +234,21 @@ class PracticeResponseResponse(ORMBase):
 
 
 # =========================================
-# user.practice_ratings
-# =========================================
-class PracticeRatingCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
-    response_id: int
-    # 요청 바디에서는 user_id를 받지 않고, 엔드포인트에서 me.user_id로 채움
-    user_id: Optional[int] = None
-    score: int
-    feedback: Optional[str] = None
-
-
-class PracticeRatingUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
-    score: Optional[int] = None
-    feedback: Optional[str] = None
-
-
-class PracticeRatingResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    rating_id: int
-    response_id: int
-    user_id: int
-    score: int
-    feedback: Optional[str] = None
-    created_at: datetime
-
-
-# =========================================
-# user.model_comparisons
-# =========================================
-class ModelComparisonCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
-    session_id: int
-    # 지금은 문자열 기준으로 비교 저장 (예: "gpt-4o-mini" vs "upstage-...").
-    # 나중에 필요하면 session_model_id / model_catalog_id 기준으로 확장 가능.
-    model_a: str
-    model_b: str
-    winner_model: Optional[str] = None
-    latency_diff_ms: Optional[int] = None
-    token_diff: Optional[int] = None
-    user_feedback: Optional[str] = None
-
-
-class ModelComparisonUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
-    winner_model: Optional[str] = None
-    latency_diff_ms: Optional[int] = None
-    token_diff: Optional[int] = None
-    user_feedback: Optional[str] = None
-
-
-class ModelComparisonResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    comparison_id: int
-    session_id: int
-    model_a: str
-    model_b: str
-    winner_model: Optional[str] = None
-    latency_diff_ms: Optional[int] = None
-    token_diff: Optional[int] = None
-    user_feedback: Optional[str] = None
-    created_at: datetime
-
-
-# =========================================
 # LLM 실행용 /chat 스키마
 # =========================================
 class PracticeTurnRequest(ORMBase):
-    """
-    /sessions/{session_id}/chat 요청 바디
-
-    - prompt_text: 사용자가 입력한 프롬프트
-    - model_names:
-        * 새 세션 시작 시, 특정 모델들만 선택해서 돌리고 싶을 때
-    - document_ids:
-        * 선택한 문서들 (RAG 컨텍스트로 사용할 문서 id 리스트)
-    - knowledge_id:
-        * 이 턴에서 사용할 기본 지식베이스 (없으면 세션에 저장된 값 사용)
-    """
     model_config = ConfigDict(from_attributes=False)
 
     prompt_text: str
     model_names: Optional[list[str]] = Field(
-        None,
-        description="이 세션에서 호출할 논리 모델 이름 목록 (예: ['gpt-4o-mini', 'gpt-5-nano'])",
+        default=None,
+        description="이 세션에서 호출할 논리 모델 이름 목록",
     )
-    document_ids: Optional[list[int]] = None  # 세부 문서 리스트
-    knowledge_id: Optional[int] = None        # 기본 지식베이스(세션 기본값 override 용)
-
+    document_ids: Optional[list[int]] = None
+    knowledge_id: Optional[int] = None
 
 
 class PracticeTurnModelResult(ORMBase):
-    """
-    한 모델에 대해 한 번 실행한 결과
-    """
     model_config = ConfigDict(from_attributes=True)
 
     session_model_id: int
@@ -279,23 +261,19 @@ class PracticeTurnModelResult(ORMBase):
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
     created_at: datetime
-    is_primary: Optional[bool] = None  # 필요 없으면 제거 가능
+    is_primary: Optional[bool] = None
 
-    # 프론트에서 받게 이 턴에서 사용된 LLM 생성 파라미터 쏴주기
-    generation_params: Optional[GenerationParams] = None
+    generation_params: Optional[Dict[str, Any]] = None
 
 
 class PracticeTurnResponse(ORMBase):
-    """
-    한 프롬프트에 대해 여러 모델을 실행한 결과 묶음
-    """
     model_config = ConfigDict(from_attributes=False)
 
     session_id: int
-    session_title: Optional[str] = None  # 자동 요약 타이틀
+    session_title: Optional[str] = None
     prompt_text: str
     results: List[PracticeTurnModelResult]
 
 
-# ForwardRef 해결
+# ForwardRef
 PracticeSessionResponse.model_rebuild()
