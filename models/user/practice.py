@@ -48,6 +48,13 @@ class PracticeSession(Base):
         nullable=True,
     )
 
+    # Agent 템플릿 연결
+    agent_id = Column(
+        BigInteger,
+        ForeignKey("user.ai_agents.agent_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     title = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
 
@@ -80,6 +87,7 @@ class PracticeSession(Base):
     __table_args__ = (
         Index("idx_practice_sessions_user", "user_id"),
         Index("idx_practice_sessions_knowledge", "knowledge_id"),
+        Index("idx_practice_sessions_agent", "agent_id"),
         {"schema": "user"},
     )
 
@@ -106,6 +114,13 @@ class PracticeSessionSetting(Base):
     )
 
     generation_params = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    )
+
+    # Agent 스냅샷(세션 시작 시점의 agent 상태를 고정해서 재현성 확보)
+    agent_snapshot = Column(
         JSONB,
         nullable=False,
         server_default=text("'{}'::jsonb"),
@@ -171,7 +186,6 @@ class UserFewShotExample(Base):
         Index("idx_few_shot_examples_user", "user_id"),
         {"schema": "user"},
     )
-
 
 
 # ========== user.practice_session_setting_few_shots (매핑) ==========
@@ -295,6 +309,4 @@ class PracticeResponse(Base):
         passive_deletes=True,
     )
 
-    __table_args__ = (
-        {"schema": "user"},
-    )
+    __table_args__ = ({"schema": "user"},)

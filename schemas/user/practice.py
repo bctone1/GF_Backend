@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Any, Dict, List
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from schemas.base import ORMBase
 from schemas.enums import StylePreset, ResponseLengthPreset
@@ -20,7 +20,21 @@ class GenerationParams(ORMBase):
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     response_length_preset: Optional[ResponseLengthPreset] = None
+
+    # 혼용 방지용: 내부 표준은 max_completion_tokens
+    # (기존 max_tokens도 입력/출력 호환을 위해 유지)
+    max_completion_tokens: Optional[int] = Field(default=None, ge=1)
     max_tokens: Optional[int] = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _sync_token_fields(self) -> "GenerationParams":
+        # 입력이 max_tokens로만 들어와도 max_completion_tokens로 맞춰줌
+        if self.max_completion_tokens is None and self.max_tokens is not None:
+            self.max_completion_tokens = self.max_tokens
+        # 반대로 기존 코드가 max_tokens를 읽는 경우를 위해 같이 채움
+        if self.max_tokens is None and self.max_completion_tokens is not None:
+            self.max_tokens = self.max_completion_tokens
+        return self
 
 
 # =========================================
@@ -89,7 +103,7 @@ class PracticeSessionSettingCreate(ORMBase):
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
 
-    # JSON 배열 대신 "선택한 예시 ID들"만 받음 (순서는 리스트 순서로 해석 or 서비스에서 sort_order 처리)
+    # JSON 배열 대신 "선택한 예시 ID들"만 받음
     few_shot_example_ids: Optional[List[int]] = None
 
 
@@ -114,6 +128,9 @@ class PracticeSessionSettingResponse(ORMBase):
     # DB(JSONB) 그대로 내려줌
     generation_params: Dict[str, Any] = Field(default_factory=dict)
 
+    # agent 템플릿 스냅샷(세션 생성 시점 재현성)
+    agent_snapshot: Dict[str, Any] = Field(default_factory=dict)
+
     # 매핑 테이블 기반
     few_shot_links: List[PracticeSessionSettingFewShotResponse] = Field(default_factory=list)
 
@@ -130,6 +147,9 @@ class PracticeSessionCreate(ORMBase):
     class_id: Optional[int] = None
     project_id: Optional[int] = None
     knowledge_id: Optional[int] = None
+
+    # agent 연결
+    agent_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -140,6 +160,9 @@ class PracticeSessionUpdate(ORMBase):
     class_id: Optional[int] = None
     project_id: Optional[int] = None
     knowledge_id: Optional[int] = None
+
+    # agent 연결 변경(정책은 서비스에서 제어)
+    agent_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -153,6 +176,8 @@ class PracticeSessionResponse(ORMBase):
     project_id: Optional[int] = None
     knowledge_id: Optional[int] = None
 
+    # agent 연결
+    agent_id: Optional[int] = None
     title: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -240,12 +265,17 @@ class PracticeTurnRequest(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     prompt_text: str
+
     model_names: Optional[list[str]] = Field(
         default=None,
         description="이 세션에서 호출할 논리 모델 이름 목록",
     )
+
     document_ids: Optional[list[int]] = None
     knowledge_id: Optional[int] = None
+
+    # 새 세션(session_id==0)에서 agent 템플릿 적용용(옵션)
+    agent_id: Optional[int] = None
 
 
 class PracticeTurnModelResult(ORMBase):

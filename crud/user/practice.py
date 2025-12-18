@@ -44,6 +44,40 @@ def _coerce_dict(value: Any) -> dict[str, Any]:
     return dict(v) if isinstance(v, dict) else {}
 
 
+def _normalize_generation_params_dict(v: dict[str, Any]) -> dict[str, Any]:
+    """
+    DB에는 max_completion_tokens 기준으로 맞추되,
+    기존 코드 호환을 위해 max_tokens도 함께 동일 값으로 유지.
+    """
+    if not isinstance(v, dict):
+        return {}
+
+    # dict(v)로 복사해서 side-effect 최소화
+    out = dict(v)
+
+    mct = out.get("max_completion_tokens")
+    mt = out.get("max_tokens")
+
+    # max_tokens만 들어오면 max_completion_tokens로 승격
+    if mct is None and mt is not None:
+        out["max_completion_tokens"] = mt
+        out["max_tokens"] = mt
+        return out
+
+    # max_completion_tokens만 들어오면 max_tokens도 채움
+    if mt is None and mct is not None:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+        return out
+
+    # 둘 다 있으면 max_completion_tokens 우선으로 동기화
+    if mct is not None and mt is not None and mct != mt:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+
+    return out
+
+
 # =========================================================
 # PracticeSession CRUD
 # =========================================================
@@ -60,6 +94,7 @@ class PracticeSessionCRUD:
             class_id=data.class_id,
             project_id=data.project_id,
             knowledge_id=data.knowledge_id,
+            agent_id=getattr(data, "agent_id", None),  # ✅ 추가
             title=data.title,
             notes=data.notes,
         )
@@ -136,6 +171,7 @@ class PracticeSessionSettingCRUD:
         default_style_params: Optional[dict[str, Any]] = None,
         style_preset: Optional[str] = None,
         default_few_shot_example_ids: Optional[list[int]] = None,
+        default_agent_snapshot: Optional[dict[str, Any]] = None,
     ) -> PracticeSessionSetting:
         """
         세션당 settings 1개 보장.
@@ -149,9 +185,10 @@ class PracticeSessionSettingCRUD:
         gen = default_generation_params
         if not isinstance(gen, dict):
             gen = getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {}
-        gen = dict(gen)
+        gen = _normalize_generation_params_dict(dict(gen))
 
         style = default_style_params if isinstance(default_style_params, dict) else {}
+        agent_snapshot = dict(default_agent_snapshot) if isinstance(default_agent_snapshot, dict) else {}
 
         try:
             with db.begin_nested():
@@ -160,6 +197,7 @@ class PracticeSessionSettingCRUD:
                     style_preset=style_preset,
                     style_params=dict(style),
                     generation_params=gen,
+                    agent_snapshot=agent_snapshot,  # ✅ 추가
                 )
                 db.add(obj)
                 db.flush()
@@ -199,7 +237,6 @@ class PracticeSessionSettingCRUD:
                 PracticeSessionSettingFewShot.setting_id == setting_id
             )
         )
-        # 새 링크 생성 (리스트 순서를 sort_order로)
         for i, eid in enumerate(example_ids):
             db.add(
                 PracticeSessionSettingFewShot(
@@ -219,7 +256,7 @@ class PracticeSessionSettingCRUD:
     ) -> Optional[PracticeSessionSetting]:
         """
         session_id 기준 settings PATCH.
-        - style_params/generation_params: merge
+        - style_params/generation_params/agent_snapshot: merge
         - few_shot_example_ids: replace(매핑 테이블)
         """
         row = self.get_by_session(db, session_id=session_id)
@@ -241,12 +278,19 @@ class PracticeSessionSettingCRUD:
             base_style.update(incoming_style)
             row.style_params = base_style
 
-        # generation_params: merge
+        # generation_params: merge (token key normalize 포함)
         if "generation_params" in values:
-            incoming_gen = _coerce_dict(values.get("generation_params"))
-            base_gen = dict(getattr(row, "generation_params", None) or {})
+            incoming_gen = _normalize_generation_params_dict(_coerce_dict(values.get("generation_params")))
+            base_gen = _normalize_generation_params_dict(dict(getattr(row, "generation_params", None) or {}))
             base_gen.update(incoming_gen)
-            row.generation_params = base_gen
+            row.generation_params = _normalize_generation_params_dict(base_gen)
+
+        # agent_snapshot: merge
+        if "agent_snapshot" in values:
+            incoming_snap = _coerce_dict(values.get("agent_snapshot"))
+            base_snap = dict(getattr(row, "agent_snapshot", None) or {})
+            base_snap.update(incoming_snap)
+            row.agent_snapshot = base_snap
 
         # few_shot_example_ids: replace
         if "few_shot_example_ids" in values:
@@ -351,7 +395,7 @@ user_few_shot_example_crud = UserFewShotExampleCRUD()
 class PracticeSessionModelCRUD:
     def create(self, db: Session, data: PracticeSessionModelCreate) -> PracticeSessionModel:
         raw_gp = getattr(data, "generation_params", None)
-        gp = _coerce_dict(raw_gp) if raw_gp is not None else {}
+        gp = _normalize_generation_params_dict(_coerce_dict(raw_gp)) if raw_gp is not None else {}
 
         obj = PracticeSessionModel(
             session_id=data.session_id,
@@ -395,7 +439,9 @@ class PracticeSessionModelCRUD:
             return obj
 
         if "generation_params" in update_data:
-            update_data["generation_params"] = _coerce_dict(update_data.get("generation_params"))
+            update_data["generation_params"] = _normalize_generation_params_dict(
+                _coerce_dict(update_data.get("generation_params"))
+            )
 
         for k, v in update_data.items():
             setattr(obj, k, v)
@@ -420,7 +466,7 @@ class PracticeSessionModelCRUD:
         merge: bool = True,
         overwrite_keys: Optional[list[str]] = None,
     ) -> list[PracticeSessionModel]:
-        gp = _coerce_dict(generation_params)
+        gp = _normalize_generation_params_dict(_coerce_dict(generation_params))
         if not gp:
             return list(self.list_by_session(db, session_id=session_id))
 
@@ -428,7 +474,7 @@ class PracticeSessionModelCRUD:
         keys = overwrite_keys[:] if overwrite_keys else None
 
         for m in models:
-            current = dict(getattr(m, "generation_params", None) or {})
+            current = _normalize_generation_params_dict(dict(getattr(m, "generation_params", None) or {}))
             next_gp = dict(current) if merge else {}
 
             if keys is None:
@@ -438,7 +484,7 @@ class PracticeSessionModelCRUD:
                     if k in gp:
                         next_gp[k] = gp[k]
 
-            m.generation_params = next_gp
+            m.generation_params = _normalize_generation_params_dict(next_gp)
             db.add(m)
 
         db.flush()

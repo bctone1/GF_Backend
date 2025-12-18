@@ -67,10 +67,51 @@ router = APIRouter()
 # =========================================================
 # helpers
 # =========================================================
+def _normalize_generation_params_dict(v: Any) -> dict[str, Any]:
+    """
+    max_completion_tokens 기준으로 키 혼용을 정규화.
+    (서비스 레이어와 동일한 정규화 규칙을 엔드포인트에서도 적용)
+    """
+    if not isinstance(v, dict):
+        return {}
+
+    out = dict(v)
+    mct = out.get("max_completion_tokens")
+    mt = out.get("max_tokens")
+    mot = out.get("max_output_tokens")
+
+    if mct is None and isinstance(mot, int) and mot > 0:
+        out["max_completion_tokens"] = mot
+        out["max_tokens"] = mot
+        return out
+
+    if mct is None and isinstance(mt, int) and mt > 0:
+        out["max_completion_tokens"] = mt
+        out["max_tokens"] = mt
+        return out
+
+    if mt is None and isinstance(mct, int) and mct > 0:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+        return out
+
+    if isinstance(mct, int) and mct > 0 and isinstance(mt, int) and mt > 0 and mct != mt:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+
+    return out
+
+
+def _coerce_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_unset=True)
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _get_default_generation_params_dict() -> dict:
     base = getattr(config, "PRACTICE_DEFAULT_GENERATION", None)
     if isinstance(base, dict):
-        return dict(base)
+        return _normalize_generation_params_dict(dict(base))
     return {}
 
 
@@ -110,16 +151,20 @@ def _sync_session_models_with_class(
 ) -> None:
     """
     모델 소스를 class/ModelCatalog로 단일화.
-    - 엔드포인트에서 config(PRACTICE_MODELS) 기반 생성/보장 로직 제거
-    - 기존에 config로 만들어진 세션도 여기서 정리(sync_existing=True)
+    - 기존 config 기반 세션도 정리(sync_existing=True)
+    - 기존 primary 선택이 유효하면 유지(동기화가 primary를 덮어쓰지 않도록)
     """
     session = ensure_my_session(db, session_id, me)
 
     if session.class_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
 
+    # 동기화 전 primary 기억(이름 기준)
+    before = list(practice_session_model_crud.list_by_session(db, session_id=session.session_id))
+    prev_primary_name = next((m.model_name for m in before if getattr(m, "is_primary", False)), None)
+
     setting = _ensure_session_settings_row(db, session_id=session.session_id)
-    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
+    base_gen = _normalize_generation_params_dict(getattr(setting, "generation_params", None) or _get_default_generation_params_dict())
 
     init_models_for_session_from_class(
         db,
@@ -132,12 +177,21 @@ def _sync_session_models_with_class(
         sync_existing=True,
     )
 
+    # 동기화 후에도 이전 primary가 남아있으면 복구
+    if prev_primary_name:
+        after = list(practice_session_model_crud.list_by_session(db, session_id=session.session_id))
+        names = [m.model_name for m in after]
+        if prev_primary_name in names:
+            for m in after:
+                m.is_primary = (m.model_name == prev_primary_name)
+            db.flush()
+
 
 def _extract_generation_patch(payload: Dict[str, Any]) -> Dict[str, Any]:
     gp = payload.get("generation_params")
     if not isinstance(gp, dict):
         return {}
-    return {k: v for k, v in gp.items() if v is not None}
+    return _normalize_generation_params_dict({k: v for k, v in gp.items() if v is not None})
 
 
 def _validate_my_few_shot_example_ids(
@@ -146,7 +200,6 @@ def _validate_my_few_shot_example_ids(
     me: AppUser,
     example_ids: list[int],
 ) -> None:
-    # 중복 방지(UniqueConstraint 걸려있어서 DB에서 터지기 전에 400으로)
     if len(example_ids) != len(set(example_ids)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -227,8 +280,6 @@ def create_practice_session(
     )
 
     _ = _ensure_session_settings_row(db, session_id=session.session_id)
-
-    # (1) class 기준 단일화
     _sync_session_models_with_class(db, me=me, session_id=session.session_id)
 
     db.commit()
@@ -248,11 +299,16 @@ def get_practice_session(
 ):
     session = ensure_my_session(db, session_id, me)
 
+    # 구 세션 정리 목적(필요 없으면 제거 가능)
+    if session.class_id is not None:
+        _sync_session_models_with_class(db, me=me, session_id=session.session_id)
+
     setting = _get_settings_with_links(db, session_id=session.session_id)
 
     resp_rows = practice_response_crud.list_by_session(db, session_id=session.session_id)
     resp_items = [PracticeResponseResponse.model_validate(r) for r in resp_rows]
 
+    db.commit()
     return PracticeSessionResponse(
         session_id=session.session_id,
         user_id=session.user_id,
@@ -321,9 +377,7 @@ def get_practice_session_settings(
 ):
     _ = ensure_my_session(db, session_id, me)
 
-    # (2) settings 조회 시에도 class 기준 sync
     _sync_session_models_with_class(db, me=me, session_id=session_id)
-
     setting = _get_settings_with_links(db, session_id=session_id)
 
     db.commit()
@@ -342,23 +396,16 @@ def update_practice_session_settings(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-     style : `accurate` | `balanced` | `creative` |`custom`
-     Length : `short` | `normal` | `long`| `custom`
-    """
     _ = ensure_my_session(db, session_id, me)
-
     _ = _ensure_session_settings_row(db, session_id=session_id)
 
     payload = data.model_dump(exclude_unset=True)
     if not payload:
-        # 그래도 class 기준 sync는 수행(옛 세션 정리 목적)
         _sync_session_models_with_class(db, me=me, session_id=session_id)
         setting = _get_settings_with_links(db, session_id=session_id)
         db.commit()
         return PracticeSessionSettingResponse.model_validate(setting)
 
-    # few-shot 선택 ids 검증(내 것 + 활성)
     if "few_shot_example_ids" in payload:
         ids = payload.get("few_shot_example_ids") or []
         if not isinstance(ids, list):
@@ -375,10 +422,8 @@ def update_practice_session_settings(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings not found")
 
-    # (2) settings 변경 후에도 class 기준 sync
     _sync_session_models_with_class(db, me=me, session_id=session_id)
 
-    # generation patch는 “세션에 존재하는 모델들”에 반영
     if gen_patch:
         practice_session_model_crud.bulk_sync_generation_params_by_session(
             db,
@@ -502,8 +547,12 @@ def list_practice_session_models(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    _ = ensure_my_session(db, session_id, me)
+    session = ensure_my_session(db, session_id, me)
+    if session.class_id is not None:
+        _sync_session_models_with_class(db, me=me, session_id=session_id)
+
     models = practice_session_model_crud.list_by_session(db, session_id=session_id)
+    db.commit()
     return [PracticeSessionModelResponse.model_validate(m) for m in models]
 
 
@@ -512,7 +561,7 @@ def list_practice_session_models(
     response_model=PracticeSessionModelResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session_model",
-    summary="세션에 모델 추가",
+    summary="세션에 모델 추가(실제 소스는 class 기준; 허용 모델만 보장 + 옵션 적용)",
 )
 def create_practice_session_model(
     session_id: int = Path(..., ge=1),
@@ -520,30 +569,51 @@ def create_practice_session_model(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    _ = ensure_my_session(db, session_id, me)
+    """
+    class/ModelCatalog 기준으로만 모델이 존재하도록 유지.
+    - 요청한 model_name이 class 허용 모델이면: 세션에 존재하도록 보장(sync) 후 해당 row 반환
+    - 요청에 generation_params가 있으면: 해당 모델에 merge 적용
+    - is_primary=True면 primary 변경
+    """
+    session = ensure_my_session(db, session_id, me)
+    if session.class_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
 
-    setting = _ensure_session_settings_row(db, session_id=session_id)
-    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
+    _ensure_session_settings_row(db, session_id=session_id)
 
-    incoming_gp = getattr(data, "generation_params", None)
+    # class 기준으로 모델 목록을 먼저 정리/보장
+    _sync_session_models_with_class(db, me=me, session_id=session_id)
 
-    if incoming_gp is None:
-        data_in = data.model_copy(update={"session_id": session_id, "generation_params": dict(base_gen)})
-    else:
-        if hasattr(incoming_gp, "model_dump"):
-            gp_dict = incoming_gp.model_dump(exclude_unset=True)
-        elif isinstance(incoming_gp, dict):
-            gp_dict = dict(incoming_gp)
-        else:
-            gp_dict = {}
+    models = list(practice_session_model_crud.list_by_session(db, session_id=session_id))
+    target = next((m for m in models if m.model_name == data.model_name), None)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="model_not_allowed_for_class")
 
-        merged = dict(base_gen)
-        merged.update(gp_dict)
-        data_in = data.model_copy(update={"session_id": session_id, "generation_params": merged})
+    # generation_params: merge
+    incoming_gp = _normalize_generation_params_dict(_coerce_dict(getattr(data, "generation_params", None)))
+    if incoming_gp:
+        current_gp = _normalize_generation_params_dict(getattr(target, "generation_params", None) or {})
+        merged = dict(current_gp)
+        merged.update(incoming_gp)
+        practice_session_model_crud.update(
+            db,
+            session_model_id=target.session_model_id,
+            data={"generation_params": merged},
+        )
 
-    model = practice_session_model_crud.create(db, data_in)
+    # primary 변경
+    if getattr(data, "is_primary", None) is True:
+        target = set_primary_model_for_session(
+            db,
+            me=me,
+            session_id=session_id,
+            target_session_model_id=target.session_model_id,
+        )
+
     db.commit()
-    return PracticeSessionModelResponse.model_validate(model)
+    # 최신 row 재조회(merge/primary 반영)
+    refreshed = practice_session_model_crud.get(db, target.session_model_id)
+    return PracticeSessionModelResponse.model_validate(refreshed or target)
 
 
 @router.patch(
@@ -572,6 +642,14 @@ def update_practice_session_model(
 
     update_data = data.model_dump(exclude_unset=True)
     update_data.pop("is_primary", None)
+
+    # generation_params는 merge로 처리(덮어쓰기 방지)
+    if "generation_params" in update_data:
+        patch = _normalize_generation_params_dict(_coerce_dict(update_data.get("generation_params")))
+        current = _normalize_generation_params_dict(getattr(model, "generation_params", None) or {})
+        merged = dict(current)
+        merged.update(patch)
+        update_data["generation_params"] = merged
 
     if update_data:
         model = practice_session_model_crud.update(
@@ -617,7 +695,6 @@ def run_practice_turn_new_session_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    # ✅ (3) 실행 전/후에 config 기반 모델 보장 로직 제거 (서비스가 처리)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
@@ -626,7 +703,6 @@ def run_practice_turn_new_session_endpoint(
         project_id=project_id,
         body=body,
     )
-
     db.commit()
     return turn_result
 
@@ -652,7 +728,6 @@ def run_practice_turn_endpoint(
             detail="session_has_no_class_id",
         )
 
-    # (3) 실행 전 config 기반 모델 보장 로직 제거 (서비스가 class 기준 sync 포함)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
