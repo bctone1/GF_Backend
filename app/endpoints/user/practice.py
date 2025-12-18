@@ -58,6 +58,7 @@ from service.user.practice import (
     ensure_my_response,
     set_primary_model_for_session,
     run_practice_turn_for_session,
+    init_models_for_session_from_class,
 )
 
 router = APIRouter()
@@ -101,57 +102,35 @@ def _get_settings_with_links(db: Session, *, session_id: int) -> PracticeSession
     return _ensure_session_settings_row(db, session_id=session_id)
 
 
-def _init_default_models_for_session(
+def _sync_session_models_with_class(
     db: Session,
     *,
+    me: AppUser,
     session_id: int,
-    base_generation_params: dict,
 ) -> None:
-    existing = practice_session_model_crud.list_by_session(db, session_id=session_id)
-    if existing:
-        return
+    """
+    모델 소스를 class/ModelCatalog로 단일화.
+    - 엔드포인트에서 config(PRACTICE_MODELS) 기반 생성/보장 로직 제거
+    - 기존에 config로 만들어진 세션도 여기서 정리(sync_existing=True)
+    """
+    session = ensure_my_session(db, session_id, me)
 
-    practice_models = getattr(config, "PRACTICE_MODELS", {}) or {}
-    enabled = [
-        (k, v)
-        for k, v in practice_models.items()
-        if isinstance(v, dict) and v.get("enabled") is True
-    ]
+    if session.class_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
 
-    if not enabled:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="no_enabled_practice_models",
-        )
+    setting = _ensure_session_settings_row(db, session_id=session.session_id)
+    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
 
-    primary_key = None
-    for k, v in enabled:
-        if v.get("default") is True:
-            primary_key = k
-            break
-    if primary_key is None:
-        primary_key = enabled[0][0]
-
-    base_gen = dict(base_generation_params or {})
-
-    for k, _v in enabled:
-        data_in = PracticeSessionModelCreate(
-            session_id=session_id,
-            model_name=k,
-            is_primary=(k == primary_key),
-            generation_params=dict(base_gen),
-        )
-        practice_session_model_crud.create(db, data_in)
-
-
-def _ensure_session_models_ready(db: Session, *, session_id: int, base_gen: dict) -> None:
-    existing = practice_session_model_crud.list_by_session(db, session_id=session_id)
-    if not existing:
-        _init_default_models_for_session(
-            db,
-            session_id=session_id,
-            base_generation_params=base_gen,
-        )
+    init_models_for_session_from_class(
+        db,
+        me=me,
+        session=session,
+        class_id=session.class_id,
+        requested_model_names=None,
+        base_generation_params=base_gen,
+        generation_overrides=None,
+        sync_existing=True,
+    )
 
 
 def _extract_generation_patch(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,7 +206,7 @@ def list_my_practice_sessions(
     response_model=PracticeSessionResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session",
-    summary="새 채팅(세션): 세션 생성 + settings 생성 + 기본 모델 미리 생성",
+    summary="새 채팅(세션): 세션 생성 + settings 생성 + class 기준 모델 생성",
 )
 def create_practice_session(
     data: PracticeSessionCreate,
@@ -247,14 +226,10 @@ def create_practice_session(
         user_id=me.user_id,
     )
 
-    setting = _ensure_session_settings_row(db, session_id=session.session_id)
+    _ = _ensure_session_settings_row(db, session_id=session.session_id)
 
-    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
-    _init_default_models_for_session(
-        db,
-        session_id=session.session_id,
-        base_generation_params=base_gen,
-    )
+    # (1) class 기준 단일화
+    _sync_session_models_with_class(db, me=me, session_id=session.session_id)
 
     db.commit()
     return PracticeSessionResponse.model_validate(session)
@@ -346,10 +321,10 @@ def get_practice_session_settings(
 ):
     _ = ensure_my_session(db, session_id, me)
 
-    setting = _get_settings_with_links(db, session_id=session_id)
+    # (2) settings 조회 시에도 class 기준 sync
+    _sync_session_models_with_class(db, me=me, session_id=session_id)
 
-    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
-    _ensure_session_models_ready(db, session_id=session_id, base_gen=base_gen)
+    setting = _get_settings_with_links(db, session_id=session_id)
 
     db.commit()
     return PracticeSessionSettingResponse.model_validate(setting)
@@ -373,11 +348,14 @@ def update_practice_session_settings(
     """
     _ = ensure_my_session(db, session_id, me)
 
-    current = _ensure_session_settings_row(db, session_id=session_id)
+    _ = _ensure_session_settings_row(db, session_id=session_id)
 
     payload = data.model_dump(exclude_unset=True)
     if not payload:
+        # 그래도 class 기준 sync는 수행(옛 세션 정리 목적)
+        _sync_session_models_with_class(db, me=me, session_id=session_id)
         setting = _get_settings_with_links(db, session_id=session_id)
+        db.commit()
         return PracticeSessionSettingResponse.model_validate(setting)
 
     # few-shot 선택 ids 검증(내 것 + 활성)
@@ -397,9 +375,10 @@ def update_practice_session_settings(
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings not found")
 
-    base_gen = getattr(updated, "generation_params", None) or _get_default_generation_params_dict()
-    _ensure_session_models_ready(db, session_id=session_id, base_gen=base_gen)
+    # (2) settings 변경 후에도 class 기준 sync
+    _sync_session_models_with_class(db, me=me, session_id=session_id)
 
+    # generation patch는 “세션에 존재하는 모델들”에 반영
     if gen_patch:
         practice_session_model_crud.bulk_sync_generation_params_by_session(
             db,
@@ -638,6 +617,7 @@ def run_practice_turn_new_session_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    # ✅ (3) 실행 전/후에 config 기반 모델 보장 로직 제거 (서비스가 처리)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
@@ -646,10 +626,6 @@ def run_practice_turn_new_session_endpoint(
         project_id=project_id,
         body=body,
     )
-
-    setting = _ensure_session_settings_row(db, session_id=turn_result.session_id)
-    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
-    _ensure_session_models_ready(db, session_id=turn_result.session_id, base_gen=base_gen)
 
     db.commit()
     return turn_result
@@ -676,10 +652,7 @@ def run_practice_turn_endpoint(
             detail="session_has_no_class_id",
         )
 
-    setting = _ensure_session_settings_row(db, session_id=session.session_id)
-    base_gen = getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
-    _ensure_session_models_ready(db, session_id=session.session_id, base_gen=base_gen)
-
+    # (3) 실행 전 config 기반 모델 보장 로직 제거 (서비스가 class 기준 sync 포함)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,

@@ -1,7 +1,7 @@
 # langchain_service/llm/runner.py
 from __future__ import annotations
 
-from typing import Iterable, Optional, Any, Dict
+from typing import Iterable, Optional, Any
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -10,34 +10,28 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from crud.partner import session as session_crud
-from crud.user import document as document_crud
-from crud.user.document import document_search_setting_crud
 from crud.supervisor.api_usage import api_usage_crud as api_usage
 
-from schemas.common.llm import QASource, QAResponse
+from schemas.common.llm import QAResponse
 
 from core import config
 from core.pricing import tokens_for_texts, estimate_llm_cost_usd
 
-from langchain_service.chain.qa_chain import make_qa_chain
-from langchain_service.embedding.get_vector import text_to_vector, _to_vector
-from langchain_service.llm.setup import get_llm
-from langchain_service.prompt.style import build_system_prompt
+from service.user.document_rag import (
+    get_effective_search_settings,
+    retrieve_sources,
+    build_context_text,
+)
 
-try:
-    from langchain_community.callbacks import get_openai_callback
-except Exception:
-    try:
-        from langchain_community.callbacks.manager import get_openai_callback
-    except Exception:
-        get_openai_callback = None
+from langchain_service.embedding.get_vector import _to_vector
+from langchain_service.llm.setup import get_llm, call_llm_chat
+from langchain_service.prompt.style import build_system_prompt
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
 log = logging.getLogger("api_cost")
 
-MAX_CTX_CHARS = 12000  # qa_chain 기본값과 동일
-_SCORE_TYPE_FIXED = "cosine_similarity"
+MAX_CTX_CHARS = 12000
 
 
 def _update_last_user_vector(db: Session, session_id: int, vector: Iterable[float]) -> None:
@@ -47,121 +41,41 @@ def _update_last_user_vector(db: Session, session_id: int, vector: Iterable[floa
     session_crud.update_message(db, message=message, data={"vector_memory": list(vector)})
 
 
-def _get_effective_search_settings(
-    db: Session,
-    *,
-    knowledge_id: Optional[int],
-    top_k_fallback: int,
-) -> Dict[str, Any]:
-    """
-     document_search_settings를 기준으로 검색 파라미터를 확정.
-    - knowledge_id 없으면 config.DEFAULT_SEARCH + fallback top_k로 처리
-    - score_type은 cosine_similarity로 고정
-    """
-    defaults = dict(getattr(config, "DEFAULT_SEARCH"))
-    defaults["score_type"] = _SCORE_TYPE_FIXED
-
-    if knowledge_id is None:
-        defaults["top_k"] = int(top_k_fallback)
-        return defaults
-
-    # row가 없으면 생성(레거시 문서 대비). MVP 원칙: row는 항상 존재
-    setting = document_search_setting_crud.ensure_default(
-        db,
-        knowledge_id=knowledge_id,
-        defaults=defaults,
-    )
-
-    top_k = int(getattr(setting, "top_k", defaults["top_k"]))
-    min_score = float(getattr(setting, "min_score", defaults["min_score"]))
-    score_type = str(getattr(setting, "score_type", defaults["score_type"]))
-
-    reranker_enabled = bool(getattr(setting, "reranker_enabled", defaults["reranker_enabled"]))
-    reranker_model = getattr(setting, "reranker_model", defaults.get("reranker_model"))
-    reranker_top_n = int(getattr(setting, "reranker_top_n", defaults["reranker_top_n"]))
-
-    # 기본 정합성
-    if score_type != _SCORE_TYPE_FIXED:
-        score_type = _SCORE_TYPE_FIXED
-    if reranker_top_n > top_k:
-        reranker_top_n = top_k
-
-    return {
-        "top_k": top_k,
-        "min_score": min_score,
-        "score_type": score_type,
-        "reranker_enabled": reranker_enabled,
-        "reranker_model": reranker_model,
-        "reranker_top_n": reranker_top_n,
-    }
-
-
-def _build_sources(
-    db: Session,
+def _build_messages_for_qa(
     *,
     question: str,
-    vector: list[float],
-    knowledge_id: Optional[int],
-    search: Dict[str, Any],
-) -> list[QASource]:
-    """
-    벡터검색 + min_score 적용 + (옵션) rerank 적용 후 QASource 생성
-    """
-    chunks = document_crud.search_chunks_by_vector(
-        db,
-        query_vector=vector,
-        knowledge_id=knowledge_id,
-        top_k=int(search["top_k"]),
-        min_score=float(search["min_score"]),
-        score_type=str(search["score_type"]),
+    context_text: str,
+    style: Optional[str],
+    policy_flags: Optional[dict],
+    few_shot_examples: Optional[list[dict]],
+) -> list[dict[str, str]]:
+    system_txt = build_system_prompt(style=(style or "friendly"), **(policy_flags or {}))
+    rule_txt = (
+        "규칙: 제공된 컨텍스트를 우선하여 답하고, 정말 관련이 없을 때만 "
+        "짧게 '해당내용은 찾을 수 없음'이라고 답하라."
     )
 
-    # rerank (로컬 모델)
-    if (
-        search.get("reranker_enabled")
-        and search.get("reranker_model")
-        and len(chunks) > 1
-        and int(search.get("reranker_top_n", 1)) >= 1
-    ):
-        try:
-            from service.user.rerank import rerank_chunks  # 지연 import
-            chunks = rerank_chunks(
-                question,
-                chunks,
-                model_name=str(search["reranker_model"]),
-                top_n=int(search["reranker_top_n"]),
-            )
-        except Exception as e:
-            # reranker 실패해도 검색은 계속 진행(운영 안정성)
-            log.exception("rerank failed (fallback to vector order): %s", e)
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_txt + "\n" + rule_txt}
+    ]
 
-    sources: list[QASource] = []
-    for chunk in chunks:
-        kid = getattr(chunk, "knowledge_id", None)
-        page_id = getattr(chunk, "page_id", None)
-        chunk_index = getattr(chunk, "chunk_index", None)
+    for ex in (few_shot_examples or []):
+        inp = str(ex.get("input", "") or "").strip()
+        out = str(ex.get("output", "") or "").strip()
+        if inp:
+            messages.append({"role": "user", "content": inp})
+        if out:
+            messages.append({"role": "assistant", "content": out})
 
-        text = (
-            getattr(chunk, "chunk_text", None)
-            or getattr(chunk, "content", None)
-            or getattr(chunk, "text", "")
-        )
-
-        chunk_id = (
-            getattr(chunk, "chunk_id", None)
-            or getattr(chunk, "id", None)
-        )
-
-        sources.append(
-            QASource(
-                chunk_id=chunk_id,
-                knowledge_id=kid,
-                page_id=page_id,
-                chunk_index=chunk_index,
-                text=text,
-            )
-        )
-    return sources
+    user_content = (
+        "다음 컨텍스트만 근거로 답하세요.\n"
+        "[컨텍스트 시작]\n"
+        f"{context_text or ''}\n"
+        "[컨텍스트 끝]\n\n"
+        f"질문: {question}"
+    )
+    messages.append({"role": "user", "content": user_content})
+    return messages
 
 
 def _render_prompt_for_estimate(
@@ -172,15 +86,12 @@ def _render_prompt_for_estimate(
     policy_flags: Optional[dict],
     few_shot_examples: Optional[list[dict]] = None,
 ) -> list[str]:
+    # 기존 tokens_for_texts 호환용: 문자열 리스트로 유지
     system_txt = build_system_prompt(style=(style or "friendly"), **(policy_flags or {}))
     rule_txt = (
         "규칙: 제공된 컨텍스트를 우선하여 답하고, 정말 관련이 없을 때만 "
         "짧게 '해당내용은 찾을 수 없음'이라고 답하라."
     )
-    context_hdr = "다음 컨텍스트만 근거로 답하세요.\n[컨텍스트 시작]"
-    context_ftr = "[컨텍스트 끝]"
-    question_lbl = "질문: "
-
     parts: list[str] = [system_txt, rule_txt]
 
     for ex in (few_shot_examples or []):
@@ -191,7 +102,12 @@ def _render_prompt_for_estimate(
         if out:
             parts.append("예시 답변: " + out)
 
-    parts += [context_hdr, context_text, context_ftr, question_lbl + question]
+    parts += [
+        "다음 컨텍스트만 근거로 답하세요.\n[컨텍스트 시작]",
+        context_text or "",
+        "[컨텍스트 끝]",
+        "질문: " + question,
+    ]
     return parts
 
 
@@ -211,118 +127,72 @@ def _run_qa(
     if session_id is not None:
         _update_last_user_vector(db, session_id, vector)
 
-    # 검색 설정 확정(문서 설정 우선)
-    search = _get_effective_search_settings(db, knowledge_id=knowledge_id, top_k_fallback=top_k)
-    effective_top_k = int(search["top_k"])
-
-    sources = _build_sources(
+    # ✅ 검색/리랭크는 document_rag에서 1번만
+    search = get_effective_search_settings(db, knowledge_id=knowledge_id, top_k_fallback=top_k)
+    sources = retrieve_sources(
         db,
         question=question,
         vector=vector,
         knowledge_id=knowledge_id,
         search=search,
     )
-    context_text = ("\n\n".join(s.text for s in sources))[:MAX_CTX_CHARS] if sources else ""
+    context_text = build_context_text(sources, max_chars=MAX_CTX_CHARS)
 
     provider = getattr(config, "LLM_PROVIDER", "openai").lower()
     model = getattr(config, "LLM_MODEL", getattr(config, "DEFAULT_CHAT_MODEL", "gpt-4o-mini"))
 
-    raw = ""
-    few = few_shot_examples or []
-
     try:
-        if provider == "openai" and get_openai_callback is not None:
-            with get_openai_callback() as cb:
-                chain = make_qa_chain(
-                    db,
-                    get_llm,
-                    text_to_vector,
-                    knowledge_id=knowledge_id,
-                    top_k=effective_top_k,
-                    policy_flags=policy_flags or {},
-                    style=style or "friendly",
-                    streaming=True,
-                    few_shot_examples=few,
-                    callbacks=[cb],
-                )
+        messages = _build_messages_for_qa(
+            question=question,
+            context_text=context_text,
+            style=style,
+            policy_flags=policy_flags,
+            few_shot_examples=few_shot_examples,
+        )
 
-                raw = "".join(
-                    chain.stream(
-                        {"question": question},
-                        config={"callbacks": [cb]},
-                    )
-                )
-                resp_text = str(raw or "")
+        # runner는 “한 번 호출”만 한다(qa_chain 제거)
+        llm_res = call_llm_chat(
+            messages=messages,
+            provider=provider,
+            model=model,
+            temperature=getattr(config, "LLM_TEMPERATURE", 0.7),
+            max_tokens=None,
+            top_p=getattr(config, "LLM_TOP_P", None),
+        )
+        resp_text = str(llm_res.text or "")
 
-                prompt_parts = _render_prompt_for_estimate(
-                    question=question,
-                    context_text=context_text,
-                    style=style,
-                    policy_flags=policy_flags,
-                    few_shot_examples=few,
-                )
-                est_tokens = tokens_for_texts(model, prompt_parts + [resp_text])
+        # token/cost: 가능하면 실제 token_usage 우선, 없으면 estimate
+        total_tokens: int | None = None
+        if isinstance(llm_res.token_usage, dict):
+            t = llm_res.token_usage.get("total_tokens")
+            if isinstance(t, int):
+                total_tokens = t
 
-                cb_total = int(getattr(cb, "total_tokens", 0) or 0)
-                total_tokens = max(cb_total, est_tokens)
-
-                usd_cb = Decimal(str(getattr(cb, "total_cost", 0.0) or 0.0))
-                usd_est = estimate_llm_cost_usd(model=model, total_tokens=total_tokens)
-                usd = max(usd_cb, usd_est)
-
-                try:
-                    api_usage.add_event(
-                        db,
-                        ts_utc=datetime.now(timezone.utc),
-                        product="llm",
-                        model=model,
-                        llm_tokens=total_tokens,
-                        embedding_tokens=0,
-                        audio_seconds=0,
-                        cost_usd=usd,
-                    )
-                except Exception as e:
-                    log.exception("api-usage llm record failed: %s", e)
-
-        else:
-            chain = make_qa_chain(
-                db,
-                get_llm,
-                text_to_vector,
-                knowledge_id=knowledge_id,
-                top_k=effective_top_k,     # 설정 반영
-                policy_flags=policy_flags or {},
-                style=style or "friendly",
-                streaming=True,
-                few_shot_examples=few,
-            )
-
-            raw = "".join(chain.stream({"question": question}))
-            resp_text = str(raw or "")
-
+        if total_tokens is None:
             prompt_parts = _render_prompt_for_estimate(
                 question=question,
                 context_text=context_text,
                 style=style,
                 policy_flags=policy_flags,
-                few_shot_examples=few,
+                few_shot_examples=few_shot_examples,
             )
             total_tokens = tokens_for_texts(model, prompt_parts + [resp_text])
-            usd = estimate_llm_cost_usd(model=model, total_tokens=total_tokens)
 
-            try:
-                api_usage.add_event(
-                    db,
-                    ts_utc=datetime.now(timezone.utc),
-                    product="llm",
-                    model=model,
-                    llm_tokens=total_tokens,
-                    embedding_tokens=0,
-                    audio_seconds=0,
-                    cost_usd=usd,
-                )
-            except Exception as e:
-                log.exception("api-usage llm record failed: %s", e)
+        usd = estimate_llm_cost_usd(model=model, total_tokens=total_tokens)
+
+        try:
+            api_usage.add_event(
+                db,
+                ts_utc=datetime.now(timezone.utc),
+                product="llm",
+                model=model,
+                llm_tokens=total_tokens,
+                embedding_tokens=0,
+                audio_seconds=0,
+                cost_usd=Decimal(str(usd)),
+            )
+        except Exception as e:
+            log.exception("api-usage llm record failed: %s", e)
 
     except Exception as exc:
         raise HTTPException(
@@ -331,7 +201,7 @@ def _run_qa(
         ) from exc
 
     return QAResponse(
-        answer=str(raw or ""),
+        answer=resp_text,
         question=question,
         session_id=session_id,
         sources=sources,

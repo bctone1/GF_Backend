@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from core import config
 from langchain_service.embedding.get_vector import texts_to_vectors
-from langchain_service.llm.runner import generate_session_title_llm, _run_qa
+from langchain_service.llm.runner import generate_session_title_llm
 from langchain_service.llm.setup import call_llm_chat
 
 from crud.user.document import document_crud, document_chunk_crud
@@ -25,10 +25,10 @@ from models.user.account import AppUser
 from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
-    PracticeResponse,
     PracticeSessionSetting,
     PracticeSessionSettingFewShot,
     UserFewShotExample,
+    PracticeResponse,
 )
 from models.partner.catalog import ModelCatalog
 
@@ -63,12 +63,24 @@ def _get_default_generation_params() -> Dict[str, Any]:
     if isinstance(base, dict):
         return dict(base)
 
+    # fallback도 max_completion_tokens 기준으로 (max_tokens 혼용 최소화)
     return {
         "temperature": 0.7,
         "top_p": 0.9,
-        "response_length_preset": "normal",
-        "max_tokens": 512,
+        "response_length_preset": None,
+        "max_completion_tokens": 1024,
     }
+
+
+def _is_enabled_runtime_model(model_key: str) -> bool:
+    practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
+    conf = practice_models.get(model_key)
+    return isinstance(conf, dict) and conf.get("enabled") is True
+
+
+def _has_any_response(db: Session, *, session_id: int) -> bool:
+    stmt = select(func.count(PracticeResponse.response_id)).where(PracticeResponse.session_id == session_id)
+    return (db.scalar(stmt) or 0) > 0
 
 
 # =========================================
@@ -278,7 +290,7 @@ def _build_context_from_documents(
 def ensure_my_session(db: Session, session_id: int, me: AppUser) -> PracticeSession:
     session = practice_session_crud.get(db, session_id)
     if not session or session.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found")
     return session
 
 
@@ -289,11 +301,11 @@ def ensure_my_session_model(
 ) -> Tuple[PracticeSessionModel, PracticeSession]:
     model = practice_session_model_crud.get(db, session_model_id)
     if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+        raise HTTPException(status_code=404, detail="model not found")
 
     session = practice_session_crud.get(db, model.session_id)
     if not session or session.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+        raise HTTPException(status_code=404, detail="model not found")
 
     return model, session
 
@@ -301,7 +313,7 @@ def ensure_my_session_model(
 def ensure_my_response(db: Session, response_id: int, me: AppUser):
     resp = practice_response_crud.get(db, response_id)
     if not resp:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="response not found")
+        raise HTTPException(status_code=404, detail="response not found")
     model, session = ensure_my_session_model(db, resp.session_model_id, me)
     return resp, model, session
 
@@ -318,14 +330,14 @@ def set_primary_model_for_session(
 ) -> PracticeSessionModel:
     session = practice_session_crud.get(db, session_id)
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found")
 
     if me is not None and session.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found")
 
     models = practice_session_model_crud.list_by_session(db, session_id=session_id)
     if not models:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no models for this session")
+        raise HTTPException(status_code=400, detail="no models for this session")
 
     target: PracticeSessionModel | None = None
     for m in models:
@@ -336,19 +348,17 @@ def set_primary_model_for_session(
             m.is_primary = False
 
     if target is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="target model does not belong to this session",
-        )
+        raise HTTPException(status_code=400, detail="target model does not belong to this session")
 
     db.flush()
     return target
 
 
 # =========================================
-# class 설정 기반 모델 생성
+# class 설정 기반 모델 생성/동기화
 # - base_generation_params(= settings.generation_params) 를 기본으로 깔고,
 #   generation_overrides[name] 로 모델별 덮어쓰기
+# - sync_existing=True면: 기존 모델이 있어도 class 기준으로 "첫 실행 전" 정리
 # =========================================
 def init_models_for_session_from_class(
     db: Session,
@@ -359,17 +369,8 @@ def init_models_for_session_from_class(
     requested_model_names: list[str] | None = None,
     base_generation_params: dict[str, Any] | None = None,
     generation_overrides: dict[str, dict[str, Any]] | None = None,
+    sync_existing: bool = True,
 ) -> list[PracticeSessionModel]:
-    existing = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
-    if existing:
-        if requested_model_names:
-            s = set(requested_model_names)
-            picked = [m for m in existing if m.model_name in s]
-            if not picked:
-                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
-            return picked
-        return existing
-
     class_obj = classes_crud.get_class(db, class_id=class_id)
     if not class_obj or class_obj.status != "active":
         raise HTTPException(status_code=400, detail="유효하지 않은 class_id 입니다.")
@@ -385,26 +386,99 @@ def init_models_for_session_from_class(
     if not model_catalog_ids:
         raise HTTPException(status_code=400, detail="이 class 에 설정된 모델이 없습니다.")
 
+    # class -> allowed_names (순서 유지, 중복 제거)
     allowed_names: list[str] = []
+    seen: set[str] = set()
     for mc_id in model_catalog_ids:
         catalog = db.get(ModelCatalog, mc_id)
         if not catalog:
             raise HTTPException(status_code=400, detail=f"유효하지 않은 model_catalog id: {mc_id}")
         name = getattr(catalog, "logical_name", None) or catalog.model_name
-        allowed_names.append(name)
+        if name not in seen:
+            seen.add(name)
+            allowed_names.append(name)
 
-    final_names = allowed_names
+    # runtime(config.PRACTICE_MODELS)에서 실제 실행 가능한 키인지 강제
+    for name in allowed_names:
+        if not _is_enabled_runtime_model(name):
+            raise HTTPException(status_code=400, detail=f"model_not_enabled_in_runtime_config: {name}")
+
+    desired_names = allowed_names
     if requested_model_names:
         s = set(requested_model_names)
-        final_names = [n for n in allowed_names if n in s]
-        if not final_names:
+        desired_names = [n for n in allowed_names if n in s]
+        if not desired_names:
             raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
 
     base_gen = dict(base_generation_params or _get_default_generation_params())
     overrides = generation_overrides or {}
 
+    existing = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+
+    # 기존 모델이 있어도(엔드포인트가 먼저 만들었어도) “첫 실행 전”이면 class 기준으로 sync
+    if existing and sync_existing:
+        has_resp = _has_any_response(db, session_id=session.session_id)
+        desired_set = set(desired_names)
+
+        # (A) 응답이 없을 때만: class에 없는 모델 제거(파괴적)
+        if not has_resp:
+            for m in existing:
+                if m.model_name not in desired_set:
+                    practice_session_model_crud.delete(db, session_model_id=m.session_model_id)
+
+        # (B) 부족한 모델 추가(응답 있어도 추가는 가능)
+        existing_after = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+        existing_names_after = {m.model_name for m in existing_after}
+
+        for name in desired_names:
+            if name in existing_names_after:
+                continue
+
+            gp = dict(base_gen)
+            ov = overrides.get(name)
+            if isinstance(ov, dict):
+                gp.update(ov)
+
+            practice_session_model_crud.create(
+                db,
+                PracticeSessionModelCreate(
+                    session_id=session.session_id,
+                    model_name=name,
+                    is_primary=False,  # 아래에서 정리
+                    generation_params=gp,
+                ),
+            )
+
+        # (C) primary 정리: desired_names[0]을 primary로 고정
+        final_models = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+        primary_name = desired_names[0] if desired_names else None
+        for m in final_models:
+            m.is_primary = (m.model_name == primary_name)
+
+        db.flush()
+
+        if requested_model_names:
+            s = set(requested_model_names)
+            picked = [m for m in final_models if m.model_name in s]
+            if not picked:
+                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
+            return picked
+
+        return final_models
+
+    # 기존 모델이 있고 sync를 안 하면 기존 방식
+    if existing:
+        if requested_model_names:
+            s = set(requested_model_names)
+            picked = [m for m in existing if m.model_name in s]
+            if not picked:
+                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
+            return picked
+        return existing
+
+    # 완전 신규 생성
     created: list[PracticeSessionModel] = []
-    for idx, name in enumerate(final_names):
+    for idx, name in enumerate(desired_names):
         gp = dict(base_gen)
         ov = overrides.get(name)
         if isinstance(ov, dict):
@@ -438,8 +512,9 @@ def _call_llm_for_model(
 
     temperature: float | None = 0.7
     top_p: float | None = 1.0
-    max_tokens: int | None = None
-    response_length_preset: str | None = None
+
+    # 모델 conf에서 "하드 상한"으로 들어올 수 있는 값
+    conf_max_tokens: int | None = None
 
     if isinstance(model_conf, dict):
         if not model_conf.get("enabled", True):
@@ -452,42 +527,64 @@ def _call_llm_for_model(
             temperature = model_conf.get("temperature")
         if "top_p" in model_conf:
             top_p = model_conf.get("top_p")
-        mt = model_conf.get("max_output_tokens") or model_conf.get("max_tokens")
-        if mt is not None:
-            max_tokens = mt
+
+        mt = model_conf.get("max_output_tokens") or model_conf.get("max_completion_tokens") or model_conf.get("max_tokens")
+        if isinstance(mt, int) and mt > 0:
+            conf_max_tokens = mt
 
     default_gen = getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {}
-    response_length_preset = default_gen.get("response_length_preset", "normal")
+    length_presets: Dict[str, int] = getattr(config, "RESPONSE_LENGTH_PRESETS", {}) or {}
 
+    # base params (default_gen 우선 적용, conf_max_tokens는 별도)
     base_params: Dict[str, Any] = {
         "temperature": temperature,
         "top_p": top_p,
-        "max_tokens": max_tokens,
-        "response_length_preset": response_length_preset,
+        "response_length_preset": default_gen.get("response_length_preset", None),
     }
+
+    # default_gen에서 None이 아닌 것만 반영
     for k, v in default_gen.items():
         if v is not None:
             base_params[k] = v
 
+    # model_conf의 상한이 있으면 base에 반영(키 혼용 정규화)
+    if conf_max_tokens is not None:
+        base_params["max_tokens"] = conf_max_tokens
+        base_params["max_completion_tokens"] = conf_max_tokens
+
     gp: Dict[str, Any] = generation_params if isinstance(generation_params, dict) else {}
     effective: Dict[str, Any] = {**base_params, **gp}
 
-    length_presets: Dict[str, int] = getattr(config, "RESPONSE_LENGTH_PRESETS", {}) or {}
+    def _pick_max_tokens(d: Dict[str, Any]) -> int | None:
+        for k in ("max_tokens", "max_completion_tokens", "max_output_tokens"):
+            v = d.get(k)
+            if isinstance(v, int) and v > 0:
+                return v
+        return None
+
     preset = effective.get("response_length_preset")
 
+    # preset -> max token 결정 (없으면 사용자가 넣은 max_completion_tokens도 살림)
     if preset in length_presets and preset != "custom":
-        effective["max_tokens"] = length_presets[preset]
+        mt = length_presets[preset]
+        effective["max_tokens"] = mt
+        effective["max_completion_tokens"] = mt
     elif preset == "custom":
-        if effective.get("max_tokens") is None:
-            if default_gen.get("max_tokens") is not None:
-                effective["max_tokens"] = default_gen["max_tokens"]
+        mt = _pick_max_tokens(effective)
+        if mt is not None:
+            effective["max_tokens"] = mt
+            effective["max_completion_tokens"] = mt
     else:
-        if effective.get("max_tokens") is not None:
-            effective["response_length_preset"] = "custom"
+        mt = _pick_max_tokens(effective)
+        if mt is not None:
+            effective["max_tokens"] = mt
+            effective["max_completion_tokens"] = mt
+            if preset is None:
+                effective["response_length_preset"] = "custom"
 
     final_temperature = effective.get("temperature", 0.7)
     final_top_p = effective.get("top_p", 1.0)
-    final_max_tokens = effective.get("max_tokens")
+    final_max_tokens = effective.get("max_tokens") or effective.get("max_completion_tokens")
 
     messages: list[dict[str, str]] = []
 
@@ -539,12 +636,11 @@ def run_practice_turn(
     document_ids: Optional[List[int]] = None,
 ) -> PracticeTurnResponse:
     if session.user_id != user.user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="session not owned by user")
+        raise HTTPException(status_code=403, detail="session not owned by user")
 
     settings = ensure_session_settings(db, session_id=session.session_id)
     session_base_gen = getattr(settings, "generation_params", None) or {}
 
-    # settings에 선택된 few-shot 예시(매핑 기반)
     selected_few_shots = _load_selected_few_shots_for_setting(
         db,
         setting_id=settings.setting_id,
@@ -564,10 +660,7 @@ def run_practice_turn(
 
     for m in models:
         if m.session_id != session.session_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="session_model does not belong to given session",
-            )
+            raise HTTPException(status_code=400, detail="session_model does not belong to given session")
 
         full_prompt = f"{context_text}\n\n질문: {prompt_text}" if context_text else prompt_text
 
@@ -643,81 +736,6 @@ def run_practice_turn(
     )
 
 
-# =========================================
-# 세션 + 첫 턴 생성 (단일 모델/RAG)
-# =========================================
-def create_session_with_first_turn(
-    db: Session,
-    *,
-    user: AppUser,
-    model_name: str,
-    prompt_text: str,
-    knowledge_id: int | None = None,
-) -> tuple[PracticeSession, PracticeResponse]:
-    session = practice_session_crud.create(
-        db,
-        data=PracticeSessionCreate(
-            class_id=None,
-            project_id=None,
-            title=None,
-            notes=None,
-        ),
-        user_id=user.user_id,
-    )
-
-    settings = ensure_session_settings(db, session_id=session.session_id)
-    base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
-
-    session_model = practice_session_model_crud.create(
-        db,
-        PracticeSessionModelCreate(
-            session_id=session.session_id,
-            model_name=model_name,
-            is_primary=True,
-            generation_params=dict(base_gen),
-        ),
-    )
-
-    # settings에 선택된 few-shot 예시 로드 + rule을 질문 앞에 주입(최소 강제)
-    selected_few_shots = _load_selected_few_shots_for_setting(
-        db,
-        setting_id=settings.setting_id,
-        me=user,
-    )
-    sys_from_fs = _derive_system_prompt_from_few_shots(selected_few_shots)
-    qa_question = f"{sys_from_fs}\n\n{prompt_text}" if sys_from_fs else prompt_text
-
-    qa = _run_qa(
-        db,
-        question=qa_question,
-        knowledge_id=knowledge_id,
-        top_k=3,
-        session_id=None,
-        few_shot_examples=selected_few_shots or None,  # qa_chain에서 사용
-    )
-
-    response = practice_response_crud.create(
-        db,
-        PracticeResponseCreate(
-            session_model_id=session_model.session_model_id,
-            session_id=session.session_id,
-            model_name=model_name,
-            prompt_text=prompt_text,
-            response_text=qa.answer,
-            token_usage=None,
-            latency_ms=None,
-        ),
-    )
-
-    title = generate_session_title_llm(prompt_text, qa.answer)
-    session = practice_session_crud.update(
-        db,
-        session_id=session.session_id,
-        data=PracticeSessionUpdate(title=title),
-    )
-    return session, response
-
-
 def _select_models_for_existing_session(
     db: Session,
     *,
@@ -773,7 +791,8 @@ def run_practice_turn_for_session(
         settings = ensure_session_settings(db, session_id=session.session_id)
         base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
 
-        created_models = init_models_for_session_from_class(
+        # 신규 세션 생성 시: class 기준 모델 생성(전체)
+        models = init_models_for_session_from_class(
             db,
             me=me,
             session=session,
@@ -781,18 +800,37 @@ def run_practice_turn_for_session(
             requested_model_names=None,
             base_generation_params=base_gen,
             generation_overrides=None,
+            sync_existing=True,
         )
 
-        models = created_models
+        # 이번 턴에서만 부분 실행
         if body.model_names:
             s = set(body.model_names)
-            models = [m for m in created_models if m.model_name in s]
-            if not models:
+            picked = [m for m in models if m.model_name in s]
+            if not picked:
                 raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
+            models = picked
 
     else:
         session = ensure_my_session(db, session_id, me)
-        _ = ensure_session_settings(db, session_id=session.session_id)
+        settings = ensure_session_settings(db, session_id=session.session_id)
+
+        if session.class_id is None:
+            raise HTTPException(status_code=400, detail="session has no class_id")
+
+        base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
+
+        # 기존 세션 실행 전: class 기준 sync (엔드포인트가 먼저 config로 만들어도 여기서 정리됨)
+        init_models_for_session_from_class(
+            db,
+            me=me,
+            session=session,
+            class_id=session.class_id,
+            requested_model_names=None,
+            base_generation_params=base_gen,
+            generation_overrides=None,
+            sync_existing=True,
+        )
 
         models = _select_models_for_existing_session(
             db,
