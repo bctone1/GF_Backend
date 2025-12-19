@@ -11,6 +11,7 @@ from core import config
 from langchain_service.embedding.get_vector import texts_to_vectors
 from langchain_service.llm.runner import generate_session_title_llm
 from langchain_service.llm.setup import call_llm_chat
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
 from crud.user.document import document_crud, document_chunk_crud
 from crud.user.practice import (
@@ -570,7 +571,6 @@ def _call_llm_for_model(
 
     temperature: float | None = 0.7
     top_p: float | None = 1.0
-
     conf_max_tokens: int | None = None
 
     if isinstance(model_conf, dict):
@@ -597,7 +597,6 @@ def _call_llm_for_model(
         "top_p": top_p,
         "response_length_preset": default_gen.get("response_length_preset", None),
     }
-
     for k, v in default_gen.items():
         if v is not None:
             base_params[k] = v
@@ -611,9 +610,9 @@ def _call_llm_for_model(
 
     preset = effective.get("response_length_preset")
     if preset in length_presets and preset != "custom":
-        mt = int(length_presets[preset])
-        effective["max_completion_tokens"] = mt
-        effective["max_tokens"] = mt
+        mt2 = int(length_presets[preset])
+        effective["max_completion_tokens"] = mt2
+        effective["max_tokens"] = mt2
     elif preset == "custom":
         effective = _normalize_generation_params_dict(effective)
     else:
@@ -624,39 +623,66 @@ def _call_llm_for_model(
     final_top_p = effective.get("top_p", 1.0)
     final_max_tokens = effective.get("max_completion_tokens") or effective.get("max_tokens")
 
-    messages: list[dict[str, str]] = []
+    # ---- 여기부터 Runnable로 구성 ----
+    sys_prompt = effective.get("system_prompt")
+    sys_prompt = sys_prompt.strip() if isinstance(sys_prompt, str) and sys_prompt.strip() else ""
 
-    system_prompt = effective.get("system_prompt")
-    if isinstance(system_prompt, str) and system_prompt.strip():
-        messages.append({"role": "system", "content": system_prompt.strip()})
-
+    # few-shot 정규화(list[dict])로 통일
+    fs_list: list[dict[str, str]] = []
     few_shot_raw = effective.get("few_shot_examples")
     if isinstance(few_shot_raw, list):
         for ex in few_shot_raw:
             if isinstance(ex, dict):
-                input_text = (ex.get("input") or "").strip()
-                output_text = (ex.get("output") or "").strip()
+                it = (ex.get("input") or "").strip()
+                ot = (ex.get("output") or "").strip()
             else:
-                input_text = (getattr(ex, "input", "") or "").strip()
-                output_text = (getattr(ex, "output", "") or "").strip()
+                it = (getattr(ex, "input", "") or "").strip()
+                ot = (getattr(ex, "output", "") or "").strip()
+            fs_list.append({"input": it, "output": ot})
 
-            if input_text:
-                messages.append({"role": "user", "content": input_text})
-            if output_text:
-                messages.append({"role": "assistant", "content": output_text})
+    def _build_messages(x: dict) -> list[dict[str, str]]:
+        msgs: list[dict[str, str]] = []
+        if sys_prompt:
+            msgs.append({"role": "system", "content": sys_prompt})
 
-    messages.append({"role": "user", "content": prompt_text})
+        for ex in fs_list:
+            it = (ex.get("input") or "").strip()
+            ot = (ex.get("output") or "").strip()
+            if it:
+                msgs.append({"role": "user", "content": it})
+            if ot:
+                msgs.append({"role": "assistant", "content": ot})
 
-    llm_result = call_llm_chat(
-        messages=messages,
-        provider=provider,
-        model=real_model_name,
-        temperature=final_temperature,
-        max_tokens=final_max_tokens,
-        top_p=final_top_p,
+        msgs.append({"role": "user", "content": str(x.get("prompt_text", "") or "")})
+        return msgs
+
+    def _call(messages: list[dict[str, str]]):
+        return call_llm_chat(
+            messages=messages,
+            provider=provider,
+            model=real_model_name,
+            temperature=final_temperature,
+            max_tokens=final_max_tokens,
+            top_p=final_top_p,
+        )
+
+    def _normalize(res) -> tuple[str, Dict[str, Any] | None, int | None]:
+        return (
+            str(getattr(res, "text", "") or ""),
+            getattr(res, "token_usage", None),
+            getattr(res, "latency_ms", None),
+        )
+
+    chain = (
+        RunnablePassthrough.assign(prompt_text=lambda x: x.get("prompt_text"))
+        | RunnableLambda(_build_messages)
+        | RunnableLambda(_call)
+        | RunnableLambda(_normalize)
     )
 
-    return llm_result.text, llm_result.token_usage, llm_result.latency_ms
+    response_text, token_usage, latency_ms = chain.invoke({"prompt_text": prompt_text})
+    return response_text, token_usage, latency_ms
+
 
 
 # =========================================

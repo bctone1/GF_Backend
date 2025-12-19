@@ -1,7 +1,7 @@
 # langchain_service/llm/runner.py
 from __future__ import annotations
 
-from typing import Iterable, Optional, Any
+from typing import Iterable, Optional
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -25,7 +25,7 @@ from service.user.document_rag import (
 
 from langchain_service.embedding.get_vector import _to_vector
 from langchain_service.llm.setup import get_llm, call_llm_chat
-from langchain_service.prompt.style import build_system_prompt
+from langchain_service.chain.qa_chain import make_qa_chain
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -41,43 +41,6 @@ def _update_last_user_vector(db: Session, session_id: int, vector: Iterable[floa
     session_crud.update_message(db, message=message, data={"vector_memory": list(vector)})
 
 
-def _build_messages_for_qa(
-    *,
-    question: str,
-    context_text: str,
-    style: Optional[str],
-    policy_flags: Optional[dict],
-    few_shot_examples: Optional[list[dict]],
-) -> list[dict[str, str]]:
-    system_txt = build_system_prompt(style=(style or "friendly"), **(policy_flags or {}))
-    rule_txt = (
-        "규칙: 제공된 컨텍스트를 우선하여 답하고, 정말 관련이 없을 때만 "
-        "짧게 '해당내용은 찾을 수 없음'이라고 답하라."
-    )
-
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_txt + "\n" + rule_txt}
-    ]
-
-    for ex in (few_shot_examples or []):
-        inp = str(ex.get("input", "") or "").strip()
-        out = str(ex.get("output", "") or "").strip()
-        if inp:
-            messages.append({"role": "user", "content": inp})
-        if out:
-            messages.append({"role": "assistant", "content": out})
-
-    user_content = (
-        "다음 컨텍스트만 근거로 답하세요.\n"
-        "[컨텍스트 시작]\n"
-        f"{context_text or ''}\n"
-        "[컨텍스트 끝]\n\n"
-        f"질문: {question}"
-    )
-    messages.append({"role": "user", "content": user_content})
-    return messages
-
-
 def _render_prompt_for_estimate(
     *,
     question: str,
@@ -86,7 +49,9 @@ def _render_prompt_for_estimate(
     policy_flags: Optional[dict],
     few_shot_examples: Optional[list[dict]] = None,
 ) -> list[str]:
-    # 기존 tokens_for_texts 호환용: 문자열 리스트로 유지
+
+    from langchain_service.prompt.style import build_system_prompt  # runner에서만 필요
+
     system_txt = build_system_prompt(style=(style or "friendly"), **(policy_flags or {}))
     rule_txt = (
         "규칙: 제공된 컨텍스트를 우선하여 답하고, 정말 관련이 없을 때만 "
@@ -127,7 +92,7 @@ def _run_qa(
     if session_id is not None:
         _update_last_user_vector(db, session_id, vector)
 
-    # ✅ 검색/리랭크는 document_rag에서 1번만
+    # 검색/리랭크는 document_rag에서 1번만
     search = get_effective_search_settings(db, knowledge_id=knowledge_id, top_k_fallback=top_k)
     sources = retrieve_sources(
         db,
@@ -142,29 +107,29 @@ def _run_qa(
     model = getattr(config, "LLM_MODEL", getattr(config, "DEFAULT_CHAT_MODEL", "gpt-4o-mini"))
 
     try:
-        messages = _build_messages_for_qa(
-            question=question,
-            context_text=context_text,
-            style=style,
-            policy_flags=policy_flags,
-            few_shot_examples=few_shot_examples,
-        )
-
-        # runner는 “한 번 호출”만 한다(qa_chain 제거)
-        llm_res = call_llm_chat(
-            messages=messages,
+        chain = make_qa_chain(
+            call_llm_chat=call_llm_chat,
             provider=provider,
             model=model,
             temperature=getattr(config, "LLM_TEMPERATURE", 0.7),
-            max_tokens=None,
             top_p=getattr(config, "LLM_TOP_P", None),
+            max_tokens=None,
+            streaming=False,
+            context_text=context_text,
+            policy_flags=policy_flags,
+            style=style or "friendly",
+            max_ctx_chars=MAX_CTX_CHARS,
+            few_shot_examples=few_shot_examples,
         )
-        resp_text = str(llm_res.text or "")
+
+        out = chain.invoke({"question": question})
+        resp_text = str(out.get("text", "") or "")
+        token_usage = out.get("token_usage")
 
         # token/cost: 가능하면 실제 token_usage 우선, 없으면 estimate
         total_tokens: int | None = None
-        if isinstance(llm_res.token_usage, dict):
-            t = llm_res.token_usage.get("total_tokens")
+        if isinstance(token_usage, dict):
+            t = token_usage.get("total_tokens")
             if isinstance(t, int):
                 total_tokens = t
 

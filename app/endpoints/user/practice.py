@@ -753,7 +753,7 @@ def run_practice_turn_endpoint(
             detail="session_has_no_class_id",
         )
 
-    # ✅ 기존 세션은 body에 agent/project/knowledge가 없고(prompt/model_names만)
+    # 기존 세션은 body에 agent/project/knowledge가 없고(prompt/model_names만)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
