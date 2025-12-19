@@ -4,10 +4,44 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, Any, Dict, List
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator, field_validator
 
 from schemas.base import ORMBase
 from schemas.enums import StylePreset, ResponseLengthPreset
+
+
+# =========================================
+# helpers
+# =========================================
+def _normalize_int_id_list(v: Optional[List[int]]) -> Optional[List[int]]:
+    """
+    - None 그대로 유지 (PATCH에서 '미변경' 의미)
+    - 중복 제거(입력 순서 유지)
+    - None/0/음수 제거
+    - str/int 혼용 들어와도 int 캐스팅 시도
+    """
+    if v is None:
+        return None
+
+    seen: set[int] = set()
+    out: List[int] = []
+
+    for x in v:
+        if x is None:
+            continue
+        try:
+            ix = int(x)
+        except (TypeError, ValueError):
+            continue
+
+        if ix <= 0:
+            continue
+
+        if ix not in seen:
+            seen.add(ix)
+            out.append(ix)
+
+    return out
 
 
 # =========================================
@@ -20,7 +54,19 @@ class GenerationParams(ORMBase):
     temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     response_length_preset: Optional[ResponseLengthPreset] = None
+
+    # 내부 표준은 max_completion_tokens
+    max_completion_tokens: Optional[int] = Field(default=None, ge=1)
+    # 호환용
     max_tokens: Optional[int] = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _sync_token_fields(self) -> "GenerationParams":
+        if self.max_completion_tokens is None and self.max_tokens is not None:
+            self.max_completion_tokens = self.max_tokens
+        if self.max_tokens is None and self.max_completion_tokens is not None:
+            self.max_tokens = self.max_completion_tokens
+        return self
 
 
 # =========================================
@@ -89,8 +135,13 @@ class PracticeSessionSettingCreate(ORMBase):
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
 
-    # JSON 배열 대신 "선택한 예시 ID들"만 받음 (순서는 리스트 순서로 해석 or 서비스에서 sort_order 처리)
+    # JSON 배열 대신 "선택한 예시 ID들"만 받음
     few_shot_example_ids: Optional[List[int]] = None
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeSessionSettingCreate":
+        self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
+        return self
 
 
 class PracticeSessionSettingUpdate(ORMBase):
@@ -100,6 +151,11 @@ class PracticeSessionSettingUpdate(ORMBase):
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
     few_shot_example_ids: Optional[List[int]] = None
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeSessionSettingUpdate":
+        self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
+        return self
 
 
 class PracticeSessionSettingResponse(ORMBase):
@@ -113,6 +169,9 @@ class PracticeSessionSettingResponse(ORMBase):
 
     # DB(JSONB) 그대로 내려줌
     generation_params: Dict[str, Any] = Field(default_factory=dict)
+
+    # agent 템플릿 스냅샷(세션 생성 시점 재현성)
+    agent_snapshot: Dict[str, Any] = Field(default_factory=dict)
 
     # 매핑 테이블 기반
     few_shot_links: List[PracticeSessionSettingFewShotResponse] = Field(default_factory=list)
@@ -129,9 +188,16 @@ class PracticeSessionCreate(ORMBase):
 
     class_id: Optional[int] = None
     project_id: Optional[int] = None
-    knowledge_id: Optional[int] = None
+    knowledge_ids: Optional[List[int]] = None
+
+    agent_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeSessionCreate":
+        self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        return self
 
 
 class PracticeSessionUpdate(ORMBase):
@@ -139,9 +205,16 @@ class PracticeSessionUpdate(ORMBase):
 
     class_id: Optional[int] = None
     project_id: Optional[int] = None
-    knowledge_id: Optional[int] = None
+    knowledge_ids: Optional[List[int]] = None
+
+    agent_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeSessionUpdate":
+        self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        return self
 
 
 class PracticeSessionResponse(ORMBase):
@@ -151,19 +224,33 @@ class PracticeSessionResponse(ORMBase):
     user_id: int
     class_id: Optional[int] = None
     project_id: Optional[int] = None
-    knowledge_id: Optional[int] = None
 
+    # 항상 list로 내려주기(ORM에서 None 들어와도 안전)
+    knowledge_ids: List[int] = Field(default_factory=list)
+
+    agent_id: Optional[int] = None
     title: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     notes: Optional[str] = None
 
     settings: Optional[PracticeSessionSettingResponse] = None
-
-    prompt_text: Optional[str] = None
-    response_text: Optional[str] = None
-
     responses: List["PracticeResponseResponse"] = Field(default_factory=list)
+
+    @field_validator("knowledge_ids", mode="before")
+    @classmethod
+    def _normalize_knowledge_ids(cls, v: Any) -> List[int]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            normalized = _normalize_int_id_list(v) or []
+            return normalized
+        # 혹시 단일 int로 들어오는 경우 방어
+        try:
+            ix = int(v)
+        except (TypeError, ValueError):
+            return []
+        return [ix] if ix > 0 else []
 
 
 # =========================================
@@ -234,18 +321,46 @@ class PracticeResponseResponse(ORMBase):
 
 
 # =========================================
-# LLM 실행용 /chat 스키마
+# LLM 실행용 /chat 스키마 (분리)
 # =========================================
-class PracticeTurnRequest(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
+class _PracticeTurnBase(ORMBase):
+    model_config = ConfigDict(from_attributes=False, extra="forbid")
 
     prompt_text: str
     model_names: Optional[list[str]] = Field(
         default=None,
         description="이 세션에서 호출할 논리 모델 이름 목록",
     )
-    document_ids: Optional[list[int]] = None
-    knowledge_id: Optional[int] = None
+
+
+class PracticeTurnRequestNewSession(_PracticeTurnBase):
+    """
+    POST /sessions/run
+    - 새 세션 생성 + 첫 턴
+    - agent_id / project_id / knowledge_ids는 여기서만 받는다.
+    """
+    agent_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
+    project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
+
+    knowledge_ids: Optional[List[int]] = Field(
+        default=None,
+        json_schema_extra={"example": None},
+        description="새 세션에서만 설정되는 지식베이스 ID 목록",
+    )
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeTurnRequestNewSession":
+        self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        return self
+
+
+class PracticeTurnRequestExistingSession(_PracticeTurnBase):
+    """
+    POST /sessions/{session_id}/chat
+    - 기존 세션 턴
+    - prompt_text / model_names만 받는다. (컨텍스트는 세션 저장값 사용)
+    """
+    pass
 
 
 class PracticeTurnModelResult(ORMBase):

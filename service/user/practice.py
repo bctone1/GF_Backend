@@ -3,13 +3,13 @@ from __future__ import annotations
 
 from typing import Optional, List, Dict, Any, Tuple
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from core import config
 from langchain_service.embedding.get_vector import texts_to_vectors
-from langchain_service.llm.runner import generate_session_title_llm, _run_qa
+from langchain_service.llm.runner import generate_session_title_llm
 from langchain_service.llm.setup import call_llm_chat
 
 from crud.user.document import document_crud, document_chunk_crud
@@ -25,10 +25,10 @@ from models.user.account import AppUser
 from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
-    PracticeResponse,
     PracticeSessionSetting,
     PracticeSessionSettingFewShot,
     UserFewShotExample,
+    PracticeResponse,
 )
 from models.partner.catalog import ModelCatalog
 
@@ -38,9 +38,93 @@ from schemas.user.practice import (
     PracticeSessionModelCreate,
     PracticeSessionUpdate,
     PracticeTurnModelResult,
-    PracticeTurnRequest,
+    PracticeTurnRequestNewSession,
+    PracticeTurnRequestExistingSession,
     PracticeTurnResponse,
 )
+
+
+# =========================================
+# helpers
+# =========================================
+def _coerce_int_list(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    out: list[int] = []
+    for x in value:
+        try:
+            ix = int(x)
+        except (TypeError, ValueError):
+            continue
+        if ix > 0:
+            out.append(ix)
+    # 중복 제거(입력 순서 유지)
+    seen: set[int] = set()
+    uniq: list[int] = []
+    for ix in out:
+        if ix not in seen:
+            seen.add(ix)
+            uniq.append(ix)
+    return uniq
+
+
+def _get_session_knowledge_ids(session: PracticeSession) -> list[int]:
+    """
+    ORM이 아직 knowledge_id(단일)일 수도, knowledge_ids(리스트)일 수도 있어서 안전하게 흡수.
+    """
+    kids = getattr(session, "knowledge_ids", None)
+    if isinstance(kids, list):
+        return _coerce_int_list(kids)
+
+    kid = getattr(session, "knowledge_id", None)
+    if kid is None:
+        return []
+    try:
+        ik = int(kid)
+    except (TypeError, ValueError):
+        return []
+    return [ik] if ik > 0 else []
+
+
+# =========================================
+# generation params 정규화 (max_completion_tokens 기준)
+# - DB/서비스 전반 키 혼용 방지
+# =========================================
+def _normalize_generation_params_dict(v: Any) -> Dict[str, Any]:
+    if not isinstance(v, dict):
+        return {}
+
+    out = dict(v)
+    mct = out.get("max_completion_tokens")
+    mt = out.get("max_tokens")
+    mot = out.get("max_output_tokens")
+
+    # max_output_tokens 들어오면 승격
+    if mct is None and isinstance(mot, int) and mot > 0:
+        out["max_completion_tokens"] = mot
+        out["max_tokens"] = mot
+        return out
+
+    # max_tokens만 들어오면 승격
+    if mct is None and isinstance(mt, int) and mt > 0:
+        out["max_completion_tokens"] = mt
+        out["max_tokens"] = mt
+        return out
+
+    # max_completion_tokens만 있으면 max_tokens도 채움
+    if mt is None and isinstance(mct, int) and mct > 0:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+        return out
+
+    # 둘 다 있고 다르면 max_completion_tokens 우선
+    if isinstance(mct, int) and mct > 0 and isinstance(mt, int) and mt > 0 and mct != mt:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+
+    return out
 
 
 # =========================================
@@ -61,22 +145,31 @@ def ensure_session_settings(db: Session, *, session_id: int) -> PracticeSessionS
 def _get_default_generation_params() -> Dict[str, Any]:
     base = getattr(config, "PRACTICE_DEFAULT_GENERATION", None)
     if isinstance(base, dict):
-        return dict(base)
+        return _normalize_generation_params_dict(dict(base))
 
-    return {
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "response_length_preset": "normal",
-        "max_tokens": 512,
-    }
+    return _normalize_generation_params_dict(
+        {
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "response_length_preset": None,
+            "max_completion_tokens": 1024,
+        }
+    )
+
+
+def _is_enabled_runtime_model(model_key: str) -> bool:
+    practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
+    conf = practice_models.get(model_key)
+    return isinstance(conf, dict) and conf.get("enabled") is True
+
+
+def _has_any_response(db: Session, *, session_id: int) -> bool:
+    stmt = select(func.count(PracticeResponse.response_id)).where(PracticeResponse.session_id == session_id)
+    return (db.scalar(stmt) or 0) > 0
 
 
 # =========================================
 # settings에 선택된 few-shot 예시 로드
-# - mapping 테이블 기반
-# - sort_order 유지
-# - "내 것 + active"만 사용
-# - meta까지 포함 (rule 추출용)
 # =========================================
 def _load_selected_few_shots_for_setting(
     db: Session,
@@ -88,7 +181,7 @@ def _load_selected_few_shots_for_setting(
         select(
             UserFewShotExample.input_text,
             UserFewShotExample.output_text,
-            UserFewShotExample.meta,  # meta 포함
+            UserFewShotExample.meta,
         )
         .join(
             PracticeSessionSettingFewShot,
@@ -112,7 +205,6 @@ def _load_selected_few_shots_for_setting(
 
 # =========================================
 # few-shot meta에서 rule -> system_prompt 생성
-# - meta.additionalProp1.rule 문자열을 우선 사용
 # =========================================
 def _derive_system_prompt_from_few_shots(few_shots: Any) -> Optional[str]:
     if not isinstance(few_shots, list) or not few_shots:
@@ -165,17 +257,17 @@ def _embed_question_to_vector(question: str) -> list[float]:
 
 
 # =========================================
-# 지식베이스 컨텍스트 빌더 (벡터 top-k 기반)
-# - document_ids가 "Document PK(id)"든 "knowledge_id"든 둘 다 방어
+# 지식베이스(knowledge_ids) 컨텍스트 빌더
 # =========================================
-def _build_context_from_documents(
+def _build_context_from_knowledges(
     db: Session,
     user: AppUser,
-    document_ids: List[int],
+    knowledge_ids: List[int],
     question: str,
     max_chunks: int = 10,
 ) -> str:
-    if not document_ids:
+    knowledge_ids = _coerce_int_list(knowledge_ids)
+    if not knowledge_ids:
         return ""
 
     query_vector = _embed_question_to_vector(question)
@@ -184,24 +276,11 @@ def _build_context_from_documents(
 
     valid_docs: list[Any] = []
 
-    for raw_id in document_ids:
-        if raw_id is None:
-            continue
-
-        doc = None
-
-        # 1) knowledge_id로 조회 시도
+    for kid in knowledge_ids:
         try:
-            doc = document_crud.get(db, knowledge_id=raw_id)
+            doc = document_crud.get(db, knowledge_id=kid)
         except Exception:
             doc = None
-
-        # 2) 실패하면 id로 조회 시도
-        if doc is None:
-            try:
-                doc = document_crud.get(db, id=raw_id)
-            except Exception:
-                doc = None
 
         if not doc:
             continue
@@ -214,8 +293,8 @@ def _build_context_from_documents(
         if owner_id is not None and owner_id != user.user_id:
             continue
 
-        kid = getattr(doc, "knowledge_id", None)
-        if kid is None:
+        real_kid = getattr(doc, "knowledge_id", None)
+        if real_kid is None:
             continue
 
         valid_docs.append(doc)
@@ -278,7 +357,7 @@ def _build_context_from_documents(
 def ensure_my_session(db: Session, session_id: int, me: AppUser) -> PracticeSession:
     session = practice_session_crud.get(db, session_id)
     if not session or session.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found")
     return session
 
 
@@ -289,11 +368,11 @@ def ensure_my_session_model(
 ) -> Tuple[PracticeSessionModel, PracticeSession]:
     model = practice_session_model_crud.get(db, session_model_id)
     if not model:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+        raise HTTPException(status_code=404, detail="model not found")
 
     session = practice_session_crud.get(db, model.session_id)
     if not session or session.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="model not found")
+        raise HTTPException(status_code=404, detail="model not found")
 
     return model, session
 
@@ -301,7 +380,7 @@ def ensure_my_session_model(
 def ensure_my_response(db: Session, response_id: int, me: AppUser):
     resp = practice_response_crud.get(db, response_id)
     if not resp:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="response not found")
+        raise HTTPException(status_code=404, detail="response not found")
     model, session = ensure_my_session_model(db, resp.session_model_id, me)
     return resp, model, session
 
@@ -318,14 +397,14 @@ def set_primary_model_for_session(
 ) -> PracticeSessionModel:
     session = practice_session_crud.get(db, session_id)
     if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found")
 
     if me is not None and session.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
+        raise HTTPException(status_code=404, detail="session not found")
 
     models = practice_session_model_crud.list_by_session(db, session_id=session_id)
     if not models:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no models for this session")
+        raise HTTPException(status_code=400, detail="no models for this session")
 
     target: PracticeSessionModel | None = None
     for m in models:
@@ -336,19 +415,14 @@ def set_primary_model_for_session(
             m.is_primary = False
 
     if target is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="target model does not belong to this session",
-        )
+        raise HTTPException(status_code=400, detail="target model does not belong to this session")
 
     db.flush()
     return target
 
 
 # =========================================
-# class 설정 기반 모델 생성
-# - base_generation_params(= settings.generation_params) 를 기본으로 깔고,
-#   generation_overrides[name] 로 모델별 덮어쓰기
+# class 설정 기반 모델 생성/동기화
 # =========================================
 def init_models_for_session_from_class(
     db: Session,
@@ -359,17 +433,8 @@ def init_models_for_session_from_class(
     requested_model_names: list[str] | None = None,
     base_generation_params: dict[str, Any] | None = None,
     generation_overrides: dict[str, dict[str, Any]] | None = None,
+    sync_existing: bool = True,
 ) -> list[PracticeSessionModel]:
-    existing = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
-    if existing:
-        if requested_model_names:
-            s = set(requested_model_names)
-            picked = [m for m in existing if m.model_name in s]
-            if not picked:
-                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
-            return picked
-        return existing
-
     class_obj = classes_crud.get_class(db, class_id=class_id)
     if not class_obj or class_obj.status != "active":
         raise HTTPException(status_code=400, detail="유효하지 않은 class_id 입니다.")
@@ -386,29 +451,96 @@ def init_models_for_session_from_class(
         raise HTTPException(status_code=400, detail="이 class 에 설정된 모델이 없습니다.")
 
     allowed_names: list[str] = []
+    seen: set[str] = set()
     for mc_id in model_catalog_ids:
         catalog = db.get(ModelCatalog, mc_id)
         if not catalog:
             raise HTTPException(status_code=400, detail=f"유효하지 않은 model_catalog id: {mc_id}")
         name = getattr(catalog, "logical_name", None) or catalog.model_name
-        allowed_names.append(name)
+        if name not in seen:
+            seen.add(name)
+            allowed_names.append(name)
 
-    final_names = allowed_names
+    for name in allowed_names:
+        if not _is_enabled_runtime_model(name):
+            raise HTTPException(status_code=400, detail=f"model_not_enabled_in_runtime_config: {name}")
+
+    desired_names = allowed_names
     if requested_model_names:
         s = set(requested_model_names)
-        final_names = [n for n in allowed_names if n in s]
-        if not final_names:
+        desired_names = [n for n in allowed_names if n in s]
+        if not desired_names:
             raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
 
-    base_gen = dict(base_generation_params or _get_default_generation_params())
+    base_gen = _normalize_generation_params_dict(dict(base_generation_params or _get_default_generation_params()))
     overrides = generation_overrides or {}
 
+    existing = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+
+    if existing and sync_existing:
+        has_resp = _has_any_response(db, session_id=session.session_id)
+        desired_set = set(desired_names)
+
+        if not has_resp:
+            for m in existing:
+                if m.model_name not in desired_set:
+                    practice_session_model_crud.delete(db, session_model_id=m.session_model_id)
+
+        existing_after = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+        existing_names_after = {m.model_name for m in existing_after}
+
+        for name in desired_names:
+            if name in existing_names_after:
+                continue
+
+            gp = dict(base_gen)
+            ov = overrides.get(name)
+            if isinstance(ov, dict):
+                gp.update(ov)
+            gp = _normalize_generation_params_dict(gp)
+
+            practice_session_model_crud.create(
+                db,
+                PracticeSessionModelCreate(
+                    session_id=session.session_id,
+                    model_name=name,
+                    is_primary=False,
+                    generation_params=gp,
+                ),
+            )
+
+        final_models = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+        primary_name = desired_names[0] if desired_names else None
+        for m in final_models:
+            m.is_primary = (m.model_name == primary_name)
+
+        db.flush()
+
+        if requested_model_names:
+            s = set(requested_model_names)
+            picked = [m for m in final_models if m.model_name in s]
+            if not picked:
+                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
+            return picked
+
+        return final_models
+
+    if existing:
+        if requested_model_names:
+            s = set(requested_model_names)
+            picked = [m for m in existing if m.model_name in s]
+            if not picked:
+                raise HTTPException(status_code=400, detail="requested model_names not found in this session")
+            return picked
+        return list(existing)
+
     created: list[PracticeSessionModel] = []
-    for idx, name in enumerate(final_names):
+    for idx, name in enumerate(desired_names):
         gp = dict(base_gen)
         ov = overrides.get(name)
         if isinstance(ov, dict):
             gp.update(ov)
+        gp = _normalize_generation_params_dict(gp)
 
         m = practice_session_model_crud.create(
             db,
@@ -438,8 +570,8 @@ def _call_llm_for_model(
 
     temperature: float | None = 0.7
     top_p: float | None = 1.0
-    max_tokens: int | None = None
-    response_length_preset: str | None = None
+
+    conf_max_tokens: int | None = None
 
     if isinstance(model_conf, dict):
         if not model_conf.get("enabled", True):
@@ -452,51 +584,52 @@ def _call_llm_for_model(
             temperature = model_conf.get("temperature")
         if "top_p" in model_conf:
             top_p = model_conf.get("top_p")
-        mt = model_conf.get("max_output_tokens") or model_conf.get("max_tokens")
-        if mt is not None:
-            max_tokens = mt
 
-    default_gen = getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {}
-    response_length_preset = default_gen.get("response_length_preset", "normal")
+        mt = model_conf.get("max_output_tokens") or model_conf.get("max_completion_tokens") or model_conf.get("max_tokens")
+        if isinstance(mt, int) and mt > 0:
+            conf_max_tokens = mt
+
+    default_gen = _normalize_generation_params_dict(getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {})
+    length_presets: Dict[str, int] = getattr(config, "RESPONSE_LENGTH_PRESETS", {}) or {}
 
     base_params: Dict[str, Any] = {
         "temperature": temperature,
         "top_p": top_p,
-        "max_tokens": max_tokens,
-        "response_length_preset": response_length_preset,
+        "response_length_preset": default_gen.get("response_length_preset", None),
     }
+
     for k, v in default_gen.items():
         if v is not None:
             base_params[k] = v
 
+    if conf_max_tokens is not None:
+        base_params["max_completion_tokens"] = conf_max_tokens
+        base_params["max_tokens"] = conf_max_tokens
+
     gp: Dict[str, Any] = generation_params if isinstance(generation_params, dict) else {}
-    effective: Dict[str, Any] = {**base_params, **gp}
+    effective: Dict[str, Any] = _normalize_generation_params_dict({**base_params, **gp})
 
-    length_presets: Dict[str, int] = getattr(config, "RESPONSE_LENGTH_PRESETS", {}) or {}
     preset = effective.get("response_length_preset")
-
     if preset in length_presets and preset != "custom":
-        effective["max_tokens"] = length_presets[preset]
+        mt = int(length_presets[preset])
+        effective["max_completion_tokens"] = mt
+        effective["max_tokens"] = mt
     elif preset == "custom":
-        if effective.get("max_tokens") is None:
-            if default_gen.get("max_tokens") is not None:
-                effective["max_tokens"] = default_gen["max_tokens"]
+        effective = _normalize_generation_params_dict(effective)
     else:
-        if effective.get("max_tokens") is not None:
+        if effective.get("max_completion_tokens") is not None:
             effective["response_length_preset"] = "custom"
 
     final_temperature = effective.get("temperature", 0.7)
     final_top_p = effective.get("top_p", 1.0)
-    final_max_tokens = effective.get("max_tokens")
+    final_max_tokens = effective.get("max_completion_tokens") or effective.get("max_tokens")
 
     messages: list[dict[str, str]] = []
 
-    # system_prompt 먼저 주입 (few-shot rule 강제용)
     system_prompt = effective.get("system_prompt")
     if isinstance(system_prompt, str) and system_prompt.strip():
         messages.append({"role": "system", "content": system_prompt.strip()})
 
-    # few_shot_examples: [{"input":..., "output":..., "meta":...}, ...]
     few_shot_raw = effective.get("few_shot_examples")
     if isinstance(few_shot_raw, list):
         for ex in few_shot_raw:
@@ -536,15 +669,18 @@ def run_practice_turn(
     models: List[PracticeSessionModel],
     prompt_text: str,
     user: AppUser,
-    document_ids: Optional[List[int]] = None,
+    knowledge_ids: Optional[List[int]] = None,
 ) -> PracticeTurnResponse:
     if session.user_id != user.user_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="session not owned by user")
+        raise HTTPException(status_code=403, detail="session not owned by user")
 
     settings = ensure_session_settings(db, session_id=session.session_id)
-    session_base_gen = getattr(settings, "generation_params", None) or {}
+    session_base_gen = _normalize_generation_params_dict(getattr(settings, "generation_params", None) or {})
 
-    # settings에 선택된 few-shot 예시(매핑 기반)
+    agent_snapshot = getattr(settings, "agent_snapshot", None) or {}
+    agent_gen = agent_snapshot.get("generation_params") if isinstance(agent_snapshot, dict) else {}
+    agent_gen = _normalize_generation_params_dict(agent_gen) if isinstance(agent_gen, dict) else {}
+
     selected_few_shots = _load_selected_few_shots_for_setting(
         db,
         setting_id=settings.setting_id,
@@ -552,11 +688,12 @@ def run_practice_turn(
     )
 
     context_text = ""
-    if document_ids:
-        context_text = _build_context_from_documents(
+    kids = _coerce_int_list(knowledge_ids)
+    if kids:
+        context_text = _build_context_from_knowledges(
             db=db,
             user=user,
-            document_ids=document_ids,
+            knowledge_ids=kids,
             question=prompt_text,
         )
 
@@ -564,15 +701,20 @@ def run_practice_turn(
 
     for m in models:
         if m.session_id != session.session_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="session_model does not belong to given session",
-            )
+            raise HTTPException(status_code=400, detail="session_model does not belong to given session")
 
         full_prompt = f"{context_text}\n\n질문: {prompt_text}" if context_text else prompt_text
 
-        model_gp = getattr(m, "generation_params", None) or {}
-        effective_gp: Dict[str, Any] = {**session_base_gen, **model_gp}
+        model_gp = _normalize_generation_params_dict(getattr(m, "generation_params", None) or {})
+
+        # 우선순위: settings(base) -> agent_snapshot(gen) -> model(gen)
+        effective_gp: Dict[str, Any] = _normalize_generation_params_dict({**session_base_gen, **agent_gen, **model_gp})
+
+        # agent_snapshot의 system_prompt/few_shot_examples는 "없을 때만" 주입
+        if isinstance(agent_snapshot, dict):
+            for k in ("system_prompt", "few_shot_examples"):
+                if k in agent_snapshot and not effective_gp.get(k):
+                    effective_gp[k] = agent_snapshot.get(k)
 
         # 모델이 직접 few_shot_examples를 안 갖고 있으면 settings 선택분 주입
         if not effective_gp.get("few_shot_examples") and selected_few_shots:
@@ -643,87 +785,11 @@ def run_practice_turn(
     )
 
 
-# =========================================
-# 세션 + 첫 턴 생성 (단일 모델/RAG)
-# =========================================
-def create_session_with_first_turn(
-    db: Session,
-    *,
-    user: AppUser,
-    model_name: str,
-    prompt_text: str,
-    knowledge_id: int | None = None,
-) -> tuple[PracticeSession, PracticeResponse]:
-    session = practice_session_crud.create(
-        db,
-        data=PracticeSessionCreate(
-            class_id=None,
-            project_id=None,
-            title=None,
-            notes=None,
-        ),
-        user_id=user.user_id,
-    )
-
-    settings = ensure_session_settings(db, session_id=session.session_id)
-    base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
-
-    session_model = practice_session_model_crud.create(
-        db,
-        PracticeSessionModelCreate(
-            session_id=session.session_id,
-            model_name=model_name,
-            is_primary=True,
-            generation_params=dict(base_gen),
-        ),
-    )
-
-    # settings에 선택된 few-shot 예시 로드 + rule을 질문 앞에 주입(최소 강제)
-    selected_few_shots = _load_selected_few_shots_for_setting(
-        db,
-        setting_id=settings.setting_id,
-        me=user,
-    )
-    sys_from_fs = _derive_system_prompt_from_few_shots(selected_few_shots)
-    qa_question = f"{sys_from_fs}\n\n{prompt_text}" if sys_from_fs else prompt_text
-
-    qa = _run_qa(
-        db,
-        question=qa_question,
-        knowledge_id=knowledge_id,
-        top_k=3,
-        session_id=None,
-        few_shot_examples=selected_few_shots or None,  # qa_chain에서 사용
-    )
-
-    response = practice_response_crud.create(
-        db,
-        PracticeResponseCreate(
-            session_model_id=session_model.session_model_id,
-            session_id=session.session_id,
-            model_name=model_name,
-            prompt_text=prompt_text,
-            response_text=qa.answer,
-            token_usage=None,
-            latency_ms=None,
-        ),
-    )
-
-    title = generate_session_title_llm(prompt_text, qa.answer)
-    session = practice_session_crud.update(
-        db,
-        session_id=session.session_id,
-        data=PracticeSessionUpdate(title=title),
-    )
-    return session, response
-
-
 def _select_models_for_existing_session(
     db: Session,
     *,
     session: PracticeSession,
-    body: PracticeTurnRequest,
-    me: AppUser,
+    body: PracticeTurnRequestExistingSession,
     class_id: int | None = None,
 ) -> List[PracticeSessionModel]:
     if session.class_id is None:
@@ -743,7 +809,7 @@ def _select_models_for_existing_session(
             raise HTTPException(status_code=400, detail="requested model_names not found in this session")
         return picked
 
-    return all_models
+    return list(all_models)
 
 
 def run_practice_turn_for_session(
@@ -752,18 +818,32 @@ def run_practice_turn_for_session(
     me: AppUser,
     session_id: int,
     class_id: int | None,
-    body: PracticeTurnRequest,
+    body: PracticeTurnRequestNewSession | PracticeTurnRequestExistingSession,
     project_id: Optional[int] = None,
 ) -> PracticeTurnResponse:
+    """
+    - session_id == 0  : 새 세션 생성 + 첫 턴 (body에 agent/project/knowledge 허용)
+    - session_id > 0   : 기존 세션 턴 (body는 prompt/model_names만, 컨텍스트는 세션 저장값 사용)
+    """
     if session_id == 0:
         if class_id is None:
             raise HTTPException(status_code=400, detail="class_id_required")
+
+        if not isinstance(body, PracticeTurnRequestNewSession):
+            # 방어: 라우팅/타이핑 실수 방지
+            raise HTTPException(status_code=400, detail="invalid_body_for_new_session")
+
+        requested_project_id = project_id if project_id is not None else body.project_id
+        requested_knowledge_ids = _coerce_int_list(body.knowledge_ids)
+        requested_agent_id = body.agent_id
 
         session = practice_session_crud.create(
             db,
             data=PracticeSessionCreate(
                 class_id=class_id,
-                project_id=project_id,
+                project_id=requested_project_id,
+                knowledge_ids=requested_knowledge_ids,
+                agent_id=requested_agent_id,
                 title=None,
                 notes=None,
             ),
@@ -771,9 +851,11 @@ def run_practice_turn_for_session(
         )
 
         settings = ensure_session_settings(db, session_id=session.session_id)
-        base_gen = getattr(settings, "generation_params", None) or _get_default_generation_params()
+        base_gen = _normalize_generation_params_dict(
+            getattr(settings, "generation_params", None) or _get_default_generation_params()
+        )
 
-        created_models = init_models_for_session_from_class(
+        models = init_models_for_session_from_class(
             db,
             me=me,
             session=session,
@@ -781,29 +863,56 @@ def run_practice_turn_for_session(
             requested_model_names=None,
             base_generation_params=base_gen,
             generation_overrides=None,
+            sync_existing=True,
         )
 
-        models = created_models
         if body.model_names:
             s = set(body.model_names)
-            models = [m for m in created_models if m.model_name in s]
-            if not models:
+            picked = [m for m in models if m.model_name in s]
+            if not picked:
                 raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
+            models = picked
+
+        ctx_knowledge_ids = _get_session_knowledge_ids(session)
 
     else:
+        if not isinstance(body, PracticeTurnRequestExistingSession):
+            # 방어: 라우팅/타이핑 실수 방지
+            raise HTTPException(status_code=400, detail="invalid_body_for_existing_session")
+
         session = ensure_my_session(db, session_id, me)
-        _ = ensure_session_settings(db, session_id=session.session_id)
+        settings = ensure_session_settings(db, session_id=session.session_id)
+
+        if session.class_id is None:
+            raise HTTPException(status_code=400, detail="session has no class_id")
+
+        base_gen = _normalize_generation_params_dict(
+            getattr(settings, "generation_params", None) or _get_default_generation_params()
+        )
+
+        init_models_for_session_from_class(
+            db,
+            me=me,
+            session=session,
+            class_id=session.class_id,
+            requested_model_names=None,
+            base_generation_params=base_gen,
+            generation_overrides=None,
+            sync_existing=True,
+        )
 
         models = _select_models_for_existing_session(
             db,
             session=session,
             body=body,
-            me=me,
             class_id=class_id,
         )
 
+        # project_id는 "요청 파라미터"로만 검증
         if project_id is not None and session.project_id is not None and session.project_id != project_id:
             raise HTTPException(status_code=400, detail="요청한 project_id와 세션의 project_id가 일치하지 않습니다.")
+
+        ctx_knowledge_ids = _get_session_knowledge_ids(session)
 
     return run_practice_turn(
         db=db,
@@ -811,5 +920,5 @@ def run_practice_turn_for_session(
         models=models,
         prompt_text=body.prompt_text,
         user=me,
-        document_ids=body.document_ids,
+        knowledge_ids=ctx_knowledge_ids,
     )

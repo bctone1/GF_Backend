@@ -44,6 +44,57 @@ def _coerce_dict(value: Any) -> dict[str, Any]:
     return dict(v) if isinstance(v, dict) else {}
 
 
+def _coerce_int_list(value: Any) -> list[int]:
+    """
+    JSONB(list[int]) 방어용
+    - None/비정상 타입이면 []
+    - int 캐스팅 실패는 스킵
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    out: list[int] = []
+    for x in value:
+        try:
+            ix = int(x)
+        except (TypeError, ValueError):
+            continue
+        if ix > 0:
+            out.append(ix)
+    return out
+
+
+def _normalize_generation_params_dict(v: dict[str, Any]) -> dict[str, Any]:
+    """
+    DB에는 max_completion_tokens 기준으로 맞추되,
+    기존 코드 호환을 위해 max_tokens도 함께 동일 값으로 유지.
+    """
+    if not isinstance(v, dict):
+        return {}
+
+    out = dict(v)
+
+    mct = out.get("max_completion_tokens")
+    mt = out.get("max_tokens")
+
+    if mct is None and mt is not None:
+        out["max_completion_tokens"] = mt
+        out["max_tokens"] = mt
+        return out
+
+    if mt is None and mct is not None:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+        return out
+
+    if mct is not None and mt is not None and mct != mt:
+        out["max_tokens"] = mct
+        out["max_completion_tokens"] = mct
+
+    return out
+
+
 # =========================================================
 # PracticeSession CRUD
 # =========================================================
@@ -55,11 +106,14 @@ class PracticeSessionCRUD:
         data: PracticeSessionCreate,
         user_id: int,
     ) -> PracticeSession:
+        knowledge_ids = _coerce_int_list(getattr(data, "knowledge_ids", None))
+
         obj = PracticeSession(
             user_id=user_id,
             class_id=data.class_id,
             project_id=data.project_id,
-            knowledge_id=data.knowledge_id,
+            knowledge_ids=knowledge_ids,
+            agent_id=getattr(data, "agent_id", None),
             title=data.title,
             notes=data.notes,
         )
@@ -101,6 +155,9 @@ class PracticeSessionCRUD:
         if not values:
             return self.get(db, session_id)
 
+        if "knowledge_ids" in values:
+            values["knowledge_ids"] = _coerce_int_list(values.get("knowledge_ids"))
+
         stmt = (
             update(PracticeSession)
             .where(PracticeSession.session_id == session_id)
@@ -136,6 +193,7 @@ class PracticeSessionSettingCRUD:
         default_style_params: Optional[dict[str, Any]] = None,
         style_preset: Optional[str] = None,
         default_few_shot_example_ids: Optional[list[int]] = None,
+        default_agent_snapshot: Optional[dict[str, Any]] = None,
     ) -> PracticeSessionSetting:
         """
         세션당 settings 1개 보장.
@@ -149,9 +207,10 @@ class PracticeSessionSettingCRUD:
         gen = default_generation_params
         if not isinstance(gen, dict):
             gen = getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {}
-        gen = dict(gen)
+        gen = _normalize_generation_params_dict(dict(gen))
 
         style = default_style_params if isinstance(default_style_params, dict) else {}
+        agent_snapshot = dict(default_agent_snapshot) if isinstance(default_agent_snapshot, dict) else {}
 
         try:
             with db.begin_nested():
@@ -160,11 +219,11 @@ class PracticeSessionSettingCRUD:
                     style_preset=style_preset,
                     style_params=dict(style),
                     generation_params=gen,
+                    agent_snapshot=agent_snapshot,
                 )
                 db.add(obj)
                 db.flush()
 
-                # (선택) 기본 few-shot 링크 세팅
                 if default_few_shot_example_ids:
                     for i, eid in enumerate(default_few_shot_example_ids):
                         db.add(
@@ -199,7 +258,6 @@ class PracticeSessionSettingCRUD:
                 PracticeSessionSettingFewShot.setting_id == setting_id
             )
         )
-        # 새 링크 생성 (리스트 순서를 sort_order로)
         for i, eid in enumerate(example_ids):
             db.add(
                 PracticeSessionSettingFewShot(
@@ -219,7 +277,7 @@ class PracticeSessionSettingCRUD:
     ) -> Optional[PracticeSessionSetting]:
         """
         session_id 기준 settings PATCH.
-        - style_params/generation_params: merge
+        - style_params/generation_params/agent_snapshot: merge
         - few_shot_example_ids: replace(매핑 테이블)
         """
         row = self.get_by_session(db, session_id=session_id)
@@ -230,25 +288,27 @@ class PracticeSessionSettingCRUD:
         if not values:
             return row
 
-        # style_preset: replace
         if "style_preset" in values:
             row.style_preset = values.get("style_preset")
 
-        # style_params: merge
         if "style_params" in values:
             incoming_style = _coerce_dict(values.get("style_params"))
             base_style = dict(getattr(row, "style_params", None) or {})
             base_style.update(incoming_style)
             row.style_params = base_style
 
-        # generation_params: merge
         if "generation_params" in values:
-            incoming_gen = _coerce_dict(values.get("generation_params"))
-            base_gen = dict(getattr(row, "generation_params", None) or {})
+            incoming_gen = _normalize_generation_params_dict(_coerce_dict(values.get("generation_params")))
+            base_gen = _normalize_generation_params_dict(dict(getattr(row, "generation_params", None) or {}))
             base_gen.update(incoming_gen)
-            row.generation_params = base_gen
+            row.generation_params = _normalize_generation_params_dict(base_gen)
 
-        # few_shot_example_ids: replace
+        if "agent_snapshot" in values:
+            incoming_snap = _coerce_dict(values.get("agent_snapshot"))
+            base_snap = dict(getattr(row, "agent_snapshot", None) or {})
+            base_snap.update(incoming_snap)
+            row.agent_snapshot = base_snap
+
         if "few_shot_example_ids" in values:
             ids = values.get("few_shot_example_ids") or []
             if not isinstance(ids, list):
@@ -351,7 +411,7 @@ user_few_shot_example_crud = UserFewShotExampleCRUD()
 class PracticeSessionModelCRUD:
     def create(self, db: Session, data: PracticeSessionModelCreate) -> PracticeSessionModel:
         raw_gp = getattr(data, "generation_params", None)
-        gp = _coerce_dict(raw_gp) if raw_gp is not None else {}
+        gp = _normalize_generation_params_dict(_coerce_dict(raw_gp)) if raw_gp is not None else {}
 
         obj = PracticeSessionModel(
             session_id=data.session_id,
@@ -395,7 +455,9 @@ class PracticeSessionModelCRUD:
             return obj
 
         if "generation_params" in update_data:
-            update_data["generation_params"] = _coerce_dict(update_data.get("generation_params"))
+            update_data["generation_params"] = _normalize_generation_params_dict(
+                _coerce_dict(update_data.get("generation_params"))
+            )
 
         for k, v in update_data.items():
             setattr(obj, k, v)
@@ -420,7 +482,7 @@ class PracticeSessionModelCRUD:
         merge: bool = True,
         overwrite_keys: Optional[list[str]] = None,
     ) -> list[PracticeSessionModel]:
-        gp = _coerce_dict(generation_params)
+        gp = _normalize_generation_params_dict(_coerce_dict(generation_params))
         if not gp:
             return list(self.list_by_session(db, session_id=session_id))
 
@@ -428,7 +490,7 @@ class PracticeSessionModelCRUD:
         keys = overwrite_keys[:] if overwrite_keys else None
 
         for m in models:
-            current = dict(getattr(m, "generation_params", None) or {})
+            current = _normalize_generation_params_dict(dict(getattr(m, "generation_params", None) or {}))
             next_gp = dict(current) if merge else {}
 
             if keys is None:
@@ -438,7 +500,7 @@ class PracticeSessionModelCRUD:
                     if k in gp:
                         next_gp[k] = gp[k]
 
-            m.generation_params = next_gp
+            m.generation_params = _normalize_generation_params_dict(next_gp)
             db.add(m)
 
         db.flush()
