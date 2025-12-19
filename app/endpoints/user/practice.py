@@ -43,7 +43,8 @@ from schemas.user.practice import (
     PracticeResponseCreate,
     PracticeResponseUpdate,
     PracticeResponseResponse,
-    PracticeTurnRequest,
+    PracticeTurnRequestNewSession,
+    PracticeTurnRequestExistingSession,
     PracticeTurnResponse,
     PracticeSessionSettingResponse,
     PracticeSessionSettingUpdate,
@@ -67,10 +68,32 @@ router = APIRouter()
 # =========================================================
 # helpers
 # =========================================================
+def _coerce_int_list(value: Any) -> list[int]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    out: list[int] = []
+    for x in value:
+        try:
+            ix = int(x)
+        except (TypeError, ValueError):
+            continue
+        if ix > 0:
+            out.append(ix)
+    # 중복 제거(입력 순서 유지)
+    seen: set[int] = set()
+    uniq: list[int] = []
+    for ix in out:
+        if ix not in seen:
+            seen.add(ix)
+            uniq.append(ix)
+    return uniq
+
+
 def _normalize_generation_params_dict(v: Any) -> dict[str, Any]:
     """
     max_completion_tokens 기준으로 키 혼용을 정규화.
-    (서비스 레이어와 동일한 정규화 규칙을 엔드포인트에서도 적용)
     """
     if not isinstance(v, dict):
         return {}
@@ -164,7 +187,9 @@ def _sync_session_models_with_class(
     prev_primary_name = next((m.model_name for m in before if getattr(m, "is_primary", False)), None)
 
     setting = _ensure_session_settings_row(db, session_id=session.session_id)
-    base_gen = _normalize_generation_params_dict(getattr(setting, "generation_params", None) or _get_default_generation_params_dict())
+    base_gen = _normalize_generation_params_dict(
+        getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
+    )
 
     init_models_for_session_from_class(
         db,
@@ -308,13 +333,17 @@ def get_practice_session(
     resp_rows = practice_response_crud.list_by_session(db, session_id=session.session_id)
     resp_items = [PracticeResponseResponse.model_validate(r) for r in resp_rows]
 
+    # knowledge_ids (세션 컬럼이 list로 바뀐 전제. 구형이면 서비스에서 흡수)
+    knowledge_ids = _coerce_int_list(getattr(session, "knowledge_ids", None))
+
     db.commit()
     return PracticeSessionResponse(
         session_id=session.session_id,
         user_id=session.user_id,
         class_id=session.class_id,
         project_id=session.project_id,
-        knowledge_id=getattr(session, "knowledge_id", None),
+        knowledge_ids=knowledge_ids,
+        agent_id=getattr(session, "agent_id", None),
         title=session.title,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -409,7 +438,10 @@ def update_practice_session_settings(
     if "few_shot_example_ids" in payload:
         ids = payload.get("few_shot_example_ids") or []
         if not isinstance(ids, list):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="few_shot_example_ids_must_be_list")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="few_shot_example_ids_must_be_list",
+            )
         _validate_my_few_shot_example_ids(db, me=me, example_ids=[int(x) for x in ids])
 
     gen_patch = _extract_generation_patch(payload)
@@ -569,12 +601,6 @@ def create_practice_session_model(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    class/ModelCatalog 기준으로만 모델이 존재하도록 유지.
-    - 요청한 model_name이 class 허용 모델이면: 세션에 존재하도록 보장(sync) 후 해당 row 반환
-    - 요청에 generation_params가 있으면: 해당 모델에 merge 적용
-    - is_primary=True면 primary 변경
-    """
     session = ensure_my_session(db, session_id, me)
     if session.class_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
@@ -611,7 +637,6 @@ def create_practice_session_model(
         )
 
     db.commit()
-    # 최신 row 재조회(merge/primary 반영)
     refreshed = practice_session_model_crud.get(db, target.session_model_id)
     return PracticeSessionModelResponse.model_validate(refreshed or target)
 
@@ -691,7 +716,7 @@ def delete_practice_session_model(
 def run_practice_turn_new_session_endpoint(
     class_id: int = Query(..., ge=1, description="이 연습 세션이 속한 Class ID (partner.classes.id)"),
     project_id: int | None = Query(None, ge=1, description="새 세션 생성 시 연결할 Project ID (user.projects.project_id)"),
-    body: PracticeTurnRequest = Body(...),
+    body: PracticeTurnRequestNewSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
@@ -700,7 +725,7 @@ def run_practice_turn_new_session_endpoint(
         me=me,
         session_id=0,
         class_id=class_id,
-        project_id=project_id,
+        project_id=project_id,  # Query가 있으면 서비스에서 body.project_id보다 우선
         body=body,
     )
     db.commit()
@@ -716,7 +741,7 @@ def run_practice_turn_new_session_endpoint(
 )
 def run_practice_turn_endpoint(
     session_id: int = Path(..., ge=1, description="1 이상: 해당 세션에서 이어서 대화"),
-    body: PracticeTurnRequest = Body(...),
+    body: PracticeTurnRequestExistingSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
@@ -728,12 +753,13 @@ def run_practice_turn_endpoint(
             detail="session_has_no_class_id",
         )
 
+    # ✅ 기존 세션은 body에 agent/project/knowledge가 없고(prompt/model_names만)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
         session_id=session_id,
         class_id=session.class_id,
-        project_id=session.project_id,
+        project_id=None,  # 기존 세션은 세션 저장값 사용(검증도 생략)
         body=body,
     )
     db.commit()

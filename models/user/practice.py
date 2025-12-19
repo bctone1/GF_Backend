@@ -1,4 +1,5 @@
 # models/user/practice.py
+
 from sqlalchemy import (
     Column,
     BigInteger,
@@ -42,10 +43,11 @@ class PracticeSession(Base):
         nullable=True,
     )
 
-    knowledge_id = Column(
-        BigInteger,
-        ForeignKey("user.documents.knowledge_id", ondelete="SET NULL"),
-        nullable=True,
+    # knowledge_ids(JSON 배열)로 통일 [1, 2, 3]
+    knowledge_ids = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
     )
 
     # Agent 템플릿 연결
@@ -86,7 +88,12 @@ class PracticeSession(Base):
 
     __table_args__ = (
         Index("idx_practice_sessions_user", "user_id"),
-        Index("idx_practice_sessions_knowledge", "knowledge_id"),
+        # JSONB 배열 검색(@>, ? 등) 대비 GIN 인덱스
+        Index(
+            "idx_practice_sessions_knowledge_ids",
+            "knowledge_ids",
+            postgresql_using="gin",
+        ),
         Index("idx_practice_sessions_agent", "agent_id"),
         {"schema": "user"},
     )

@@ -44,6 +44,27 @@ def _coerce_dict(value: Any) -> dict[str, Any]:
     return dict(v) if isinstance(v, dict) else {}
 
 
+def _coerce_int_list(value: Any) -> list[int]:
+    """
+    JSONB(list[int]) 방어용
+    - None/비정상 타입이면 []
+    - int 캐스팅 실패는 스킵
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return []
+    out: list[int] = []
+    for x in value:
+        try:
+            ix = int(x)
+        except (TypeError, ValueError):
+            continue
+        if ix > 0:
+            out.append(ix)
+    return out
+
+
 def _normalize_generation_params_dict(v: dict[str, Any]) -> dict[str, Any]:
     """
     DB에는 max_completion_tokens 기준으로 맞추되,
@@ -52,25 +73,21 @@ def _normalize_generation_params_dict(v: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(v, dict):
         return {}
 
-    # dict(v)로 복사해서 side-effect 최소화
     out = dict(v)
 
     mct = out.get("max_completion_tokens")
     mt = out.get("max_tokens")
 
-    # max_tokens만 들어오면 max_completion_tokens로 승격
     if mct is None and mt is not None:
         out["max_completion_tokens"] = mt
         out["max_tokens"] = mt
         return out
 
-    # max_completion_tokens만 들어오면 max_tokens도 채움
     if mt is None and mct is not None:
         out["max_tokens"] = mct
         out["max_completion_tokens"] = mct
         return out
 
-    # 둘 다 있으면 max_completion_tokens 우선으로 동기화
     if mct is not None and mt is not None and mct != mt:
         out["max_tokens"] = mct
         out["max_completion_tokens"] = mct
@@ -89,12 +106,14 @@ class PracticeSessionCRUD:
         data: PracticeSessionCreate,
         user_id: int,
     ) -> PracticeSession:
+        knowledge_ids = _coerce_int_list(getattr(data, "knowledge_ids", None))
+
         obj = PracticeSession(
             user_id=user_id,
             class_id=data.class_id,
             project_id=data.project_id,
-            knowledge_id=data.knowledge_id,
-            agent_id=getattr(data, "agent_id", None),  # ✅ 추가
+            knowledge_ids=knowledge_ids,
+            agent_id=getattr(data, "agent_id", None),
             title=data.title,
             notes=data.notes,
         )
@@ -135,6 +154,9 @@ class PracticeSessionCRUD:
         values = {k: v for k, v in data.model_dump(exclude_unset=True).items()}
         if not values:
             return self.get(db, session_id)
+
+        if "knowledge_ids" in values:
+            values["knowledge_ids"] = _coerce_int_list(values.get("knowledge_ids"))
 
         stmt = (
             update(PracticeSession)
@@ -197,12 +219,11 @@ class PracticeSessionSettingCRUD:
                     style_preset=style_preset,
                     style_params=dict(style),
                     generation_params=gen,
-                    agent_snapshot=agent_snapshot,  # ✅ 추가
+                    agent_snapshot=agent_snapshot,
                 )
                 db.add(obj)
                 db.flush()
 
-                # (선택) 기본 few-shot 링크 세팅
                 if default_few_shot_example_ids:
                     for i, eid in enumerate(default_few_shot_example_ids):
                         db.add(
@@ -267,32 +288,27 @@ class PracticeSessionSettingCRUD:
         if not values:
             return row
 
-        # style_preset: replace
         if "style_preset" in values:
             row.style_preset = values.get("style_preset")
 
-        # style_params: merge
         if "style_params" in values:
             incoming_style = _coerce_dict(values.get("style_params"))
             base_style = dict(getattr(row, "style_params", None) or {})
             base_style.update(incoming_style)
             row.style_params = base_style
 
-        # generation_params: merge (token key normalize 포함)
         if "generation_params" in values:
             incoming_gen = _normalize_generation_params_dict(_coerce_dict(values.get("generation_params")))
             base_gen = _normalize_generation_params_dict(dict(getattr(row, "generation_params", None) or {}))
             base_gen.update(incoming_gen)
             row.generation_params = _normalize_generation_params_dict(base_gen)
 
-        # agent_snapshot: merge
         if "agent_snapshot" in values:
             incoming_snap = _coerce_dict(values.get("agent_snapshot"))
             base_snap = dict(getattr(row, "agent_snapshot", None) or {})
             base_snap.update(incoming_snap)
             row.agent_snapshot = base_snap
 
-        # few_shot_example_ids: replace
         if "few_shot_example_ids" in values:
             ids = values.get("few_shot_example_ids") or []
             if not isinstance(ids, list):
