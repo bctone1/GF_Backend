@@ -333,11 +333,12 @@ class _PracticeTurnBase(ORMBase):
     )
 
 
+
 class PracticeTurnRequestNewSession(_PracticeTurnBase):
     """
     POST /sessions/run
     - 새 세션 생성 + 첫 턴
-    - agent_id / project_id / knowledge_ids는 여기서만 받는다.
+    - agent_id / project_id / knowledge_ids + (settings 튜닝 값들)까지 받는다.
     """
     agent_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
     project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
@@ -348,12 +349,31 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
         description="새 세션에서만 설정되는 지식베이스 ID 목록",
     )
 
+    style_preset: Optional[StylePreset] = Field(
+        default=None,
+        description="스타일 프리셋(accurate/balanced/creative/custom 등)",
+    )
+    style_params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="스타일 상세 옵션(형식/persona/힌트모드/self-check 등)",
+    )
 
+    generation_params: Optional[GenerationParams] = Field(
+        default=None,
+        description="LLM 생성 파라미터(temperature/top_p/max_completion_tokens 등)",
+    )
+
+    few_shot_example_ids: Optional[List[int]] = Field(
+        default=None,
+        description="유저 few-shot 라이브러리(example_id)에서 선택한 ID 목록",
+    )
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeTurnRequestNewSession":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
         return self
+
 
 
 class PracticeTurnRequestExistingSession(_PracticeTurnBase):
