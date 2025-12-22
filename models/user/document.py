@@ -20,7 +20,7 @@ from pgvector.sqlalchemy import Vector
 
 from models.base import Base
 
-EMBEDDING_DIM_FIXED = 1536    # postgreSQL 현재 1536만 됨 small model고정
+EMBEDDING_DIM_FIXED = 1536  # postgreSQL 현재 1536만 됨 small model고정
 KB_SCORE_TYPE_FIXED = "cosine_similarity"  # 유사도 기반으로 고정
 
 
@@ -48,6 +48,7 @@ class Document(Base):
         server_default=text("'uploading'"),
     )
 
+    # NOTE: chunk_count는 "검색용(child) 청크 수"로 유지 권장
     chunk_count = Column(Integer, nullable=False, server_default=text("0"))
 
     # 진행률 (0~100)
@@ -125,17 +126,35 @@ class DocumentIngestionSetting(Base):
         primary_key=True,
     )
 
+    # -------------------------
+    # chunking (child 기준)
+    # -------------------------
     chunk_size = Column(Integer, nullable=False)
     chunk_overlap = Column(Integer, nullable=False)
     max_chunks = Column(Integer, nullable=False)
     chunk_strategy = Column(Text, nullable=False)
 
+    # -------------------------
+    # parent-child 확장 옵션
+    # - 일반 모드: chunking_mode='general', segment_separator NULL 가능
+    # - 부모-자식: chunking_mode='parent_child', segment_separator 사용 + parent_* 사용
+    # -------------------------
+    chunking_mode = Column(Text, nullable=False, server_default=text("'general'"))  # general | parent_child
+    segment_separator = Column(Text, nullable=True)  # 예: '\n\n', '#h#h', '## '
+
+    parent_chunk_size = Column(Integer, nullable=True)
+    parent_chunk_overlap = Column(Integer, nullable=True)
+
+    # -------------------------
+    # embedding
+    # -------------------------
     embedding_provider = Column(Text, nullable=False)
     embedding_model = Column(Text, nullable=False)
 
     # 정합성 강제: 1536 차원 only
     embedding_dim = Column(Integer, nullable=False, server_default=text(str(EMBEDDING_DIM_FIXED)))
 
+    # 전처리 옵션/기타 확장
     extra = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -156,6 +175,23 @@ class DocumentIngestionSetting(Base):
         CheckConstraint(
             f"embedding_dim = {EMBEDDING_DIM_FIXED}",
             name="chk_doc_ingest_embedding_dim_fixed_1536",
+        ),
+        CheckConstraint(
+            "chunking_mode IN ('general', 'parent_child')",
+            name="chk_doc_ingest_chunking_mode_enum",
+        ),
+        # parent_* 정합성
+        CheckConstraint(
+            "(parent_chunk_overlap IS NULL OR parent_chunk_overlap >= 0)",
+            name="chk_doc_ingest_parent_overlap_ge_0_or_null",
+        ),
+        CheckConstraint(
+            "(parent_chunk_size IS NULL OR parent_chunk_size >= 1)",
+            name="chk_doc_ingest_parent_size_ge_1_or_null",
+        ),
+        CheckConstraint(
+            "(parent_chunk_size IS NULL OR parent_chunk_overlap IS NULL OR parent_chunk_overlap < parent_chunk_size)",
+            name="chk_doc_ingest_parent_overlap_lt_size_or_null",
         ),
         {"schema": "user"},
     )
@@ -284,11 +320,26 @@ class DocumentChunk(Base):
         nullable=True,
     )
 
-    chunk_index = Column(Integer, nullable=False)  # 1부터
+    # parent-child 확장
+    chunk_level = Column(Text, nullable=False, server_default=text("'child'"))  # child | parent
+    parent_chunk_id = Column(
+        BigInteger,
+        ForeignKey("user.document_chunks.chunk_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    segment_index = Column(Integer, nullable=False, server_default=text("1"))  # 1부터 (일반 모드=1 고정)
+    chunk_index_in_segment = Column(Integer, nullable=True)  # 1부터 (child에서만 채우기 권장)
+
+    # 문서 전체에서 증가하는 인덱스 (기존 유지)
+    # - 일반 모드: child만 존재 -> 1..N
+    # - 부모-자식 모드: child에서만 1..N, parent는 NULL 허용
+    chunk_index = Column(Integer, nullable=True)
     chunk_text = Column(Text, nullable=False)
 
-    # 벡터 차원 고정(정합성: ingestion_setting.embedding_dim == 1536 강제)
-    vector_memory = Column(Vector(EMBEDDING_DIM_FIXED), nullable=False)
+    # 벡터 차원 고정
+    # - child: NOT NULL
+    # - parent: NULL (권장)
+    vector_memory = Column(Vector(EMBEDDING_DIM_FIXED), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
@@ -296,10 +347,54 @@ class DocumentChunk(Base):
     page = relationship("DocumentPage", back_populates="chunks", passive_deletes=True)
 
     __table_args__ = (
-        CheckConstraint("chunk_index >= 1", name="chk_document_chunks_index_ge_1"),
+        CheckConstraint(
+            "chunk_level IN ('child', 'parent')",
+            name="chk_document_chunks_level_enum",
+        ),
+        # 인덱스 정합성
+        CheckConstraint(
+            "(chunk_level = 'parent' AND chunk_index IS NULL) OR (chunk_level = 'child' AND chunk_index IS NOT NULL)",
+            name="chk_document_chunks_global_index_by_level",
+        ),
+        CheckConstraint(
+            "(chunk_index IS NULL OR chunk_index >= 1)",
+            name="chk_document_chunks_index_ge_1_or_null",
+        ),
+        CheckConstraint(
+            "segment_index >= 1",
+            name="chk_document_chunks_segment_index_ge_1",
+        ),
+        CheckConstraint(
+            "(chunk_index_in_segment IS NULL OR chunk_index_in_segment >= 1)",
+            name="chk_document_chunks_index_in_segment_ge_1_or_null",
+        ),
+        # parent-child 관계 정합성
+        CheckConstraint(
+            "(chunk_level = 'child' AND parent_chunk_id IS NOT NULL) OR (chunk_level = 'parent' AND parent_chunk_id IS NULL) "
+            "OR (chunk_level = 'child' AND parent_chunk_id IS NULL)",  # 일반모드(child 단일) 허용
+            name="chk_document_chunks_parent_ref_allowed",
+        ),
+        # 벡터 정합성: child는 벡터 필수, parent는 벡터 비움(권장)
+        CheckConstraint(
+            "(chunk_level = 'child' AND vector_memory IS NOT NULL) OR (chunk_level = 'parent' AND vector_memory IS NULL)",
+            name="chk_document_chunks_vector_by_level",
+        ),
+        # 문서 내 글로벌 인덱스 unique (NULL 여러 개 허용 -> parent 여러 개 OK)
         UniqueConstraint("knowledge_id", "chunk_index", name="uq_document_chunks_doc_idx"),
+        # 세그먼트 내 인덱스 unique (parent/child 포함해서 충돌 방지)
+        UniqueConstraint(
+            "knowledge_id",
+            "chunk_level",
+            "segment_index",
+            "chunk_index_in_segment",
+            name="uq_document_chunks_doc_level_segment_idx",
+        ),
+        Index("idx_document_chunks_doc_level_segment", "knowledge_id", "chunk_level", "segment_index"),
+        Index("idx_document_chunks_doc_parent", "knowledge_id", "parent_chunk_id"),
         Index("idx_document_chunks_doc_index", "knowledge_id", "chunk_index"),
         Index("idx_document_chunks_doc_page", "knowledge_id", "page_id"),
+        # NOTE: ivfflat 인덱스는 vector_memory NULL 허용이어도 생성 가능하지만,
+        #       쿼리는 child만 대상으로 걸도록(WHERE chunk_level='child') 구성 권장.
         Index(
             "idx_document_chunks_vec_ivfflat",
             "vector_memory",
