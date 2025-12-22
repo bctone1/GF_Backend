@@ -1,7 +1,7 @@
 # service/user/practice.py
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Callable
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -11,7 +11,6 @@ from core import config
 from langchain_service.embedding.get_vector import texts_to_vectors
 from langchain_service.llm.runner import generate_session_title_llm
 from langchain_service.llm.setup import call_llm_chat
-from langchain_core.runnables import RunnableLambda, RunnablePassthrough
 
 from crud.user.document import document_crud, document_chunk_crud
 from crud.user.practice import (
@@ -44,6 +43,8 @@ from schemas.user.practice import (
     PracticeTurnResponse,
 )
 
+from langchain_service.chain.qa_chain import make_qa_chain
+
 
 # =========================================
 # helpers
@@ -61,6 +62,7 @@ def _coerce_int_list(value: Any) -> list[int]:
             continue
         if ix > 0:
             out.append(ix)
+
     # 중복 제거(입력 순서 유지)
     seen: set[int] = set()
     uniq: list[int] = []
@@ -161,7 +163,42 @@ def _get_default_generation_params() -> Dict[str, Any]:
 def _is_enabled_runtime_model(model_key: str) -> bool:
     practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
     conf = practice_models.get(model_key)
-    return isinstance(conf, dict) and conf.get("enabled") is True
+    if not isinstance(conf, dict):
+        return False
+    return conf.get("enabled", True) is True
+
+
+def _resolve_runtime_model(model_key: str) -> tuple[str | None, str, dict[str, Any]]:
+    """
+    runtime config(PRACTICE_MODELS) 기준으로
+    - provider / 실제 model_name
+    - 모델별 default generation override(temperature/top_p/max_tokens 등)
+    를 반환.
+    """
+    practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
+    conf = practice_models.get(model_key)
+
+    if not isinstance(conf, dict):
+        raise HTTPException(status_code=400, detail=f"model_not_configured_in_runtime_config: {model_key}")
+
+    if conf.get("enabled", True) is False:
+        raise HTTPException(status_code=400, detail=f"model_not_enabled_in_runtime_config: {model_key}")
+
+    provider = conf.get("provider")
+    real_model = conf.get("model_name", model_key)
+
+    defaults: dict[str, Any] = {}
+    if "temperature" in conf:
+        defaults["temperature"] = conf.get("temperature")
+    if "top_p" in conf:
+        defaults["top_p"] = conf.get("top_p")
+
+    mt = conf.get("max_output_tokens") or conf.get("max_completion_tokens") or conf.get("max_tokens")
+    if isinstance(mt, int) and mt > 0:
+        defaults["max_completion_tokens"] = mt
+        defaults["max_tokens"] = mt
+
+    return provider, real_model, defaults
 
 
 def _has_any_response(db: Session, *, session_id: int) -> bool:
@@ -258,98 +295,121 @@ def _embed_question_to_vector(question: str) -> list[float]:
 
 
 # =========================================
-# 지식베이스(knowledge_ids) 컨텍스트 빌더
+# (RAG) retrieve_fn for qa_chain
+# - stage1에서 retrieve가 "보이게" 하기 위한 콜백
 # =========================================
-def _build_context_from_knowledges(
-    db: Session,
-    user: AppUser,
-    knowledge_ids: List[int],
-    question: str,
-    max_chunks: int = 10,
-) -> str:
-    knowledge_ids = _coerce_int_list(knowledge_ids)
-    if not knowledge_ids:
-        return ""
+def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., Any]:
+    def _retrieve(
+        *,
+        knowledge_ids: List[int] | None = None,
+        query: str | None = None,
+        top_k: int | None = None,
+        threshold: float | None = None,
+        raw: dict | None = None,
+        **_: Any,
+    ) -> Dict[str, Any]:
+        kids = _coerce_int_list(knowledge_ids or [])
+        q = (query or "").strip()
+        if not kids or not q:
+            return {"context": "", "sources": []}
 
-    query_vector = _embed_question_to_vector(question)
-    if not query_vector:
-        return ""
+        max_chunks = int(top_k) if isinstance(top_k, int) and top_k > 0 else 10
 
-    valid_docs: list[Any] = []
+        query_vector = _embed_question_to_vector(q)
+        if not query_vector:
+            return {"context": "", "sources": []}
 
-    for kid in knowledge_ids:
-        try:
-            doc = document_crud.get(db, knowledge_id=kid)
-        except Exception:
-            doc = None
+        # validate docs ownership
+        valid_docs: list[Any] = []
+        for kid in kids:
+            try:
+                doc = document_crud.get(db, knowledge_id=kid)
+            except Exception:
+                doc = None
 
-        if not doc:
-            continue
+            if not doc:
+                continue
 
-        owner_id = (
-            getattr(doc, "owner_id", None)
-            or getattr(doc, "user_id", None)
-            or getattr(doc, "owner_user_id", None)
-        )
-        if owner_id is not None and owner_id != user.user_id:
-            continue
-
-        real_kid = getattr(doc, "knowledge_id", None)
-        if real_kid is None:
-            continue
-
-        valid_docs.append(doc)
-
-    if not valid_docs:
-        return ""
-
-    per_doc_top_k = max(1, max_chunks // len(valid_docs))
-
-    chunks: list[Any] = []
-    for doc in valid_docs:
-        kid = getattr(doc, "knowledge_id", None)
-        if kid is None:
-            continue
-
-        try:
-            doc_chunks = document_chunk_crud.search_by_vector(
-                db,
-                query_vector=query_vector,
-                knowledge_id=kid,
-                top_k=per_doc_top_k,
+            owner_id = (
+                getattr(doc, "owner_id", None)
+                or getattr(doc, "user_id", None)
+                or getattr(doc, "owner_user_id", None)
             )
-        except Exception:
-            doc_chunks = []
+            if owner_id is not None and owner_id != me.user_id:
+                continue
 
-        if doc_chunks:
-            chunks.extend(doc_chunks)
+            real_kid = getattr(doc, "knowledge_id", None)
+            if real_kid is None:
+                continue
 
-    if not chunks:
-        return ""
+            valid_docs.append(doc)
 
-    chunks = chunks[:max_chunks]
+        if not valid_docs:
+            return {"context": "", "sources": []}
 
-    texts: List[str] = []
-    for c in chunks:
-        chunk_text = (
-            getattr(c, "chunk_text", None)
-            or getattr(c, "text", None)
-            or getattr(c, "content", None)
+        per_doc_top_k = max(1, max_chunks // len(valid_docs))
+
+        chunks: list[Any] = []
+        for doc in valid_docs:
+            kid = getattr(doc, "knowledge_id", None)
+            if kid is None:
+                continue
+            try:
+                doc_chunks = document_chunk_crud.search_by_vector(
+                    db,
+                    query_vector=query_vector,
+                    knowledge_id=kid,
+                    top_k=per_doc_top_k,
+                )
+            except Exception:
+                doc_chunks = []
+
+            if doc_chunks:
+                chunks.extend(doc_chunks)
+
+        if not chunks:
+            return {"context": "", "sources": []}
+
+        chunks = chunks[:max_chunks]
+
+        texts: List[str] = []
+        sources: List[Dict[str, Any]] = []
+        for c in chunks:
+            chunk_text = (
+                getattr(c, "chunk_text", None)
+                or getattr(c, "text", None)
+                or getattr(c, "content", None)
+            )
+
+            if chunk_text:
+                t = str(chunk_text)
+                texts.append(t)
+
+            sources.append(
+                {
+                    "knowledge_id": getattr(c, "knowledge_id", None),
+                    "chunk_id": getattr(c, "chunk_id", None) or getattr(c, "id", None),
+                    "score": getattr(c, "score", None) or getattr(c, "similarity", None),
+                    "preview": (str(chunk_text)[:200] if chunk_text else ""),
+                }
+            )
+
+        if not texts:
+            return {"context": "", "sources": []}
+
+        context_body = "\n\n".join(texts)
+        context = (
+            "다음은 사용자가 업로드한 참고 문서 중에서, "
+            "질문과 가장 관련도가 높은 일부 발췌 내용입니다.\n\n"
+            f"{context_body}\n\n"
+            "위 내용을 참고해서 아래 질문에 답변해 주세요."
         )
-        if chunk_text:
-            texts.append(str(chunk_text))
 
-    if not texts:
-        return ""
+        _ = raw
+        _ = threshold  # 현재 search_by_vector에 직접 적용은 안 하니 meta로만
+        return {"context": context, "sources": sources}
 
-    context_body = "\n\n".join(texts)
-
-    return (
-        "다음은 사용자가 업로드한 참고 문서 중에서, "
-        "질문과 가장 관련도가 높은 일부 발췌 내용입니다.\n\n"
-        f"{context_body}\n\n"
-        "위 내용을 참고해서 아래 질문에 답변해 주세요."
-    )
+    return _retrieve
 
 
 # =========================================
@@ -558,133 +618,6 @@ def init_models_for_session_from_class(
     return created
 
 
-def _call_llm_for_model(
-    model_name: str,
-    prompt_text: str,
-    generation_params: Dict[str, Any] | None = None,
-) -> tuple[str, Dict[str, Any] | None, int | None]:
-    practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
-    model_conf = practice_models.get(model_name) or {}
-
-    provider: str | None = None
-    real_model_name: str = model_name
-
-    temperature: float | None = 0.7
-    top_p: float | None = 1.0
-    conf_max_tokens: int | None = None
-
-    if isinstance(model_conf, dict):
-        if not model_conf.get("enabled", True):
-            raise ValueError(f"unsupported or disabled model_name: {model_name}")
-
-        provider = model_conf.get("provider")
-        real_model_name = model_conf.get("model_name", model_name)
-
-        if "temperature" in model_conf:
-            temperature = model_conf.get("temperature")
-        if "top_p" in model_conf:
-            top_p = model_conf.get("top_p")
-
-        mt = model_conf.get("max_output_tokens") or model_conf.get("max_completion_tokens") or model_conf.get("max_tokens")
-        if isinstance(mt, int) and mt > 0:
-            conf_max_tokens = mt
-
-    default_gen = _normalize_generation_params_dict(getattr(config, "PRACTICE_DEFAULT_GENERATION", {}) or {})
-    length_presets: Dict[str, int] = getattr(config, "RESPONSE_LENGTH_PRESETS", {}) or {}
-
-    base_params: Dict[str, Any] = {
-        "temperature": temperature,
-        "top_p": top_p,
-        "response_length_preset": default_gen.get("response_length_preset", None),
-    }
-    for k, v in default_gen.items():
-        if v is not None:
-            base_params[k] = v
-
-    if conf_max_tokens is not None:
-        base_params["max_completion_tokens"] = conf_max_tokens
-        base_params["max_tokens"] = conf_max_tokens
-
-    gp: Dict[str, Any] = generation_params if isinstance(generation_params, dict) else {}
-    effective: Dict[str, Any] = _normalize_generation_params_dict({**base_params, **gp})
-
-    preset = effective.get("response_length_preset")
-    if preset in length_presets and preset != "custom":
-        mt2 = int(length_presets[preset])
-        effective["max_completion_tokens"] = mt2
-        effective["max_tokens"] = mt2
-    elif preset == "custom":
-        effective = _normalize_generation_params_dict(effective)
-    else:
-        if effective.get("max_completion_tokens") is not None:
-            effective["response_length_preset"] = "custom"
-
-    final_temperature = effective.get("temperature", 0.7)
-    final_top_p = effective.get("top_p", 1.0)
-    final_max_tokens = effective.get("max_completion_tokens") or effective.get("max_tokens")
-
-    # ---- 여기부터 Runnable로 구성 ----
-    sys_prompt = effective.get("system_prompt")
-    sys_prompt = sys_prompt.strip() if isinstance(sys_prompt, str) and sys_prompt.strip() else ""
-
-    # few-shot 정규화(list[dict])로 통일
-    fs_list: list[dict[str, str]] = []
-    few_shot_raw = effective.get("few_shot_examples")
-    if isinstance(few_shot_raw, list):
-        for ex in few_shot_raw:
-            if isinstance(ex, dict):
-                it = (ex.get("input") or "").strip()
-                ot = (ex.get("output") or "").strip()
-            else:
-                it = (getattr(ex, "input", "") or "").strip()
-                ot = (getattr(ex, "output", "") or "").strip()
-            fs_list.append({"input": it, "output": ot})
-
-    def _build_messages(x: dict) -> list[dict[str, str]]:
-        msgs: list[dict[str, str]] = []
-        if sys_prompt:
-            msgs.append({"role": "system", "content": sys_prompt})
-
-        for ex in fs_list:
-            it = (ex.get("input") or "").strip()
-            ot = (ex.get("output") or "").strip()
-            if it:
-                msgs.append({"role": "user", "content": it})
-            if ot:
-                msgs.append({"role": "assistant", "content": ot})
-
-        msgs.append({"role": "user", "content": str(x.get("prompt_text", "") or "")})
-        return msgs
-
-    def _call(messages: list[dict[str, str]]):
-        return call_llm_chat(
-            messages=messages,
-            provider=provider,
-            model=real_model_name,
-            temperature=final_temperature,
-            max_tokens=final_max_tokens,
-            top_p=final_top_p,
-        )
-
-    def _normalize(res) -> tuple[str, Dict[str, Any] | None, int | None]:
-        return (
-            str(getattr(res, "text", "") or ""),
-            getattr(res, "token_usage", None),
-            getattr(res, "latency_ms", None),
-        )
-
-    chain = (
-        RunnablePassthrough.assign(prompt_text=lambda x: x.get("prompt_text"))
-        | RunnableLambda(_build_messages)
-        | RunnableLambda(_call)
-        | RunnableLambda(_normalize)
-    )
-
-    response_text, token_usage, latency_ms = chain.invoke({"prompt_text": prompt_text})
-    return response_text, token_usage, latency_ms
-
-
-
 # =========================================
 # 멀티 모델 Practice 턴 실행
 # =========================================
@@ -701,8 +634,9 @@ def run_practice_turn(
         raise HTTPException(status_code=403, detail="session not owned by user")
 
     settings = ensure_session_settings(db, session_id=session.session_id)
-    session_base_gen = _normalize_generation_params_dict(getattr(settings, "generation_params", None) or {})
 
+    # ---- 세션/에이전트/모델 파라미터 우선순위 유지 ----
+    session_base_gen = _normalize_generation_params_dict(getattr(settings, "generation_params", None) or {})
     agent_snapshot = getattr(settings, "agent_snapshot", None) or {}
     agent_gen = agent_snapshot.get("generation_params") if isinstance(agent_snapshot, dict) else {}
     agent_gen = _normalize_generation_params_dict(agent_gen) if isinstance(agent_gen, dict) else {}
@@ -713,15 +647,24 @@ def run_practice_turn(
         me=user,
     )
 
-    context_text = ""
+    # ---- style preset 결정 (qa_chain factory 파라미터로 전달) ----
+    style_key = getattr(settings, "style_preset", None) or "friendly"
+
+    # ---- retrieve_fn을 체인에 주입 (stage1에서 retrieve가 보이게) ----
+    retrieve_fn = _make_retrieve_fn_for_practice(db, user)
+
+    chain = make_qa_chain(
+        call_llm_chat=call_llm_chat,
+        retrieve_fn=retrieve_fn,
+        context_text="",
+        policy_flags=None,
+        style=style_key,
+        max_ctx_chars=12000,
+        streaming=False,
+        chain_version="qa_chain_20251219",
+    )
+
     kids = _coerce_int_list(knowledge_ids)
-    if kids:
-        context_text = _build_context_from_knowledges(
-            db=db,
-            user=user,
-            knowledge_ids=kids,
-            question=prompt_text,
-        )
 
     results: List[PracticeTurnModelResult] = []
 
@@ -729,45 +672,94 @@ def run_practice_turn(
         if m.session_id != session.session_id:
             raise HTTPException(status_code=400, detail="session_model does not belong to given session")
 
-        full_prompt = f"{context_text}\n\n질문: {prompt_text}" if context_text else prompt_text
-
         model_gp = _normalize_generation_params_dict(getattr(m, "generation_params", None) or {})
 
         # 우선순위: settings(base) -> agent_snapshot(gen) -> model(gen)
-        effective_gp: Dict[str, Any] = _normalize_generation_params_dict({**session_base_gen, **agent_gen, **model_gp})
+        effective_gp_full: Dict[str, Any] = _normalize_generation_params_dict(
+            {**session_base_gen, **agent_gen, **model_gp}
+        )
 
         # agent_snapshot의 system_prompt/few_shot_examples는 "없을 때만" 주입
         if isinstance(agent_snapshot, dict):
             for k in ("system_prompt", "few_shot_examples"):
-                if k in agent_snapshot and not effective_gp.get(k):
-                    effective_gp[k] = agent_snapshot.get(k)
+                if k in agent_snapshot and not effective_gp_full.get(k):
+                    effective_gp_full[k] = agent_snapshot.get(k)
 
-        # 모델이 직접 few_shot_examples를 안 갖고 있으면 settings 선택분 주입
-        if not effective_gp.get("few_shot_examples") and selected_few_shots:
-            effective_gp["few_shot_examples"] = selected_few_shots
+        if not effective_gp_full.get("few_shot_examples") and selected_few_shots:
+            effective_gp_full["few_shot_examples"] = selected_few_shots
 
         # few-shot meta(rule) -> system_prompt로 강제
-        sys_from_fs = _derive_system_prompt_from_few_shots(effective_gp.get("few_shot_examples"))
+        sys_from_fs = _derive_system_prompt_from_few_shots(effective_gp_full.get("few_shot_examples"))
         if sys_from_fs:
-            prev = effective_gp.get("system_prompt")
+            prev = effective_gp_full.get("system_prompt")
             if isinstance(prev, str) and prev.strip():
-                effective_gp["system_prompt"] = prev.strip() + "\n\n" + sys_from_fs
+                effective_gp_full["system_prompt"] = prev.strip() + "\n\n" + sys_from_fs
             else:
-                effective_gp["system_prompt"] = sys_from_fs
+                effective_gp_full["system_prompt"] = sys_from_fs
 
-        response_text, token_usage, latency_ms = _call_llm_for_model(
-            model_name=m.model_name,
-            prompt_text=full_prompt,
-            generation_params=effective_gp,
-        )
+        # ---- qa_chain 계약에 맞게 분리 ----
+        style_params = dict(getattr(settings, "style_params", None) or {})
+        sys_prompt = effective_gp_full.get("system_prompt")
+        if isinstance(sys_prompt, str) and sys_prompt.strip():
+            style_params["system_prompt"] = sys_prompt.strip()
+
+        few_shots = effective_gp_full.get("few_shot_examples")
+        few_shots = few_shots if isinstance(few_shots, list) else []
+
+        gen_params = dict(effective_gp_full)
+        gen_params.pop("system_prompt", None)
+        gen_params.pop("few_shot_examples", None)
+
+        # ---- 런타임 provider/real_model + defaults 매핑 ----
+        provider, real_model, runtime_defaults = _resolve_runtime_model(m.model_name)
+
+        # runtime_defaults는 "없을 때만" 주입
+        for k, v in runtime_defaults.items():
+            if gen_params.get(k) is None and v is not None:
+                gen_params[k] = v
+        gen_params = _normalize_generation_params_dict(gen_params)
+
+        # ---- stage0 입력 dict 만들기 ----
+        chain_in: Dict[str, Any] = {
+            "prompt": prompt_text,
+            "history": [],  # TODO: PracticeResponse 기반으로 대화 히스토리 재구성
+            "session_id": session.session_id,
+            "class_id": session.class_id,
+            "knowledge_ids": kids,
+            "style_params": style_params,
+            "generation_params": gen_params,
+            "model_names": [real_model],  # 실제 호출 모델
+            "few_shot_examples": few_shots,
+            "trace": {"chain_version": "qa_chain_20251219", "logical_model_name": m.model_name},
+        }
+        if provider:
+            chain_in["provider"] = provider
+
+        out = chain.invoke(chain_in)  # FinalOut
+
+        response_text = out["text"]
+        latency_ms = out.get("latency_ms")
+
+        # token_usage 포맷 보존 + gf 메타 추가
+        raw_usage = out.get("token_usage")
+        if isinstance(raw_usage, dict):
+            token_usage: Dict[str, Any] = dict(raw_usage)
+        else:
+            token_usage = {"raw": raw_usage}
+
+        token_usage["_gf"] = {
+            "retrieval": out.get("retrieval"),
+            "sources": out.get("sources"),
+            "runtime_model": out.get("model_name"),
+        }
 
         resp = practice_response_crud.create(
             db,
             PracticeResponseCreate(
                 session_model_id=m.session_model_id,
                 session_id=session.session_id,
-                model_name=m.model_name,
-                prompt_text=prompt_text,
+                model_name=m.model_name,  # 논리 모델명 유지
+                prompt_text=prompt_text,  # 원 질문만 저장
                 response_text=response_text,
                 token_usage=token_usage,
                 latency_ms=latency_ms,
@@ -785,10 +777,11 @@ def run_practice_turn(
                 latency_ms=resp.latency_ms,
                 created_at=resp.created_at,
                 is_primary=m.is_primary,
-                generation_params=effective_gp,
+                generation_params=effective_gp_full,
             )
         )
 
+    # 세션 제목 생성 로직 유지
     if not session.title and results:
         primary = next((r for r in results if r.is_primary), results[0])
         title = generate_session_title_llm(
@@ -856,7 +849,6 @@ def run_practice_turn_for_session(
             raise HTTPException(status_code=400, detail="class_id_required")
 
         if not isinstance(body, PracticeTurnRequestNewSession):
-            # 방어: 라우팅/타이핑 실수 방지
             raise HTTPException(status_code=400, detail="invalid_body_for_new_session")
 
         requested_project_id = project_id if project_id is not None else body.project_id
@@ -903,7 +895,6 @@ def run_practice_turn_for_session(
 
     else:
         if not isinstance(body, PracticeTurnRequestExistingSession):
-            # 방어: 라우팅/타이핑 실수 방지
             raise HTTPException(status_code=400, detail="invalid_body_for_existing_session")
 
         session = ensure_my_session(db, session_id, me)
@@ -934,7 +925,6 @@ def run_practice_turn_for_session(
             class_id=class_id,
         )
 
-        # project_id는 "요청 파라미터"로만 검증
         if project_id is not None and session.project_id is not None and session.project_id != project_id:
             raise HTTPException(status_code=400, detail="요청한 project_id와 세션의 project_id가 일치하지 않습니다.")
 

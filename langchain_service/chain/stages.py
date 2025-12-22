@@ -122,7 +122,7 @@ def _coerce_generation_params(gen: Any, style_params: Mapping[str, Any]) -> Dict
     gen.pop("max_tokens", None)
     gen.pop("max_output_tokens", None)
 
-    # (선택) temperature/top_p 캐스팅
+    # 택) temperature/top_p 캐스팅
     if "temperature" in gen and gen["temperature"] is not None:
         try:
             gen["temperature"] = float(gen["temperature"])
@@ -195,7 +195,7 @@ def normalize_input(inp: Any) -> Dict[str, Any]:
     """
     입력이 뭐가 오든 stage0 계약 dict로 정리.
     - knowledge_ids 정리
-    - generation_params 키 정규화(여기서만!)
+    - generation_params 키 정규화(여기서만)
     """
     # str이 들어오면 prompt로 간주
     if isinstance(inp, str):

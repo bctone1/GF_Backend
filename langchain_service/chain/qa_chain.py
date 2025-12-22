@@ -46,7 +46,6 @@ from langchain_service.chain.contracts import (
 def make_qa_chain(
     *,
     call_llm_chat: Callable[..., Any],
-    # (선택) RAG retrieve 함수 주입 (knowledge_ids 기반 검색을 체인 단계로 노출하기 위함)
     retrieve_fn: Optional[Callable[..., Any]] = None,
     # (레거시/호환) 외부에서 만든 context_text가 있으면 stage1 fallback으로 사용
     context_text: str = "",
