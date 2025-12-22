@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, func
 
 from core.deps import get_db, get_current_user
-from core import config
+
 from models.user.account import AppUser
 from models.user.practice import (
     PracticeSessionSetting,
@@ -53,13 +53,17 @@ from schemas.user.practice import (
     UserFewShotExampleResponse,
 )
 
-from service.user.practice import (
+from service.user.practice.ownership import (
     ensure_my_session,
     ensure_my_session_model,
     ensure_my_response,
-    set_primary_model_for_session,
+)
+from service.user.practice.ids import coerce_int_list
+from service.user.practice.params import normalize_generation_params_dict
+from service.user.practice.models_sync import init_models_for_session_from_class
+from service.user.practice.orchestrator import (
     run_practice_turn_for_session,
-    init_models_for_session_from_class,
+    ensure_session_settings,
 )
 
 router = APIRouter()
@@ -68,83 +72,15 @@ router = APIRouter()
 # =========================================================
 # helpers
 # =========================================================
-def _coerce_int_list(value: Any) -> list[int]:
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        return []
-    out: list[int] = []
-    for x in value:
-        try:
-            ix = int(x)
-        except (TypeError, ValueError):
-            continue
-        if ix > 0:
-            out.append(ix)
-    # 중복 제거(입력 순서 유지)
-    seen: set[int] = set()
-    uniq: list[int] = []
-    for ix in out:
-        if ix not in seen:
-            seen.add(ix)
-            uniq.append(ix)
-    return uniq
-
-
-def _normalize_generation_params_dict(v: Any) -> dict[str, Any]:
-    """
-    max_completion_tokens 기준으로 키 혼용을 정규화.
-    """
-    if not isinstance(v, dict):
-        return {}
-
-    out = dict(v)
-    mct = out.get("max_completion_tokens")
-    mt = out.get("max_tokens")
-    mot = out.get("max_output_tokens")
-
-    if mct is None and isinstance(mot, int) and mot > 0:
-        out["max_completion_tokens"] = mot
-        out["max_tokens"] = mot
-        return out
-
-    if mct is None and isinstance(mt, int) and mt > 0:
-        out["max_completion_tokens"] = mt
-        out["max_tokens"] = mt
-        return out
-
-    if mt is None and isinstance(mct, int) and mct > 0:
-        out["max_tokens"] = mct
-        out["max_completion_tokens"] = mct
-        return out
-
-    if isinstance(mct, int) and mct > 0 and isinstance(mt, int) and mt > 0 and mct != mt:
-        out["max_tokens"] = mct
-        out["max_completion_tokens"] = mct
-
-    return out
-
-
 def _coerce_dict(value: Any) -> dict[str, Any]:
     if hasattr(value, "model_dump"):
         value = value.model_dump(exclude_unset=True)
     return dict(value) if isinstance(value, dict) else {}
 
 
-def _get_default_generation_params_dict() -> dict:
-    base = getattr(config, "PRACTICE_DEFAULT_GENERATION", None)
-    if isinstance(base, dict):
-        return _normalize_generation_params_dict(dict(base))
-    return {}
-
-
 def _ensure_session_settings_row(db: Session, *, session_id: int) -> PracticeSessionSetting:
-    default_gen = _get_default_generation_params_dict()
-    return practice_session_setting_crud.get_or_create_default(
-        db,
-        session_id=session_id,
-        default_generation_params=default_gen,
-    )
+    # orchestrator의 ensure를 사용(세션당 1개 보장)
+    return ensure_session_settings(db, session_id=session_id)
 
 
 def _get_settings_with_links(db: Session, *, session_id: int) -> PracticeSessionSetting:
@@ -164,6 +100,44 @@ def _get_settings_with_links(db: Session, *, session_id: int) -> PracticeSession
     if row:
         return row
     return _ensure_session_settings_row(db, session_id=session_id)
+
+
+def set_primary_model_for_session(
+    db: Session,
+    *,
+    me: AppUser | None,
+    session_id: int,
+    target_session_model_id: int,
+):
+    """
+    (기존 monolith service에서 endpoint가 쓰던 기능)
+    - 세션 소유권 검사
+    - 세션 내 모델들 is_primary 토글
+    """
+    session = practice_session_crud.get(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    if me is not None and session.user_id != me.user_id:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    models = list(practice_session_model_crud.list_by_session(db, session_id=session_id))
+    if not models:
+        raise HTTPException(status_code=400, detail="no models for this session")
+
+    target = None
+    for m in models:
+        if m.session_model_id == target_session_model_id:
+            m.is_primary = True
+            target = m
+        else:
+            m.is_primary = False
+
+    if target is None:
+        raise HTTPException(status_code=400, detail="target model does not belong to this session")
+
+    db.flush()
+    return target
 
 
 def _sync_session_models_with_class(
@@ -187,8 +161,8 @@ def _sync_session_models_with_class(
     prev_primary_name = next((m.model_name for m in before if getattr(m, "is_primary", False)), None)
 
     setting = _ensure_session_settings_row(db, session_id=session.session_id)
-    base_gen = _normalize_generation_params_dict(
-        getattr(setting, "generation_params", None) or _get_default_generation_params_dict()
+    base_gen = normalize_generation_params_dict(
+        getattr(setting, "generation_params", None) or {}
     )
 
     init_models_for_session_from_class(
@@ -216,7 +190,7 @@ def _extract_generation_patch(payload: Dict[str, Any]) -> Dict[str, Any]:
     gp = payload.get("generation_params")
     if not isinstance(gp, dict):
         return {}
-    return _normalize_generation_params_dict({k: v for k, v in gp.items() if v is not None})
+    return normalize_generation_params_dict({k: v for k, v in gp.items() if v is not None})
 
 
 def _validate_my_few_shot_example_ids(
@@ -333,8 +307,8 @@ def get_practice_session(
     resp_rows = practice_response_crud.list_by_session(db, session_id=session.session_id)
     resp_items = [PracticeResponseResponse.model_validate(r) for r in resp_rows]
 
-    # knowledge_ids (세션 컬럼이 list로 바뀐 전제. 구형이면 서비스에서 흡수)
-    knowledge_ids = _coerce_int_list(getattr(session, "knowledge_ids", None))
+    # knowledge_ids (세션 컬럼이 list로 바뀐 전제. 구형이면 service에서 흡수)
+    knowledge_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
 
     db.commit()
     return PracticeSessionResponse(
@@ -616,9 +590,9 @@ def create_practice_session_model(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="model_not_allowed_for_class")
 
     # generation_params: merge
-    incoming_gp = _normalize_generation_params_dict(_coerce_dict(getattr(data, "generation_params", None)))
+    incoming_gp = normalize_generation_params_dict(_coerce_dict(getattr(data, "generation_params", None)))
     if incoming_gp:
-        current_gp = _normalize_generation_params_dict(getattr(target, "generation_params", None) or {})
+        current_gp = normalize_generation_params_dict(getattr(target, "generation_params", None) or {})
         merged = dict(current_gp)
         merged.update(incoming_gp)
         practice_session_model_crud.update(
@@ -670,8 +644,8 @@ def update_practice_session_model(
 
     # generation_params는 merge로 처리(덮어쓰기 방지)
     if "generation_params" in update_data:
-        patch = _normalize_generation_params_dict(_coerce_dict(update_data.get("generation_params")))
-        current = _normalize_generation_params_dict(getattr(model, "generation_params", None) or {})
+        patch = normalize_generation_params_dict(_coerce_dict(update_data.get("generation_params")))
+        current = normalize_generation_params_dict(getattr(model, "generation_params", None) or {})
         merged = dict(current)
         merged.update(patch)
         update_data["generation_params"] = merged
@@ -753,13 +727,12 @@ def run_practice_turn_endpoint(
             detail="session_has_no_class_id",
         )
 
-    # 기존 세션은 body에 agent/project/knowledge가 없고(prompt/model_names만)
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
         session_id=session_id,
         class_id=session.class_id,
-        project_id=None,  # 기존 세션은 세션 저장값 사용(검증도 생략)
+        project_id=None,
         body=body,
     )
     db.commit()

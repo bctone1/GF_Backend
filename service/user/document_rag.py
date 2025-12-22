@@ -91,7 +91,7 @@ def retrieve_sources(
         and int(search.get("reranker_top_n", 1)) >= 1
     ):
         try:
-            from service.user.rerank import rerank_chunks  # lazy import
+            from service import rerank_chunks  # lazy import
             chunks = rerank_chunks(
                 question,
                 chunks,
