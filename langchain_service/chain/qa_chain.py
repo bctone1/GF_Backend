@@ -51,7 +51,7 @@ def make_qa_chain(
     context_text: str = "",
     policy_flags: dict | None = None,
     style: str = "friendly",
-    max_ctx_chars: int = 12000,
+    max_ctx_chars: int = 10000,
     streaming: bool = False,  # call_llm_chat가 streaming 지원하면 추후 연결
     few_shot_examples: Optional[List[Dict[str, str]]] = None,
     provider: Optional[str] = None,

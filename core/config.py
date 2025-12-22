@@ -181,6 +181,7 @@ PRACTICE_MODELS = {
         "provider": "anthropic",
         "model_name": "claude-3-haiku-20240307",
         "display_name": "Claude 3 Haiku (2024-03-07)",
+        "max_output_tokens": 4096,  # 모델 상한선 있음
         "enabled": True,
         "default": False,
     },

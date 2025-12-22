@@ -49,6 +49,53 @@ from langchain_service.chain.qa_chain import make_qa_chain
 # =========================================
 # helpers
 # =========================================
+def _get_model_max_output_tokens(
+    *,
+    logical_model_name: str,
+    provider: str | None,
+    real_model_name: str,
+) -> int | None:
+    # 1) runtime config 우선
+    practice_models: Dict[str, Any] = getattr(config, "PRACTICE_MODELS", {}) or {}
+    conf = practice_models.get(logical_model_name) or {}
+    if isinstance(conf, dict):
+        mt = conf.get("max_output_tokens") or conf.get("max_completion_tokens") or conf.get("max_tokens")
+        if isinstance(mt, int) and mt > 0:
+            return int(mt)
+
+    # 2) provider/model별 하드 가드(혹시 config 누락돼도 안전)
+    if (provider or "").lower() == "anthropic":
+        if real_model_name == "claude-3-haiku-20240307":
+            return 4096
+
+    return None
+
+
+def _clamp_generation_params_max_tokens(
+    gp: Dict[str, Any],
+    *,
+    max_out: int | None,
+) -> Dict[str, Any]:
+    if not max_out or max_out <= 0:
+        return gp
+
+    out = dict(gp)
+
+    # normalize 키 기준: max_completion_tokens
+    mct = out.get("max_completion_tokens")
+    try:
+        imct = int(mct) if mct is not None else None
+    except Exception:
+        imct = None
+
+    if imct is not None and imct > max_out:
+        out["max_completion_tokens"] = max_out
+        out["max_tokens"] = max_out  # call_llm_chat이 max_tokens로 넘길 수도 있어서 같이 맞춤
+
+    return out
+
+
+
 def _coerce_int_list(value: Any) -> list[int]:
     if value is None:
         return []
@@ -298,7 +345,14 @@ def _embed_question_to_vector(question: str) -> list[float]:
 # (RAG) retrieve_fn for qa_chain
 # - stage1에서 retrieve가 "보이게" 하기 위한 콜백
 # =========================================
-def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., Any]:
+def _make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..., Any]:
+    """
+    - db shadowing 방지: 외부 db를 db_outer로 캡처
+    - turn 내 캐시(질문 임베딩/검색 결과)로 stage1 latency 절감
+    """
+    vec_cache: dict[str, list[float]] = {}
+    ret_cache: dict[tuple, Dict[str, Any]] = {}
+
     def _retrieve(
         *,
         knowledge_ids: List[int] | None = None,
@@ -315,15 +369,29 @@ def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., An
 
         max_chunks = int(top_k) if isinstance(top_k, int) and top_k > 0 else 10
 
-        query_vector = _embed_question_to_vector(q)
+        # 검색 결과 캐시 키 (threshold는 현재 필터에 직접 안 쓰지만, 향후 적용 대비 포함)
+        cache_key = (tuple(kids), q, max_chunks, float(threshold) if threshold is not None else None)
+        cached = ret_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # ---- query embedding 캐시 ----
+        if q in vec_cache:
+            query_vector = vec_cache[q]
+        else:
+            query_vector = _embed_question_to_vector(q)
+            vec_cache[q] = query_vector
+
         if not query_vector:
-            return {"context": "", "sources": []}
+            out = {"context": "", "sources": []}
+            ret_cache[cache_key] = out
+            return out
 
         # validate docs ownership
         valid_docs: list[Any] = []
         for kid in kids:
             try:
-                doc = document_crud.get(db, knowledge_id=kid)
+                doc = document_crud.get(db_outer, knowledge_id=kid)
             except Exception:
                 doc = None
 
@@ -345,7 +413,9 @@ def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., An
             valid_docs.append(doc)
 
         if not valid_docs:
-            return {"context": "", "sources": []}
+            out = {"context": "", "sources": []}
+            ret_cache[cache_key] = out
+            return out
 
         per_doc_top_k = max(1, max_chunks // len(valid_docs))
 
@@ -356,7 +426,7 @@ def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., An
                 continue
             try:
                 doc_chunks = document_chunk_crud.search_by_vector(
-                    db,
+                    db_outer,
                     query_vector=query_vector,
                     knowledge_id=kid,
                     top_k=per_doc_top_k,
@@ -368,7 +438,9 @@ def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., An
                 chunks.extend(doc_chunks)
 
         if not chunks:
-            return {"context": "", "sources": []}
+            out = {"context": "", "sources": []}
+            ret_cache[cache_key] = out
+            return out
 
         chunks = chunks[:max_chunks]
 
@@ -395,7 +467,9 @@ def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., An
             )
 
         if not texts:
-            return {"context": "", "sources": []}
+            out = {"context": "", "sources": []}
+            ret_cache[cache_key] = out
+            return out
 
         context_body = "\n\n".join(texts)
         context = (
@@ -407,9 +481,13 @@ def _make_retrieve_fn_for_practice(db: Session, me: AppUser) -> Callable[..., An
 
         _ = raw
         _ = threshold  # 현재 search_by_vector에 직접 적용은 안 하니 meta로만
-        return {"context": context, "sources": sources}
+
+        out = {"context": context, "sources": sources}
+        ret_cache[cache_key] = out
+        return out
 
     return _retrieve
+
 
 
 # =========================================
@@ -665,19 +743,32 @@ def run_practice_turn(
     )
 
     kids = _coerce_int_list(knowledge_ids)
-
     results: List[PracticeTurnModelResult] = []
 
     for m in models:
         if m.session_id != session.session_id:
             raise HTTPException(status_code=400, detail="session_model does not belong to given session")
 
+        provider, real_model, runtime_defaults = _resolve_runtime_model(m.model_name)
+        runtime_defaults = _normalize_generation_params_dict(runtime_defaults or {})
+
         model_gp = _normalize_generation_params_dict(getattr(m, "generation_params", None) or {})
 
-        # 우선순위: settings(base) -> agent_snapshot(gen) -> model(gen)
+        # 우선순위: settings(base) -> agent_gen -> runtime_defaults -> model_gp
         effective_gp_full: Dict[str, Any] = _normalize_generation_params_dict(
-            {**session_base_gen, **agent_gen, **model_gp}
+            {**session_base_gen, **agent_gen, **runtime_defaults, **model_gp}
         )
+        # 여기서 상한 강제
+        max_out = _get_model_max_output_tokens(
+            logical_model_name=m.model_name,
+            provider=provider,
+            real_model_name=real_model,
+        )
+        effective_gp_full = _clamp_generation_params_max_tokens(
+            effective_gp_full,
+            max_out=max_out,
+        )
+        effective_gp_full = _normalize_generation_params_dict(effective_gp_full)
 
         # agent_snapshot의 system_prompt/few_shot_examples는 "없을 때만" 주입
         if isinstance(agent_snapshot, dict):
@@ -710,19 +801,14 @@ def run_practice_turn(
         gen_params.pop("system_prompt", None)
         gen_params.pop("few_shot_examples", None)
 
-        # ---- 런타임 provider/real_model + defaults 매핑 ----
-        provider, real_model, runtime_defaults = _resolve_runtime_model(m.model_name)
-
-        # runtime_defaults는 "없을 때만" 주입
-        for k, v in runtime_defaults.items():
-            if gen_params.get(k) is None and v is not None:
-                gen_params[k] = v
+        gen_params = _normalize_generation_params_dict(gen_params)
+        gen_params = _clamp_generation_params_max_tokens(gen_params, max_out=max_out)
         gen_params = _normalize_generation_params_dict(gen_params)
 
         # ---- stage0 입력 dict 만들기 ----
         chain_in: Dict[str, Any] = {
             "prompt": prompt_text,
-            "history": [],  # TODO: PracticeResponse 기반으로 대화 히스토리 재구성
+            "history": [],  # NOTE: PracticeResponse 기반으로 대화 히스토리 재구성
             "session_id": session.session_id,
             "class_id": session.class_id,
             "knowledge_ids": kids,
