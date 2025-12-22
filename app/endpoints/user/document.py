@@ -1,8 +1,10 @@
 # app/endpoints/user/document.py
 from __future__ import annotations
 
-import json, os
+import json
+import os
 from typing import Optional, List, Any, Dict
+
 from database.session import SessionLocal
 from fastapi import (
     APIRouter,
@@ -52,6 +54,9 @@ from schemas.user.document import (
 )
 
 from service.user.upload_pipeline import UploadPipeline
+from service.user.document_ingest import ingest_document_text
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 router = APIRouter()
 
@@ -92,19 +97,88 @@ def _safe_parse_json_dict(raw: Optional[str], *, field_name: str) -> Optional[Di
 
 def _approx_tokens(text: str) -> int:
     # 프리뷰용 저비용 추정치(대략 4 chars ~= 1 token)
-    n = max(1, len(text) // 4)
-    return n
+    return max(1, len(text) // 4)
+
+
+def _build_child_splitter(*, chunk_size: int, chunk_overlap: int, chunk_strategy: str):
+    # 현재는 recursive만 MVP로 지원(나머지는 이후 확장)
+    if chunk_strategy != "recursive":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsupported chunk_strategy: {chunk_strategy}",
+        )
+    return RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+    )
+
+
+def _split_parents(text: str, separator: str) -> list[str]:
+    parts = [p.strip() for p in (text or "").split(separator)]
+    return [p for p in parts if p]
+
+
+def _resolve_document_file_path(*, doc, user_id: int) -> str:
+    base_dir = getattr(config, "UPLOAD_FOLDER", "./uploads")
+    folder_path = doc.folder_path or os.path.join(str(user_id), "document")
+    return os.path.join(base_dir, folder_path, doc.name)
 
 
 def run_document_pipeline_background(user_id: int, knowledge_id: int) -> None:
     """
     BackgroundTasks에서 호출할 실제 작업 함수.
     - 새로운 DB 세션을 열어서 사용 후 닫는다.
+    - UploadPipeline: 파일/텍스트 추출
+    - ingest_document_text: (general/parent-child) chunk 생성 + child embedding
     """
     db = SessionLocal()
     try:
+        doc = document_crud.get(db, knowledge_id=knowledge_id)
+        if not doc:
+            return
+
+        # 상태: embedding(서버 처리 단계)
+        document_crud.update(
+            db,
+            knowledge_id=knowledge_id,
+            data=DocumentUpdate(status="embedding", progress=5, error_message=None),
+        )
+        db.commit()
+        db.refresh(doc)
+
         pipeline = UploadPipeline(db, user_id=user_id)
-        pipeline.process_document(knowledge_id=knowledge_id)
+
+        file_path = _resolve_document_file_path(doc=doc, user_id=user_id)
+        text, _meta = pipeline.extract_text(file_path)
+
+        # ingestion (settings 기반으로 general/parent-child 자동 분기)
+        child_count = ingest_document_text(
+            db,
+            document=doc,
+            full_text=text,
+        )
+
+        # 완료
+        document_crud.update(
+            db,
+            knowledge_id=knowledge_id,
+            data=DocumentUpdate(status="ready", progress=100, chunk_count=child_count),
+        )
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        # 실패 상태 기록(있으면)
+        doc = document_crud.get(db, knowledge_id=knowledge_id)
+        if doc:
+            document_crud.update(
+                db,
+                knowledge_id=knowledge_id,
+                data=DocumentUpdate(status="failed", progress=0, error_message=str(e)),
+            )
+            db.commit()
+        # BackgroundTasks라 로그로만 남길 수도 있음(여기서는 재-raise)
+        raise
     finally:
         db.close()
 
@@ -176,10 +250,7 @@ def upload_document(
     me: AppUser = Depends(get_current_user),
 ):
     if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="file required",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file required")
 
     # 1) 파일 사이즈 체크
     max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
@@ -201,11 +272,7 @@ def upload_document(
     db.refresh(doc)
 
     # 4) 백그라운드 처리
-    background_tasks.add_task(
-        run_document_pipeline_background,
-        me.user_id,
-        doc.knowledge_id,
-    )
+    background_tasks.add_task(run_document_pipeline_background, me.user_id, doc.knowledge_id)
 
     return DocumentResponse.model_validate(doc)
 
@@ -218,7 +285,7 @@ def upload_document(
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document_advanced",
-    summary="지식베이스 파일 업로드(고급)-비동기 ",
+    summary="지식베이스 파일 업로드(고급)-비동기",
 )
 def upload_document_advanced(
     background_tasks: BackgroundTasks,
@@ -229,10 +296,7 @@ def upload_document_advanced(
     me: AppUser = Depends(get_current_user),
 ):
     if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="file required",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file required")
 
     # 1) 파일 사이즈 체크
     max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
@@ -261,11 +325,7 @@ def upload_document_advanced(
     db.refresh(doc)
 
     # 4) 백그라운드 처리
-    background_tasks.add_task(
-        run_document_pipeline_background,
-        me.user_id,
-        doc.knowledge_id,
-    )
+    background_tasks.add_task(run_document_pipeline_background, me.user_id, doc.knowledge_id)
 
     return DocumentResponse.model_validate(doc)
 
@@ -300,10 +360,7 @@ def update_document(
     updated = document_crud.update(db, knowledge_id=knowledge_id, data=data)
     db.commit()
     if not updated:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="document not found",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="document not found")
     return DocumentResponse.model_validate(updated)
 
 
@@ -330,7 +387,7 @@ def delete_document(
     "/document/{knowledge_id}/settings/ingestion",
     response_model=DocumentIngestionSettingResponse,
     operation_id="get_document_ingestion_settings",
-    summary="임베딩 파라미터 불러오기"
+    summary="임베딩 파라미터 불러오기",
 )
 def get_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -355,7 +412,7 @@ def get_document_ingestion_settings(
     "/document/{knowledge_id}/settings/ingestion",
     response_model=DocumentIngestionSettingResponse,
     operation_id="patch_document_ingestion_settings",
-    summary="임베딩 파라미터 수정"
+    summary="임베딩 파라미터 수정",
 )
 def patch_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -365,7 +422,6 @@ def patch_document_ingestion_settings(
 ):
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
-    # row 존재 보장
     defaults = dict(getattr(config, "DEFAULT_INGESTION"))
     defaults["embedding_dim"] = _EMBEDDING_DIM_FIXED
     document_ingestion_setting_crud.ensure_default(db, knowledge_id=knowledge_id, defaults=defaults)
@@ -407,7 +463,7 @@ def get_document_search_settings(
     "/document/{knowledge_id}/settings/search",
     response_model=DocumentSearchSettingResponse,
     operation_id="patch_document_search_settings",
-    summary="RAG 검색 파라미터 튜닝"
+    summary="RAG 검색 파라미터 튜닝",
 )
 def patch_document_search_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -415,14 +471,6 @@ def patch_document_search_settings(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    - "top_k": 상위 청크 개수,
-    - "min_score": 0~1 , 높을수록 까다로움 `0.1=` 좀만 비슷해도 통과,
-    - "score_type": "cosine_similarity" (고정)
-    - "reranker_enabled": `true` 면 후보 K 청크를 재정렬 함
-    - "reranker_model": `BAAI/bge-reranker-v2-m3`(다중언어지원) | `cross-encoder/ms-marco-MiniLM-L-6-v2`(가벼움)
-    - "reranker_top_n": 최종 청크 갯수, `top_k=10, reranker_top_n=3` : 10개 뽑고 rerank후 최종 3개 사용
-    """
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
     defaults = dict(getattr(config, "DEFAULT_SEARCH"))
@@ -440,6 +488,7 @@ def patch_document_search_settings(
 
 # =========================================================
 # Chunk Preview (저장 안 함)
+# - general / parent-child 둘 다 지원(평면화된 리스트로 반환)
 # =========================================================
 @router.post(
     "/document/{knowledge_id}/chunks/preview",
@@ -455,27 +504,40 @@ def preview_document_chunks(
 ):
     doc = _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
-    # 파일 경로 복원
-    base_dir = getattr(config, "UPLOAD_FOLDER", "./uploads")
-    folder_path = doc.folder_path or os.path.join(str(me.user_id), "document")
-    file_path = os.path.join(base_dir, folder_path, doc.name)
+    file_path = _resolve_document_file_path(doc=doc, user_id=me.user_id)
 
     pipeline = UploadPipeline(db, user_id=me.user_id)
-
     text, _ = pipeline.extract_text(file_path)
-    chunks = pipeline.chunk_text(
-        text,
+
+    splitter = _build_child_splitter(
         chunk_size=body.chunk_size,
         chunk_overlap=body.chunk_overlap,
-        max_chunks=body.max_chunks,
         chunk_strategy=body.chunk_strategy,
     )
+
+    flat_chunks: list[str] = []
+
+    if body.chunking_mode == "general":
+        flat_chunks = splitter.split_text(text)
+    else:
+        if not body.segment_separator:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="segment_separator is required when chunking_mode='parent_child'",
+            )
+        parents = _split_parents(text, body.segment_separator)
+        for parent_text in parents:
+            flat_chunks.extend(splitter.split_text(parent_text))
+            if len(flat_chunks) >= body.max_chunks:
+                break
+
+    flat_chunks = flat_chunks[: body.max_chunks]
 
     items: List[ChunkPreviewItem] = []
     total_chars = 0
     total_tokens = 0
 
-    for idx, ch in enumerate(chunks, start=1):
+    for idx, ch in enumerate(flat_chunks, start=1):
         cc = len(ch)
         tk = _approx_tokens(ch)
         total_chars += cc
@@ -514,12 +576,11 @@ def reindex_document(
 ):
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
-    # 단순 방식: 기존 chunks/pages 정리 후 재실행
-    # chunks 먼저 지우고(페이지 FK set null 이슈 회피) -> pages 삭제
+    # chunks 먼저 지우고 -> pages 삭제
     document_chunk_crud.delete_by_document(db, knowledge_id=knowledge_id)
     db.execute(sa_delete(DocumentPage).where(DocumentPage.knowledge_id == knowledge_id))
 
-    # 문서 상태 리셋(진행률/카운트)
+    # 문서 상태 리셋
     document_crud.update(
         db,
         knowledge_id=knowledge_id,
@@ -532,11 +593,7 @@ def reindex_document(
     )
     db.commit()
 
-    background_tasks.add_task(
-        run_document_pipeline_background,
-        me.user_id,
-        knowledge_id,
-    )
+    background_tasks.add_task(run_document_pipeline_background, me.user_id, knowledge_id)
     return None
 
 
@@ -589,9 +646,14 @@ def list_document_chunks(
 ):
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
-    chunks = document_chunk_crud.list_by_document_page(
-        db,
-        knowledge_id=knowledge_id,
-        page_id=page_id,
-    )
+    # NOTE: crud가 parent-child aware 정렬을 사용하게 바뀌었으면
+    #       list_by_document를 쓰는게 더 낫다.
+    if page_id is None:
+        chunks = document_chunk_crud.list_by_document(db, knowledge_id=knowledge_id)
+    else:
+        chunks = document_chunk_crud.list_by_document_page(
+            db,
+            knowledge_id=knowledge_id,
+            page_id=page_id,
+        )
     return [DocumentChunkResponse.model_validate(c) for c in chunks]

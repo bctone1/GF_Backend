@@ -348,6 +348,8 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
         description="새 세션에서만 설정되는 지식베이스 ID 목록",
     )
 
+
+
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeTurnRequestNewSession":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
