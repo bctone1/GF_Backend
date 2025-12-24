@@ -687,11 +687,11 @@ def delete_practice_session_model(
 # =========================================================
 # Chat / Turns
 # =========================================================
-@router.post("/sessions/run", response_model=PracticeTurnResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/sessions/run", response_model=PracticeTurnResponse,
+             status_code=status.HTTP_201_CREATED, summary="Quick 입력 세션")
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
     class_id: int = Query(..., ge=1),
-    project_id: int | None = Query(None, ge=1),
     body: PracticeTurnRequestNewSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -701,29 +701,29 @@ def run_practice_turn_new_session_endpoint(
         me=me,
         session_id=0,
         class_id=class_id,
-        project_id=project_id,
         body=body,
         generate_title=False,
     )
     db.commit()
 
-    answer = _pick_answer_text(turn_result)
-    if answer:
-        background_tasks.add_task(
-            generate_session_title_task,
-            session_id=turn_result.session_id,
-            question=turn_result.prompt_text,
-            answer=answer,
-        )
+    from sqlalchemy import select
+    from models.user.practice import PracticeSession
+
+    row = db.scalar(select(PracticeSession).where(PracticeSession.session_id == turn_result.session_id))
+    print("DEBUG after commit:", row.session_id, row.knowledge_ids)
+
+    if not turn_result.session_title:
+        answer = _pick_answer_text(turn_result)
+        if answer:
+            background_tasks.add_task(
+                generate_session_title_task,
+                session_id=turn_result.session_id,
+                question=turn_result.prompt_text,
+                answer=answer,
+            )
 
     return turn_result
 
-
-def _pick_answer_text(turn_result: PracticeTurnResponse) -> str:
-    if not turn_result.results:
-        return ""
-    primary = next((r for r in turn_result.results if r.is_primary), None) or turn_result.results[0]
-    return (primary.response_text or "").strip()
 
 
 @router.post(

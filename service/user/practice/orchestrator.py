@@ -114,7 +114,7 @@ def run_practice_turn_for_session(
         if not isinstance(body, PracticeTurnRequestNewSession):
             raise HTTPException(status_code=400, detail="invalid_body_for_new_session")
 
-        requested_project_id = project_id if project_id is not None else body.project_id
+        requested_project_id = body.project_id
         requested_knowledge_ids = coerce_int_list(body.knowledge_ids)
         requested_agent_id = body.agent_id
 
@@ -130,6 +130,9 @@ def run_practice_turn_for_session(
             ),
             user_id=me.user_id,
         )
+
+        print("DEBUG after create:", session.session_id, session.knowledge_ids)
+        print("DEBUG requested_knowledge_ids:", requested_knowledge_ids)
 
         settings = ensure_session_settings(db, session_id=session.session_id)
 
