@@ -90,6 +90,7 @@ def run_practice_turn_for_session(
     class_id: int | None,
     body: PracticeTurnRequestNewSession | PracticeTurnRequestExistingSession,
     project_id: Optional[int] = None,
+    generate_title: bool = True,
 ) -> PracticeTurnResponse:
     """
     - session_id == 0  : 새 세션 생성 + 첫 턴 (body에 agent/project/knowledge 허용)
@@ -210,4 +211,5 @@ def run_practice_turn_for_session(
         prompt_text=body.prompt_text,
         user=me,
         knowledge_ids=ctx_knowledge_ids,
+        generate_title=generate_title,
     )

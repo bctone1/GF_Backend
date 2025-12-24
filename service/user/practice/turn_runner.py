@@ -120,6 +120,7 @@ def run_practice_turn(
     prompt_text: str,
     user: AppUser,
     knowledge_ids: Optional[List[int]] = None,
+    generate_title: bool = True,
 ) -> PracticeTurnResponse:
     if session.user_id != user.user_id:
         raise HTTPException(status_code=403, detail="session not owned by user")
@@ -168,7 +169,6 @@ def run_practice_turn(
             {**session_base_gen, **agent_gen, **runtime_defaults, **model_gp}
         )
 
-        # 상한 강제
         max_out = get_model_max_output_tokens(
             logical_model_name=m.model_name,
             provider=provider,
@@ -177,17 +177,14 @@ def run_practice_turn(
         effective_gp_full = clamp_generation_params_max_tokens(effective_gp_full, max_out=max_out)
         effective_gp_full = normalize_generation_params_dict(effective_gp_full)
 
-        # agent_snapshot의 system_prompt/few_shot_examples는 "없을 때만" 주입
         if isinstance(agent_snapshot, dict):
             for k in ("system_prompt", "few_shot_examples"):
                 if k in agent_snapshot and not effective_gp_full.get(k):
                     effective_gp_full[k] = agent_snapshot.get(k)
 
-        # setting에서 선택한 few-shot은 effective에 없을 때 주입
         if not effective_gp_full.get("few_shot_examples") and selected_few_shots:
             effective_gp_full["few_shot_examples"] = selected_few_shots
 
-        # few-shot meta(rule) -> system_prompt로 강제
         sys_from_fs = _derive_system_prompt_from_few_shots(effective_gp_full.get("few_shot_examples"))
         if sys_from_fs:
             prev = effective_gp_full.get("system_prompt")
@@ -196,7 +193,6 @@ def run_practice_turn(
             else:
                 effective_gp_full["system_prompt"] = sys_from_fs
 
-        # ---- qa_chain 계약에 맞게 분리 ----
         style_params = dict(getattr(settings, "style_params", None) or {})
         sys_prompt = effective_gp_full.get("system_prompt")
         if isinstance(sys_prompt, str) and sys_prompt.strip():
@@ -273,7 +269,7 @@ def run_practice_turn(
             )
         )
 
-    if not session.title and results:
+    if generate_title and (not session.title) and results:
         primary = next((r for r in results if r.is_primary), results[0])
         title = generate_session_title_llm(
             question=prompt_text,
@@ -293,3 +289,4 @@ def run_practice_turn(
         prompt_text=prompt_text,
         results=results,
     )
+

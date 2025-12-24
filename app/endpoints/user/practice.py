@@ -11,6 +11,7 @@ from fastapi import (
     Path,
     status,
     Body,
+    BackgroundTasks,
 )
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, func
@@ -65,7 +66,7 @@ from service.user.practice.orchestrator import (
     run_practice_turn_for_session,
     ensure_session_settings,
 )
-
+from service.user.practice_task import generate_session_title_task
 router = APIRouter()
 
 
@@ -81,6 +82,12 @@ def _coerce_dict(value: Any) -> dict[str, Any]:
 def _ensure_session_settings_row(db: Session, *, session_id: int) -> PracticeSessionSetting:
     # orchestrator의 ensure를 사용(세션당 1개 보장)
     return ensure_session_settings(db, session_id=session_id)
+
+def _pick_answer_text(turn_result: PracticeTurnResponse) -> str:
+    if not turn_result.results:
+        return ""
+    primary = next((r for r in turn_result.results if r.is_primary), None) or turn_result.results[0]
+    return (primary.response_text or "").strip()
 
 
 def _get_settings_with_links(db: Session, *, session_id: int) -> PracticeSessionSetting:
@@ -680,16 +687,11 @@ def delete_practice_session_model(
 # =========================================================
 # Chat / Turns
 # =========================================================
-@router.post(
-    "/sessions/run",
-    response_model=PracticeTurnResponse,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="run_practice_turn_for_new_session",
-    summary="QUICK 입력: 새 세션 생성 + 첫 턴 실행",
-)
+@router.post("/sessions/run", response_model=PracticeTurnResponse, status_code=status.HTTP_201_CREATED)
 def run_practice_turn_new_session_endpoint(
-    class_id: int = Query(..., ge=1, description="이 연습 세션이 속한 Class ID (partner.classes.id)"),
-    project_id: int | None = Query(None, ge=1, description="새 세션 생성 시 연결할 Project ID (user.projects.project_id)"),
+    background_tasks: BackgroundTasks,
+    class_id: int = Query(..., ge=1),
+    project_id: int | None = Query(None, ge=1),
     body: PracticeTurnRequestNewSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -699,11 +701,29 @@ def run_practice_turn_new_session_endpoint(
         me=me,
         session_id=0,
         class_id=class_id,
-        project_id=project_id,  # Query가 있으면 서비스에서 body.project_id보다 우선
+        project_id=project_id,
         body=body,
+        generate_title=False,
     )
     db.commit()
+
+    answer = _pick_answer_text(turn_result)
+    if answer:
+        background_tasks.add_task(
+            generate_session_title_task,
+            session_id=turn_result.session_id,
+            question=turn_result.prompt_text,
+            answer=answer,
+        )
+
     return turn_result
+
+
+def _pick_answer_text(turn_result: PracticeTurnResponse) -> str:
+    if not turn_result.results:
+        return ""
+    primary = next((r for r in turn_result.results if r.is_primary), None) or turn_result.results[0]
+    return (primary.response_text or "").strip()
 
 
 @router.post(
@@ -714,18 +734,15 @@ def run_practice_turn_new_session_endpoint(
     summary="기존 세션에서 실습 턴 실행",
 )
 def run_practice_turn_endpoint(
+    background_tasks: BackgroundTasks,
     session_id: int = Path(..., ge=1, description="1 이상: 해당 세션에서 이어서 대화"),
     body: PracticeTurnRequestExistingSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
     session = ensure_my_session(db, session_id, me)
-
     if session.class_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="session_has_no_class_id",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
 
     turn_result = run_practice_turn_for_session(
         db=db,
@@ -734,10 +751,21 @@ def run_practice_turn_endpoint(
         class_id=session.class_id,
         project_id=None,
         body=body,
+        generate_title=False,
     )
     db.commit()
-    return turn_result
 
+    if not turn_result.session_title:
+        answer = _pick_answer_text(turn_result)
+        if answer:
+            background_tasks.add_task(
+                generate_session_title_task,
+                session_id=turn_result.session_id,
+                question=turn_result.prompt_text,
+                answer=answer,
+            )
+
+    return turn_result
 
 # =========================================================
 # Practice Responses
