@@ -146,7 +146,7 @@ DEFAULT_INGESTION = {
 }
 
 DEFAULT_SEARCH = {
-    "top_k": 8,
+    "top_k": 5,
     "min_score": 0.20,  # 0~1 (cosine_similarity 기준)
     "score_type": KB_SCORE_TYPE,
     "reranker_enabled": False,
