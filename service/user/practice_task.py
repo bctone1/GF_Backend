@@ -2,8 +2,6 @@
 import logging
 from database.session import SessionLocal
 from models.user.practice import PracticeSession
-from schemas.user.practice import PracticeSessionUpdate
-from crud.user.practice import practice_session_crud
 from langchain_service.llm.runner import generate_session_title_llm
 
 from sqlalchemy import update, or_

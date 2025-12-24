@@ -706,12 +706,6 @@ def run_practice_turn_new_session_endpoint(
     )
     db.commit()
 
-    from sqlalchemy import select
-    from models.user.practice import PracticeSession
-
-    row = db.scalar(select(PracticeSession).where(PracticeSession.session_id == turn_result.session_id))
-    print("DEBUG after commit:", row.session_id, row.knowledge_ids)
-
     if not turn_result.session_title:
         answer = _pick_answer_text(turn_result)
         if answer:
@@ -723,7 +717,6 @@ def run_practice_turn_new_session_endpoint(
             )
 
     return turn_result
-
 
 
 @router.post(

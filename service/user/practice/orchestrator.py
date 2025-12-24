@@ -130,10 +130,6 @@ def run_practice_turn_for_session(
             ),
             user_id=me.user_id,
         )
-
-        print("DEBUG after create:", session.session_id, session.knowledge_ids)
-        print("DEBUG requested_knowledge_ids:", requested_knowledge_ids)
-
         settings = ensure_session_settings(db, session_id=session.session_id)
 
         base_gen = normalize_generation_params_dict(
