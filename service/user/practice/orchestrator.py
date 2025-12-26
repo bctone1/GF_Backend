@@ -1,7 +1,7 @@
 # service/user/practice/orchestrator.py
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -93,17 +93,20 @@ def run_practice_turn_for_session(
     generate_title: bool = True,
 ) -> PracticeTurnResponse:
     """
-    - session_id == 0  : 새 세션 생성 + 첫 턴 (body에 agent/project/knowledge 허용)
-    - session_id > 0   : 기존 세션 턴 (body는 prompt/model_names만, 컨텍스트는 세션 저장값 사용)
+    - session_id == 0  : 새 세션 생성 + 첫 턴
+    - session_id > 0   : 기존 세션 턴
 
-    경로
-    - new-session:
-        세션 생성 → settings ensure → base_gen 결정 → init_models → model_names 필터 → ctx_knowledge_ids
-    - existing-session:
-        ensure_my_session → settings ensure → init_models(sync) → 선택모델 → project_id 검증 → ctx_knowledge_ids
-    - 공통:
-        run_practice_turn(...) 호출
+    공통:
+    - body의 per-turn override 값들(agent/style/generation)은 run_practice_turn에 그대로 전달(세션 저장값은 유지).
     """
+    # ---------------------------------
+    # per-turn overrides (body에 있으면 전달)
+    # ---------------------------------
+    requested_agent_id: Optional[int] = getattr(body, "agent_id", None)
+    requested_style_preset: Optional[str] = getattr(body, "style_preset", None)
+    requested_style_params: Optional[Dict[str, Any]] = getattr(body, "style_params", None)
+    requested_generation_params: Optional[Dict[str, Any]] = getattr(body, "generation_params", None)
+
     if session_id == 0:
         # -----------------------------
         # new-session 경로
@@ -116,7 +119,6 @@ def run_practice_turn_for_session(
 
         requested_project_id = body.project_id
         requested_knowledge_ids = coerce_int_list(body.knowledge_ids)
-        requested_agent_id = body.agent_id
 
         session = practice_session_crud.create(
             db,
@@ -200,7 +202,7 @@ def run_practice_turn_for_session(
         ctx_knowledge_ids = get_session_knowledge_ids(session)
 
     # -----------------------------
-    # 공통: 턴 실행
+    # 공통: 턴 실행 (per-turn override 전달)
     # -----------------------------
     return run_practice_turn(
         db=db,
@@ -211,4 +213,8 @@ def run_practice_turn_for_session(
         user=me,
         knowledge_ids=ctx_knowledge_ids,
         generate_title=generate_title,
+        requested_agent_id=requested_agent_id,
+        requested_generation_params=requested_generation_params,
+        requested_style_preset=requested_style_preset,
+        requested_style_params=requested_style_params,
     )

@@ -8,10 +8,13 @@ from sqlalchemy import update, or_
 
 logger = logging.getLogger(__name__)
 
-def generate_session_title_task(*, session_id: int, question: str, answer: str, max_chars: int = 30) -> None:
+def generate_session_title_task(*, session_id: int, question: str, answer: "", max_chars: int = 30) -> None:
     db = SessionLocal()
     try:
-        title = generate_session_title_llm(question=question, answer=answer, max_chars=max_chars)
+        title = generate_session_title_llm(
+            question=question,
+            answer=answer,
+            max_chars=max_chars)
         if not title:
             return
 

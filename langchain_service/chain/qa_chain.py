@@ -36,6 +36,7 @@ from langchain_service.chain.contracts import (
     GF_RETRIEVED_COUNT,
     GF_TOP_K,
     GF_THRESHOLD,
+
     # validators / errors
     ContractError,
     validate_stage1,
@@ -71,15 +72,28 @@ def make_qa_chain(
     (5) RunnableLambda(normalize_response)
     """
 
+    def _is_none_style(v: Any) -> bool:
+        if v is None:
+            return True
+        if isinstance(v, str) and v.strip().lower() in ("none", "null", ""):
+            return True
+        return False
+
     # -------------------------
     # defaults (factory level)
     # -------------------------
-    _style = style if style in STYLE_MAP else "friendly"
-    _system_txt = build_system_prompt(style=_style, **(policy_flags or {}))
     _rule_txt = (
         "규칙: 제공된 컨텍스트를 우선하여 답하고, 정말 관련이 없을 때만 "
         "짧게 '해당내용은 찾을 수 없음'이라고 답하라."
     )
+
+    if _is_none_style(style):
+        _style = "none"
+        _system_txt = ""  # style none이면 기본 스타일 프롬프트는 비움
+    else:
+        _style = style if style in STYLE_MAP else "friendly"
+        _system_txt = build_system_prompt(style=_style, **(policy_flags or {}))
+
     _default_few_shot = few_shot_examples or []
 
     _provider_default = (provider or getattr(config, "LLM_PROVIDER", "openai")).lower()
@@ -110,11 +124,36 @@ def make_qa_chain(
                     d[GF_PROMPT] = v.strip()
                     break
 
-        # style_params 기본 + system_prompt 삽입
+        # style_params 기본 + system_prompt 처리(덮어쓰기 금지)
         sp = d.get(GF_STYLE_PARAMS) or {}
         if not isinstance(sp, dict):
             sp = {}
-        sp.setdefault("system_prompt", _system_txt + "\n" + _rule_txt)
+
+        # 기본 규칙 자동 부착 여부(옵션): 기본 True
+        use_default_rule = sp.get("use_default_rule")
+        if use_default_rule is None:
+            use_default_rule = True
+        use_default_rule = bool(use_default_rule)
+
+        existing = sp.get("system_prompt")
+        if "system_prompt" not in sp:
+            # system_prompt 키 자체가 없을 때만 기본값을 채움
+            base_parts: List[str] = []
+            if isinstance(_system_txt, str) and _system_txt.strip():
+                base_parts.append(_system_txt.strip())
+            if use_default_rule and isinstance(_rule_txt, str) and _rule_txt.strip():
+                base_parts.append(_rule_txt.strip())
+            sp["system_prompt"] = "\n".join(base_parts).strip()
+        else:
+            # system_prompt가 있으면 덮지 않고, 기본 rule만 필요 시 append
+            if use_default_rule and isinstance(existing, str):
+                cur = existing
+                if _rule_txt.strip() and (_rule_txt.strip() not in cur):
+                    # 비어있는 system_prompt("" 포함)여도 rule은 붙임(원치 않으면 use_default_rule=false)
+                    sep = "\n\n" if cur.strip() else ""
+                    sp["system_prompt"] = (cur + sep + _rule_txt).strip()
+            # non-str이면 그대로 둠(후속 stage에서 str 캐스팅)
+
         d[GF_STYLE_PARAMS] = sp
 
         # policy_flags 기본값
@@ -130,21 +169,15 @@ def make_qa_chain(
         tr.setdefault("chain_version", chain_version)
         d[GF_TRACE] = tr
 
-        # (선택) 모델 후보 기본값이 필요하면 model_names에 넣어둘 수도 있음
-        # d.setdefault(GF_MODEL_NAMES, [ _model_default ])
-
         return normalize_input(d)
 
     # =========================================================
     # (1) enrich_context: retrieve를 "보이게" 만들기 위한 assign + merge
-    #    - assign 자체가 RunnableAssign이며 내부적으로 RunnableParallel로 키들을 병렬 계산함
-    #    - 우리는 passthrough_input / context_pack 2키를 assign으로 만들고,
-    #      다음 단계에서 top-level로 merge한다.
     # =========================================================
     def _context_pack(stage0_out: Dict[str, Any]) -> Dict[str, Any]:
         """
         반환은 {context, sources, retrieval}만.
-        retrieve_fn 있으면 stage_retrieve_context를 통해 실제 검색 수행(그래프에서 retrieve node로_opcode 노출).
+        retrieve_fn 있으면 stage_retrieve_context를 통해 실제 검색 수행.
         """
         knowledge_ids = stage0_out.get(GF_KNOWLEDGE_IDS) or []
         if not isinstance(knowledge_ids, list):
@@ -153,14 +186,14 @@ def make_qa_chain(
         # search params (계약 외 키)
         top_k = None
         threshold = None
-        sp = stage0_out.get("search_params") or stage0_out.get("retrieval_params") or {}
-        if isinstance(sp, dict):
+        sp2 = stage0_out.get("search_params") or stage0_out.get("retrieval_params") or {}
+        if isinstance(sp2, dict):
             try:
-                top_k = int(sp.get("top_k")) if sp.get("top_k") is not None else None
+                top_k = int(sp2.get("top_k")) if sp2.get("top_k") is not None else None
             except Exception:
                 top_k = None
             try:
-                threshold = float(sp.get("threshold")) if sp.get("threshold") is not None else None
+                threshold = float(sp2.get("threshold")) if sp2.get("threshold") is not None else None
             except Exception:
                 threshold = None
 
@@ -202,10 +235,6 @@ def make_qa_chain(
         }
 
     def _stage1_merge(x: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        assign 결과(dict)에는 passthrough_input/context_pack이 추가되어 있음.
-        => stage1 계약(dict)으로 top-level merge
-        """
         base = x.get("passthrough_input")
         pack = x.get("context_pack")
         if not isinstance(base, dict):
@@ -315,9 +344,6 @@ def make_qa_chain(
     # =========================================================
     stage0 = RunnableLambda(_stage0).with_config(run_name="stage0_normalize_input")
 
-    # (1) RunnableAssign(RunnableParallel(...)) 형태:
-    # - RunnablePassthrough.assign(...) == RunnableAssign
-    # - 내부적으로 keys 병렬 계산(= RunnableParallel)됨
     stage1_assign = RunnablePassthrough.assign(
         passthrough_input=RunnablePassthrough().with_config(run_name="stage1_passthrough_input"),
         context_pack=RunnableLambda(_context_pack).with_config(run_name="stage1_retrieve_context"),
