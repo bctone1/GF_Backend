@@ -1,97 +1,116 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "GrowFit Docs"
+description: "실습 중심 LLM 교육 플랫폼 GrowFit의 사용법, 개념, API 문서"
 ---
 
-## Setting up
+## 여기서 뭘 할 수 있어?
 
-Get your documentation site up and running in minutes.
+GrowFit Docs는 아래 내용을 빠르게 찾을 수 있게 정리한 문서야.
+
+- **실습(Practice)**: 모델/파라미터/프롬프트/에이전트/RAG를 바꿔가며 비교하는 방법
+- **지식베이스(RAG)**: 청크/오버랩/top-k/threshold/rerank 설정과 결과 해석
+- **API**: FastAPI 기반 엔드포인트/요청·응답 예시/에러 케이스
+- **운영/비용**: 토큰/지연시간/비용 지표를 교육에 연결하는 방법
+
+---
+
+## 시작하기
+
+<Columns cols={2}>
+  <Card
+    title="로컬에서 문서 실행"
+    icon="rocket"
+    href="/getting-started/local-dev"
+  >
+    mint dev로 문서를 실행하고 개발 흐름을 확인해.
+  </Card>
+
+  <Card
+    title="환경변수/설정"
+    icon="gear"
+    href="/getting-started/env"
+  >
+    백엔드/문서 공통으로 필요한 설정 값을 정리해.
+  </Card>
+</Columns>
+
+---
+
+## 핵심 개념 빠르게 보기
+
+<Columns cols={2}>
+  <Card
+    title="Practice Session"
+    icon="bolt"
+    href="/concepts/practice-session"
+  >
+    실습 세션 구조와 파라미터(temperature/top_p/max_tokens 등)를 이해해.
+  </Card>
+
+  <Card
+    title="Agents"
+    icon="wand-magic-sparkles"
+    href="/concepts/agents"
+  >
+    시스템 프롬프트, few-shot 예시, 공유/포크 흐름을 정리해.
+  </Card>
+
+  <Card
+    title="Knowledge Base (RAG)"
+    icon="book"
+    href="/concepts/knowledge-base"
+  >
+    chunk/overlap/top-k/threshold/rerank가 결과에 미치는 영향을 이해해.
+  </Card>
+
+  <Card
+    title="Cost & Latency"
+    icon="chart-line"
+    href="/concepts/cost-latency"
+  >
+    TTFT/latency/token/cost를 어떻게 읽고 실험에 반영하는지 정리해.
+  </Card>
+</Columns>
+
+---
+
+## 튜토리얼로 바로 실습하기
+
+<Columns cols={2}>
+  <Card
+    title="튜토리얼 1: 파라미터 비교"
+    icon="sliders"
+    href="/tutorials/01-params"
+  >
+    같은 질문으로 temperature/top_p를 바꿔 차이를 관찰해.
+  </Card>
+
+  <Card
+    title="튜토리얼 2: RAG 적용"
+    icon="magnifying-glass"
+    href="/tutorials/02-rag"
+  >
+    RAG 없이/있이 비교하고 top-k/threshold를 조절해봐.
+  </Card>
+
+  <Card
+    title="튜토리얼 3: Rerank on/off"
+    icon="shuffle"
+    href="/tutorials/03-rerank"
+  >
+    재랭킹이 정확도와 지연시간에 주는 영향을 확인해.
+  </Card>
+</Columns>
+
+---
+
+## API Reference
 
 <Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
+  title="API 문서 보기"
+  icon="terminal"
+  href="/api/introduction"
   horizontal
 >
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
-
-## Create beautiful pages
-
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
+  인증부터 Practice/Knowledge Base/Agents까지 요청·응답 예시로 확인해.
 </Card>
