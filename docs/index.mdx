@@ -1,74 +1,118 @@
----
+﻿---
 title: "GrowFit Docs"
-description: "실습 중심 LLM 교육 플랫폼 GrowFit의 사용법, 개념, API 문서"
+description: "실습 중심 LLM 교육 플랫폼 GrowFit의 사용법, 핵심 개념, API 레퍼런스"
 ---
 
-## 여기서 뭘 할 수 있어?
+<Note>
+  이 문서는 GrowFit 백엔드(FastAPI)와 문서(Mintlify)가 함께 움직이는 기준 문서입니다.
+  Practice(실험) → Knowledge Base(RAG) → Agents(프롬프트/공유) → Cost & Latency(지표) 흐름으로 읽으시면 가장 빠릅니다.
+</Note>
 
-GrowFit Docs는 아래 내용을 빠르게 찾을 수 있게 정리한 문서야.
+## 이 문서에서 무엇을 할 수 있나요?
 
-- **실습(Practice)**: 모델/파라미터/프롬프트/에이전트/RAG를 바꿔가며 비교하는 방법
-- **지식베이스(RAG)**: 청크/오버랩/top-k/threshold/rerank 설정과 결과 해석
-- **API**: FastAPI 기반 엔드포인트/요청·응답 예시/에러 케이스
-- **운영/비용**: 토큰/지연시간/비용 지표를 교육에 연결하는 방법
+GrowFit Docs는 아래 내용을 **빠르게 탐색하고, 바로 실습으로 연결**할 수 있도록 정리되어 있습니다.
+
+- **실습(Practice)**: 모델/파라미터/프롬프트/에이전트/RAG를 바꿔가며 결과를 비교하는 방법
+- **지식베이스(RAG)**: chunk/overlap/top-k/threshold/rerank 설정과 결과 해석, 튜닝 가이드
+- **API**: FastAPI 엔드포인트, 요청·응답 예시, 에러 케이스 및 운영 팁
+- **운영/비용**: token/TTFT/latency/cost 지표를 읽고, 실험 설계에 반영하는 방법
 
 ---
 
-## 시작하기
+## 빠른 시작 (3분)
 
-<Columns cols={2}>
-  <Card
-    title="로컬에서 문서 실행"
-    icon="rocket"
-    href="/getting-started/local-dev"
-  >
-    mint dev로 문서를 실행하고 개발 흐름을 확인해.
+<Steps>
+  <Step title="문서 서버 실행">
+    로컬에서 문서를 띄워 변경사항을 바로 확인합니다.
+  </Step>
+
+  <Step title="환경변수/설정 확인">
+    백엔드와 문서가 공통으로 사용하는 설정값을 정리하고, 실행 환경을 맞춥니다.
+  </Step>
+
+  <Step title="API Reference 연결">
+    FastAPI의 <code>/openapi.json</code>을 내보내어 Mintlify API Reference에서 확인할 수 있도록 구성합니다.
+  </Step>
+</Steps>
+
+<Columns cols={3}>
+  <Card title="로컬에서 문서 실행" icon="rocket" href="/getting-started/local-dev">
+    <Badge color="green" size="small">추천</Badge>
+    <br />
+    <code>mint dev</code>로 문서를 실행하고, 작성·검증 흐름을 확인합니다.
   </Card>
 
-  <Card
-    title="환경변수/설정"
-    icon="gear"
-    href="/getting-started/env"
-  >
-    백엔드/문서 공통으로 필요한 설정 값을 정리해.
+  <Card title="환경변수/설정" icon="gear" href="/getting-started/env">
+    백엔드/문서 공통 설정 값과 로컬 개발 시 주의사항을 정리합니다.
+  </Card>
+
+  <Card title="OpenAPI 내보내기" icon="file-export" href="/getting-started/openapi-export">
+    <Badge color="blue" size="small">API</Badge>
+    <br />
+    FastAPI 스펙을 파일로 export하여 API Reference에 연결하는 방법을 안내합니다.
   </Card>
 </Columns>
+
+---
+
+## 역할별로 바로가기
+
+<Tabs>
+  <Tab title="학습자 (Student)">
+    <Columns cols={2}>
+      <Card title="튜토리얼: 파라미터 비교" icon="sliders" href="/tutorials/01-params">
+        같은 질문으로 <code>temperature</code>/<code>top_p</code>를 바꿔 차이를 관찰합니다.
+      </Card>
+      <Card title="튜토리얼: RAG 적용" icon="magnifying-glass" href="/tutorials/02-rag">
+        RAG 없이/있이 비교하고 <code>top-k</code>/<code>threshold</code>를 조절해봅니다.
+      </Card>
+    </Columns>
+  </Tab>
+
+  <Tab title="강사/파트너 (Partner)">
+    <Columns cols={2}>
+      <Card title="Agents 개념" icon="wand-magic-sparkles" href="/concepts/agents">
+        시스템 프롬프트, few-shot 예시, 공유/포크 흐름을 정리합니다.
+      </Card>
+      <Card title="Practice Session 개념" icon="bolt" href="/concepts/practice-session">
+        실습 세션 구조와 모델 비교(멀티모델) 실험 설계를 이해합니다.
+      </Card>
+    </Columns>
+  </Tab>
+
+  <Tab title="운영자 (Ops)">
+    <Columns cols={2}>
+      <Card title="Cost & Latency" icon="chart-line" href="/concepts/cost-latency">
+        <Badge color="orange" size="small">Observability</Badge>
+        <br />
+        TTFT/latency/token/cost 지표를 읽고 실험/운영에 반영하는 방법을 정리합니다.
+      </Card>
+      <Card title="API 에러/운영 가이드" icon="triangle-exclamation" href="/guides/ops/errors">
+        자주 발생하는 에러 케이스와 재현/원인/대응 방식을 정리합니다.
+      </Card>
+    </Columns>
+  </Tab>
+</Tabs>
 
 ---
 
 ## 핵심 개념 빠르게 보기
 
 <Columns cols={2}>
-  <Card
-    title="Practice Session"
-    icon="bolt"
-    href="/concepts/practice-session"
-  >
-    실습 세션 구조와 파라미터(temperature/top_p/max_tokens 등)를 이해해.
+  <Card title="Practice Session" icon="bolt" href="/concepts/practice-session">
+    모델 선택(복수 모델 비교), 파라미터(<code>temperature</code>/<code>top_p</code>/<code>max_tokens</code>) 및 스타일 프리셋 흐름을 정리합니다.
   </Card>
 
-  <Card
-    title="Agents"
-    icon="wand-magic-sparkles"
-    href="/concepts/agents"
-  >
-    시스템 프롬프트, few-shot 예시, 공유/포크 흐름을 정리해.
+  <Card title="Agents" icon="wand-magic-sparkles" href="/concepts/agents">
+    시스템 프롬프트, few-shot 예시, 클래스 공유, 사용자 포크(개인화) 시나리오를 설명합니다.
   </Card>
 
-  <Card
-    title="Knowledge Base (RAG)"
-    icon="book"
-    href="/concepts/knowledge-base"
-  >
-    chunk/overlap/top-k/threshold/rerank가 결과에 미치는 영향을 이해해.
+  <Card title="Knowledge Base (RAG)" icon="book" href="/concepts/knowledge-base">
+    문서 업로드 → 청킹 → 임베딩 → 검색/재랭킹까지, 설정 값이 결과에 미치는 영향을 중심으로 정리합니다.
   </Card>
 
-  <Card
-    title="Cost & Latency"
-    icon="chart-line"
-    href="/concepts/cost-latency"
-  >
-    TTFT/latency/token/cost를 어떻게 읽고 실험에 반영하는지 정리해.
+  <Card title="Cost & Latency" icon="chart-line" href="/concepts/cost-latency">
+    실험 결과를 “정확도”만이 아니라 “속도/비용”까지 포함해 평가하는 기준을 제공합니다.
   </Card>
 </Columns>
 
@@ -77,28 +121,22 @@ GrowFit Docs는 아래 내용을 빠르게 찾을 수 있게 정리한 문서야
 ## 튜토리얼로 바로 실습하기
 
 <Columns cols={2}>
-  <Card
-    title="튜토리얼 1: 파라미터 비교"
-    icon="sliders"
-    href="/tutorials/01-params"
-  >
-    같은 질문으로 temperature/top_p를 바꿔 차이를 관찰해.
+  <Card title="튜토리얼 1: 파라미터 비교" icon="sliders" href="/tutorials/01-params">
+    동일 프롬프트로 <code>temperature</code>/<code>top_p</code>를 바꿔 응답 스타일 변화를 관찰합니다.
   </Card>
 
-  <Card
-    title="튜토리얼 2: RAG 적용"
-    icon="magnifying-glass"
-    href="/tutorials/02-rag"
-  >
-    RAG 없이/있이 비교하고 top-k/threshold를 조절해봐.
+  <Card title="튜토리얼 2: RAG 적용" icon="magnifying-glass" href="/tutorials/02-rag">
+    RAG 적용 전/후를 비교하고 <code>top-k</code>/<code>threshold</code> 조합을 실험합니다.
   </Card>
 
-  <Card
-    title="튜토리얼 3: Rerank on/off"
-    icon="shuffle"
-    href="/tutorials/03-rerank"
-  >
-    재랭킹이 정확도와 지연시간에 주는 영향을 확인해.
+  <Card title="튜토리얼 3: Rerank on/off" icon="shuffle" href="/tutorials/03-rerank">
+    재랭킹이 정확도와 지연시간에 미치는 영향을 확인하고, 상황별 권장값을 정리합니다.
+  </Card>
+
+  <Card title="튜토리얼 4: Agent 적용" icon="user-gear" href="/tutorials/04-agent">
+    <Badge color="gray" size="small">준비 중</Badge>
+    <br />
+    에이전트를 붙였을 때 시스템 프롬프트/예시가 결과를 어떻게 바꾸는지 실습합니다.
   </Card>
 </Columns>
 
@@ -106,11 +144,18 @@ GrowFit Docs는 아래 내용을 빠르게 찾을 수 있게 정리한 문서야
 
 ## API Reference
 
-<Card
-  title="API 문서 보기"
-  icon="terminal"
-  href="/api/introduction"
-  horizontal
->
-  인증부터 Practice/Knowledge Base/Agents까지 요청·응답 예시로 확인해.
+<Card title="API 문서 보기" icon="terminal" href="/api/introduction" horizontal>
+  인증부터 Practice/Knowledge Base/Agents까지, 요청·응답 예시와 함께 확인하실 수 있습니다.
 </Card>
+
+---
+
+## 자주 묻는 질문
+
+<Accordion title="OpenAPI는 어떻게 문서에 반영하나요?">
+  FastAPI의 <code>/openapi.json</code>을 파일로 내보낸 뒤, 문서 리포지토리에 포함하여 Mintlify API Reference에서 읽도록 구성합니다.
+</Accordion>
+
+<Accordion title="튜토리얼은 어떤 기준으로 추가하면 좋을까요?">
+  “하나의 가설(예: rerank는 정확도를 올린다)” → “변수(설정값) 조절” → “지표(정확도/TTFT/비용)로 결론” 구조로 작성하시면 일관성이 유지됩니다.
+</Accordion>

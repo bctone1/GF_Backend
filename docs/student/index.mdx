@@ -1,0 +1,82 @@
+---
+title: "학습자 가이드"
+description: "Practice 실습부터 RAG/Agents 개념까지, 학습자가 따라가기 쉬운 경로로 정리했습니다."
+icon: "graduation-cap"
+---
+
+<Note>
+  GrowFit 학습자는 “실험 → 비교 → 지표로 해석” 흐름이 핵심입니다.
+  튜토리얼을 먼저 따라가고, 개념 문서로 돌아오는 방식이 가장 빠릅니다.
+</Note>
+
+## 무엇을 할 수 있나요?
+
+- **LLM 실습(Practice)**에서 모델/파라미터/스타일/에이전트/RAG를 바꿔가며 결과를 비교합니다.
+- **RAG(지식베이스)** 설정을 조절해 검색 결과와 답변 품질 변화를 확인합니다.
+- **평가 지표**(TTFT/latency/token/cost)를 읽고, “좋은 답변”을 운영 관점까지 포함해 판단합니다.
+
+---
+
+## 추천 학습 경로
+
+<Steps>
+  <Step title="튜토리얼로 감 잡기">
+    먼저 튜토리얼로 “무엇을 바꾸면 어떤 차이가 나는지”를 체감합니다.
+  </Step>
+  <Step title="Practice 개념 정리">
+    파라미터/스타일/평가 기준을 문서로 정리하며 실험을 확장합니다.
+  </Step>
+  <Step title="RAG 적용 및 튜닝">
+    top-k/threshold/rerank 조합을 바꾸며 정확도와 속도 트레이드오프를 이해합니다.
+  </Step>
+</Steps>
+
+---
+
+## 바로 시작하기
+
+<Columns cols={2}>
+  <Card title="튜토리얼 1: 파라미터 비교" icon="sliders" href="/tutorials/01-params">
+    동일 질문으로 <code>temperature</code>/<code>top_p</code>를 바꿔 차이를 관찰합니다.
+  </Card>
+
+  <Card title="튜토리얼 2: RAG 적용" icon="magnifying-glass" href="/tutorials/02-rag">
+    RAG 없이/있이 비교하고 <code>top-k</code>/<code>threshold</code>를 조절합니다.
+  </Card>
+
+  <Card title="Practice 개요" icon="bolt" href="/practice/overview">
+    Practice Session 구조와 실습 흐름(모델/프롬프트/지식/에이전트)을 한 번에 봅니다.
+  </Card>
+
+  <Card title="지표 읽는 법 (Cost & Latency)" icon="chart-line" href="/practice/cost-latency">
+    TTFT/latency/token/cost를 확인하고 실험 결과를 해석합니다.
+  </Card>
+</Columns>
+
+---
+
+## UI에서 어디를 봐야 하나요?
+
+<Columns cols={2}>
+  <Card title="UI Flow: Practice" icon="window" href="/ui/practice">
+    실습 화면에서 설정을 바꾸는 위치와 결과 비교 포인트를 정리합니다.
+  </Card>
+
+  <Card title="UI Flow: Knowledge Base" icon="book" href="/ui/knowledge-base">
+    업로드/인제스트/검색/출처 확인까지의 화면 흐름을 정리합니다.
+  </Card>
+</Columns>
+
+---
+
+## 도움말
+
+<Columns cols={2}>
+  <Card title="FAQ" icon="circle-question" href="/faq">
+    자주 묻는 질문을 빠르게 확인합니다.
+  </Card>
+
+  <Card title="Troubleshooting" icon="triangle-exclamation" href="/troubleshooting">
+    오류 상황별 원인/대응 방법을 확인합니다.
+  </Card>
+</Columns>

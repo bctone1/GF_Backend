@@ -5,19 +5,12 @@ from pathlib import Path
 from main import app  # main.py가 루트에 있으니 이게 제일 단순함
 
 
+OUT = Path("docs/openapi.json")  # Mintlify가 읽을 위치로 맞춰
+
 def main():
-    # docs 폴더가 루트에 있다고 가정
-    out_path = Path("docs") / "openapi.json"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    schema = app.openapi()
-
-    out_path.write_text(
-        json.dumps(schema, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    print(f"[OK] wrote: {out_path}")
-
+    spec = app.openapi()
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
 
 if __name__ == "__main__":
     main()

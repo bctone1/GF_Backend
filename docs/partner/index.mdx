@@ -1,0 +1,61 @@
+---
+title: "강사(Partner) 가이드"
+description: "수업 운영 관점에서 Agents/Practice/RAG를 구성하고, 학습자 경험을 설계합니다."
+icon: "chalkboard-user"
+---
+
+<Note>
+  강사 역할의 핵심은 “실습 시나리오 설계 + 에이전트 공유 + 지표 기반 피드백”입니다.
+</Note>
+
+## 무엇을 할 수 있나요?
+
+- **Agents 템플릿**을 만들고 클래스에 공유하여 실습 품질을 표준화합니다.
+- **Practice 실습 과제**를 설계하고, 모델 비교/평가 기준을 제시합니다.
+- **RAG(지식베이스)**를 수업 자료 기반으로 구성하고 출처/근거 중심 학습을 유도합니다.
+
+---
+
+## 추천 운영 경로
+
+<Steps>
+  <Step title="Agent 템플릿 만들기">
+    시스템 프롬프트 + few-shot 예시로 수업용 템플릿을 준비합니다.
+  </Step>
+  <Step title="클래스 공유 및 실습 설계">
+    공유/포크 흐름을 기준으로 과제를 구성하고, 실습 목표를 명확히 합니다.
+  </Step>
+  <Step title="지표/평가로 피드백">
+    정확도뿐 아니라 비용/지연시간까지 포함해 평가 기준을 운영합니다.
+  </Step>
+</Steps>
+
+---
+
+## 바로가기
+
+<Columns cols={2}>
+  <Card title="Agents 개요" icon="wand-magic-sparkles" href="/agents/overview">
+    에이전트 구성 요소(시스템 프롬프트, 예시, 버전)를 정리합니다.
+  </Card>
+
+  <Card title="에이전트 공유" icon="share-nodes" href="/agents/sharing">
+    클래스 공유/권한/노출 범위를 정리합니다.
+  </Card>
+
+  <Card title="Practice에서 Agents 활용" icon="bolt" href="/practice/agents">
+    실습 실행 시 에이전트를 붙였을 때의 동작 방식과 권장 패턴을 정리합니다.
+  </Card>
+
+  <Card title="UI Flow: Agents / Projects" icon="window" href="/ui/projects">
+    강사 관점에서 프로젝트/실습 운영 흐름을 확인합니다.
+  </Card>
+</Columns>
+
+---
+
+## RAG 운영 팁
+
+<Card title="RAG: 검색/재랭킹 운영" icon="magnifying-glass" href="/rag/rerank" horizontal>
+  수업 자료 기반 RAG에서 재랭킹 on/off의 효과(정확도 vs 지연시간)를 운영 관점으로 정리합니다.
+</Card>
