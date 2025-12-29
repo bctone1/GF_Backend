@@ -1,6 +1,9 @@
+DOCS 작업중 : https://bctone.mintlify.app/
+
 # GrowFit Backend
 
 FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 **pgvector**, 추후 **Qdrant**로 전환 예정. 권한 티어는 **Supervisor → Org → Partner → Student/User**.
+
 
 ## 기술 스택
 
