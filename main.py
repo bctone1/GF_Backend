@@ -14,7 +14,6 @@ app = FastAPI(
 
 app.add_middleware(ProcessTimeMiddleware)
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

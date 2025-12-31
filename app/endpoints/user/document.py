@@ -412,7 +412,8 @@ def get_document_ingestion_settings(
     "/document/{knowledge_id}/settings/ingestion",
     response_model=DocumentIngestionSettingResponse,
     operation_id="patch_document_ingestion_settings",
-    summary="임베딩 파라미터 수정",
+    summary="임베딩 파라미터 수정, 부모-자식",
+    description="chunking_mode: general | parent_child",
 )
 def patch_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
