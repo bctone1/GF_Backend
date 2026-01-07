@@ -6,19 +6,12 @@ from decimal import Decimal
 from typing import Optional, Literal, List
 
 from pydantic import ConfigDict, Field
-
 from schemas.base import ORMBase
-
-# 프로젝트에서 Page[T] 제네릭을 쓰고 있다면 경로만 맞춰서 import 해
-# 예) from schemas.page import Page
-# 아래는 "모델 단건/집계 응답" 위주라 Page 없이도 바로 쓸 수 있게 구성했어.
-
 
 # =========================
 # type aliases
 # =========================
 UsageDimType = Literal["partner", "class", "enrollment", "student"]
-
 
 # =========================
 # partner.usage_events
