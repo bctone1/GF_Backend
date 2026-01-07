@@ -212,6 +212,70 @@ def list_my_document(
     return {"items": items, "total": total, "page": page, "size": size}
 
 
+# =========================================================
+# Document Usage (READ ONLY)
+# =========================================================
+@router.get(
+    "/document/{knowledge_id}/usage",
+    response_model=List[DocumentUsageResponse],
+    operation_id="list_document_usage",
+)
+def list_document_usage(
+    knowledge_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
+    usages = document_usage_crud.list_by_document(db, knowledge_id=knowledge_id)
+    return [DocumentUsageResponse.model_validate(u) for u in usages]
+
+
+# =========================================================
+# Document Pages / Chunks (조회 전용)
+# =========================================================
+@router.get(
+    "/document/{knowledge_id}/pages",
+    response_model=List[DocumentPageResponse],
+    operation_id="list_document_pages",
+)
+def list_document_pages(
+    knowledge_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
+    pages = document_page_crud.list_by_document(db, knowledge_id=knowledge_id)
+    return [DocumentPageResponse.model_validate(p) for p in pages]
+
+
+@router.get(
+    "/document/{knowledge_id}/chunks",
+    response_model=List[DocumentChunkResponse],
+    operation_id="list_document_chunks",
+)
+def list_document_chunks(
+    knowledge_id: int = Path(..., ge=1),
+    page_id: Optional[int] = Query(None, ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
+
+    # NOTE: crud가 parent-child aware 정렬을 사용하게 바뀌었으면
+    #       list_by_document를 쓰는게 더 낫다.
+    if page_id is None:
+        chunks = document_chunk_crud.list_by_document(db, knowledge_id=knowledge_id)
+    else:
+        chunks = document_chunk_crud.list_by_document_page(
+            db,
+            knowledge_id=knowledge_id,
+            page_id=page_id,
+        )
+    return [DocumentChunkResponse.model_validate(c) for c in chunks]
+
+
+
+
 @router.post(
     "/document",
     response_model=DocumentResponse,
@@ -412,8 +476,8 @@ def get_document_ingestion_settings(
     "/document/{knowledge_id}/settings/ingestion",
     response_model=DocumentIngestionSettingResponse,
     operation_id="patch_document_ingestion_settings",
-    summary="임베딩 파라미터 수정, 부모-자식",
-    description="chunking_mode: general | parent_child",
+    summary="청킹 설정",
+    description="**chunking_mode** : `general`(일반) | `parent_child` (부모자식)",
 )
 def patch_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -436,57 +500,6 @@ def patch_document_ingestion_settings(
     return DocumentIngestionSettingResponse.model_validate(updated)
 
 
-@router.get(
-    "/document/{knowledge_id}/settings/search",
-    response_model=DocumentSearchSettingResponse,
-    operation_id="get_document_search_settings",
-)
-def get_document_search_settings(
-    knowledge_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
-
-    defaults = dict(getattr(config, "DEFAULT_SEARCH"))
-    defaults["score_type"] = _SCORE_TYPE_FIXED
-
-    setting = document_search_setting_crud.ensure_default(
-        db,
-        knowledge_id=knowledge_id,
-        defaults=defaults,
-    )
-    db.commit()
-    return DocumentSearchSettingResponse.model_validate(setting)
-
-
-@router.patch(
-    "/document/{knowledge_id}/settings/search",
-    response_model=DocumentSearchSettingResponse,
-    operation_id="patch_document_search_settings",
-    summary="RAG 검색 파라미터 튜닝",
-)
-def patch_document_search_settings(
-    knowledge_id: int = Path(..., ge=1),
-    data: DocumentSearchSettingUpdate = ...,
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
-
-    defaults = dict(getattr(config, "DEFAULT_SEARCH"))
-    defaults["score_type"] = _SCORE_TYPE_FIXED
-    document_search_setting_crud.ensure_default(db, knowledge_id=knowledge_id, defaults=defaults)
-
-    updated = document_search_setting_crud.update_by_knowledge_id(
-        db,
-        knowledge_id=knowledge_id,
-        data=data,
-    )
-    db.commit()
-    return DocumentSearchSettingResponse.model_validate(updated)
-
-
 # =========================================================
 # Chunk Preview (저장 안 함)
 # - general / parent-child 둘 다 지원(평면화된 리스트로 반환)
@@ -495,7 +508,8 @@ def patch_document_search_settings(
     "/document/{knowledge_id}/chunks/preview",
     response_model=ChunkPreviewResponse,
     operation_id="preview_document_chunks",
-    summary="청크 프리뷰(저장 x)",
+    summary="청크 프리뷰-미리보기 새로고침(저장 x)",
+    description="저장되지 않고 미리보기 새로고침을 통하여 볼수 있음 확정되면,\n 청킹 설정 patch 통하여 확정"
 )
 def preview_document_chunks(
     knowledge_id: int = Path(..., ge=1),
@@ -560,6 +574,58 @@ def preview_document_chunks(
     return ChunkPreviewResponse(items=items, stats=stats)
 
 
+
+@router.get(
+    "/document/{knowledge_id}/settings/search",
+    response_model=DocumentSearchSettingResponse,
+    operation_id="get_document_search_settings",
+)
+def get_document_search_settings(
+    knowledge_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
+
+    defaults = dict(getattr(config, "DEFAULT_SEARCH"))
+    defaults["score_type"] = _SCORE_TYPE_FIXED
+
+    setting = document_search_setting_crud.ensure_default(
+        db,
+        knowledge_id=knowledge_id,
+        defaults=defaults,
+    )
+    db.commit()
+    return DocumentSearchSettingResponse.model_validate(setting)
+
+
+@router.patch(
+    "/document/{knowledge_id}/settings/search",
+    response_model=DocumentSearchSettingResponse,
+    operation_id="patch_document_search_settings",
+    summary="검색설정 : rerank 파라미터 튜닝",
+)
+def patch_document_search_settings(
+    knowledge_id: int = Path(..., ge=1),
+    data: DocumentSearchSettingUpdate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
+
+    defaults = dict(getattr(config, "DEFAULT_SEARCH"))
+    defaults["score_type"] = _SCORE_TYPE_FIXED
+    document_search_setting_crud.ensure_default(db, knowledge_id=knowledge_id, defaults=defaults)
+
+    updated = document_search_setting_crud.update_by_knowledge_id(
+        db,
+        knowledge_id=knowledge_id,
+        data=data,
+    )
+    db.commit()
+    return DocumentSearchSettingResponse.model_validate(updated)
+
+
 # =========================================================
 # Reindex Trigger (단순 교체)
 # =========================================================
@@ -567,7 +633,7 @@ def preview_document_chunks(
     "/document/{knowledge_id}/reindex",
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="reindex_document",
-    summary="재인덱싱 트리거 버튼(백그라운드)",
+    summary="지식베이스 생성(백그라운드)",
 )
 def reindex_document(
     background_tasks: BackgroundTasks,
@@ -597,64 +663,3 @@ def reindex_document(
     background_tasks.add_task(run_document_pipeline_background, me.user_id, knowledge_id)
     return None
 
-
-# =========================================================
-# Document Usage (READ ONLY)
-# =========================================================
-@router.get(
-    "/document/{knowledge_id}/usage",
-    response_model=List[DocumentUsageResponse],
-    operation_id="list_document_usage",
-)
-def list_document_usage(
-    knowledge_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
-    usages = document_usage_crud.list_by_document(db, knowledge_id=knowledge_id)
-    return [DocumentUsageResponse.model_validate(u) for u in usages]
-
-
-# =========================================================
-# Document Pages / Chunks (조회 전용)
-# =========================================================
-@router.get(
-    "/document/{knowledge_id}/pages",
-    response_model=List[DocumentPageResponse],
-    operation_id="list_document_pages",
-)
-def list_document_pages(
-    knowledge_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
-    pages = document_page_crud.list_by_document(db, knowledge_id=knowledge_id)
-    return [DocumentPageResponse.model_validate(p) for p in pages]
-
-
-@router.get(
-    "/document/{knowledge_id}/chunks",
-    response_model=List[DocumentChunkResponse],
-    operation_id="list_document_chunks",
-)
-def list_document_chunks(
-    knowledge_id: int = Path(..., ge=1),
-    page_id: Optional[int] = Query(None, ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
-
-    # NOTE: crud가 parent-child aware 정렬을 사용하게 바뀌었으면
-    #       list_by_document를 쓰는게 더 낫다.
-    if page_id is None:
-        chunks = document_chunk_crud.list_by_document(db, knowledge_id=knowledge_id)
-    else:
-        chunks = document_chunk_crud.list_by_document_page(
-            db,
-            knowledge_id=knowledge_id,
-            page_id=page_id,
-        )
-    return [DocumentChunkResponse.model_validate(c) for c in chunks]
