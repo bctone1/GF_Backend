@@ -23,8 +23,10 @@ from sqlalchemy import delete as sa_delete
 
 from core import config
 from core.deps import get_db, get_current_user
+from core.pricing import tokens_for_texts
+
 from models.user.account import AppUser
-from models.user.document import DocumentPage  # reindex 시 pages 정리용
+from models.user.document import DocumentPage
 
 from crud.user.document import (
     document_crud,
@@ -54,14 +56,16 @@ from schemas.user.document import (
 )
 
 from service.user.upload_pipeline import UploadPipeline
-from service.user.document_ingest import ingest_document_text
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 router = APIRouter()
 
 _EMBEDDING_DIM_FIXED = 1536
 _SCORE_TYPE_FIXED = "cosine_similarity"
+
+_PARENT_PREFIX = "[PARENT]"
+_CHILD_PREFIX = "[CHILD]"
+_CHUNK_PREFIX = "[CHUNK]"
 
 
 def _ensure_my_document(db: Session, *, knowledge_id: int, me: AppUser):
@@ -95,21 +99,42 @@ def _safe_parse_json_dict(raw: Optional[str], *, field_name: str) -> Optional[Di
     return obj
 
 
-def _approx_tokens(text: str) -> int:
-    # 프리뷰용 저비용 추정치(대략 4 chars ~= 1 token)
-    return max(1, len(text) // 4)
+def _resolve_document_file_path(*, doc, user_id: int) -> str:
+    base_dir = getattr(config, "UPLOAD_FOLDER", "./uploads")
+    folder_path = doc.folder_path or os.path.join(str(user_id), "document")
+    return os.path.join(base_dir, folder_path, doc.name)
 
 
-def _build_child_splitter(*, chunk_size: int, chunk_overlap: int, chunk_strategy: str):
-    # 현재는 recursive만 MVP로 지원(나머지는 이후 확장)
+def _estimate_tokens(text: str, *, model: str) -> int:
+    # preview에서만 쓰는 토큰 추정(실제로는 tiktoken 기반일 가능성이 높아서 정확)
+    try:
+        return int(tokens_for_texts(model, [text]))
+    except Exception:
+        # 안전망(대략치)
+        return max(1, len(text) // 4)
+
+
+def _build_splitter_for_preview(
+    *,
+    chunk_size: int,
+    chunk_overlap: int,
+    chunk_strategy: str,
+    embed_model: str,
+):
     if chunk_strategy != "recursive":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"unsupported chunk_strategy: {chunk_strategy}",
         )
+
+    def _tok_len(s: str) -> int:
+        return _estimate_tokens(s, model=embed_model)
+
     return RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
+        length_function=_tok_len,
+        separators=["\n\n", "\n", " ", ""],
     )
 
 
@@ -118,67 +143,30 @@ def _split_parents(text: str, separator: str) -> list[str]:
     return [p for p in parts if p]
 
 
-def _resolve_document_file_path(*, doc, user_id: int) -> str:
-    base_dir = getattr(config, "UPLOAD_FOLDER", "./uploads")
-    folder_path = doc.folder_path or os.path.join(str(user_id), "document")
-    return os.path.join(base_dir, folder_path, doc.name)
+def _decorate_parent(seg_idx: int, parent_text: str) -> str:
+    return f"{_PARENT_PREFIX} seg={seg_idx}\n{parent_text.strip()}".strip()
+
+
+def _decorate_child(seg_idx: int, child_idx: int, global_idx: int, child_text: str) -> str:
+    return f"{_CHILD_PREFIX} seg={seg_idx} child={child_idx} global={global_idx}\n{child_text.strip()}".strip()
+
+
+def _decorate_chunk(global_idx: int, chunk_text: str) -> str:
+    return f"{_CHUNK_PREFIX} global={global_idx}\n{chunk_text.strip()}".strip()
 
 
 def run_document_pipeline_background(user_id: int, knowledge_id: int) -> None:
     """
     BackgroundTasks에서 호출할 실제 작업 함수.
-    - 새로운 DB 세션을 열어서 사용 후 닫는다.
-    - UploadPipeline: 파일/텍스트 추출
-    - ingest_document_text: (general/parent-child) chunk 생성 + child embedding
+    통일안:
+    - 엔드포인트는 파이프라인 세부 로직을 직접 수행하지 않고
+      UploadPipeline.process_document()에 위임한다.
     """
     db = SessionLocal()
     try:
-        doc = document_crud.get(db, knowledge_id=knowledge_id)
-        if not doc:
-            return
-
-        # 상태: embedding(서버 처리 단계)
-        document_crud.update(
-            db,
-            knowledge_id=knowledge_id,
-            data=DocumentUpdate(status="embedding", progress=5, error_message=None),
-        )
-        db.commit()
-        db.refresh(doc)
-
         pipeline = UploadPipeline(db, user_id=user_id)
-
-        file_path = _resolve_document_file_path(doc=doc, user_id=user_id)
-        text, _meta = pipeline.extract_text(file_path)
-
-        # ingestion (settings 기반으로 general/parent-child 자동 분기)
-        child_count = ingest_document_text(
-            db,
-            document=doc,
-            full_text=text,
-        )
-
-        # 완료
-        document_crud.update(
-            db,
-            knowledge_id=knowledge_id,
-            data=DocumentUpdate(status="ready", progress=100, chunk_count=child_count),
-        )
-        db.commit()
-
-    except Exception as e:
-        db.rollback()
-        # 실패 상태 기록(있으면)
-        doc = document_crud.get(db, knowledge_id=knowledge_id)
-        if doc:
-            document_crud.update(
-                db,
-                knowledge_id=knowledge_id,
-                data=DocumentUpdate(status="failed", progress=0, error_message=str(e)),
-            )
-            db.commit()
-        # BackgroundTasks라 로그로만 남길 수도 있음(여기서는 재-raise)
-        raise
+        pipeline.process_document(knowledge_id)
+        # process_document 내부에서 status/progress/pages/chunks/cost까지 처리 및 commit
     finally:
         db.close()
 
@@ -261,8 +249,6 @@ def list_document_chunks(
 ):
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
-    # NOTE: crud가 parent-child aware 정렬을 사용하게 바뀌었으면
-    #       list_by_document를 쓰는게 더 낫다.
     if page_id is None:
         chunks = document_chunk_crud.list_by_document(db, knowledge_id=knowledge_id)
     else:
@@ -272,8 +258,6 @@ def list_document_chunks(
             page_id=page_id,
         )
     return [DocumentChunkResponse.model_validate(c) for c in chunks]
-
-
 
 
 @router.post(
@@ -287,10 +271,6 @@ def create_document(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    """
-    문서 메타데이터만 직접 생성하는 예약 엔드포인트.
-    실제 파일 업로드/파싱/임베딩은 /user/upload 사용.
-    """
     data_for_create = data.model_copy(update={"owner_id": me.user_id})
     doc = document_crud.create(db, data_for_create)
     db.commit()
@@ -316,7 +296,6 @@ def upload_document(
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file required")
 
-    # 1) 파일 사이즈 체크
     max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
     file.file.seek(0, 2)
     size = file.file.tell()
@@ -327,17 +306,13 @@ def upload_document(
             detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
         )
 
-    # 2) 파일 저장 + Document row + settings 2row 생성(UploadPipeline에서 보장)
     pipeline = UploadPipeline(db, user_id=me.user_id)
     doc = pipeline.init_document(file)
 
-    # 3) 커밋
     db.commit()
     db.refresh(doc)
 
-    # 4) 백그라운드 처리
     background_tasks.add_task(run_document_pipeline_background, me.user_id, doc.knowledge_id)
-
     return DocumentResponse.model_validate(doc)
 
 
@@ -362,7 +337,6 @@ def upload_document_advanced(
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file required")
 
-    # 1) 파일 사이즈 체크
     max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
     file.file.seek(0, 2)
     size = file.file.tell()
@@ -376,7 +350,6 @@ def upload_document_advanced(
     ingestion_override = _safe_parse_json_dict(ingestion_settings, field_name="ingestion_settings")
     search_override = _safe_parse_json_dict(search_settings, field_name="search_settings")
 
-    # 2) 파일 저장 + Document row + settings 2row 생성(override 반영)
     pipeline = UploadPipeline(db, user_id=me.user_id)
     doc = pipeline.init_document(
         file,
@@ -384,13 +357,10 @@ def upload_document_advanced(
         search_override=search_override,
     )
 
-    # 3) 커밋
     db.commit()
     db.refresh(doc)
 
-    # 4) 백그라운드 처리
     background_tasks.add_task(run_document_pipeline_background, me.user_id, doc.knowledge_id)
-
     return DocumentResponse.model_validate(doc)
 
 
@@ -502,14 +472,15 @@ def patch_document_ingestion_settings(
 
 # =========================================================
 # Chunk Preview (저장 안 함)
-# - general / parent-child 둘 다 지원(평면화된 리스트로 반환)
+# - general / parent-child 둘 다 지원
+# - prefix는 프리뷰에서만 붙인다(DB에는 raw 유지)
 # =========================================================
 @router.post(
     "/document/{knowledge_id}/chunks/preview",
     response_model=ChunkPreviewResponse,
     operation_id="preview_document_chunks",
     summary="청크 프리뷰-미리보기 새로고침(저장 x)",
-    description="저장되지 않고 미리보기 새로고침을 통하여 볼수 있음 확정되면,\n 청킹 설정 patch 통하여 확정"
+    description="저장되지 않고 미리보기 새로고침을 통하여 볼수 있음 확정되면,\n 청킹 설정 patch 통하여 확정",
 )
 def preview_document_chunks(
     knowledge_id: int = Path(..., ge=1),
@@ -520,51 +491,91 @@ def preview_document_chunks(
     doc = _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
     file_path = _resolve_document_file_path(doc=doc, user_id=me.user_id)
-
     pipeline = UploadPipeline(db, user_id=me.user_id)
     text, _ = pipeline.extract_text(file_path)
 
-    splitter = _build_child_splitter(
+    # embed model은 현재 문서 ingestion setting 기준(없으면 default)
+    ing = document_ingestion_setting_crud.get(db, knowledge_id)
+    embed_model = (
+        getattr(ing, "embedding_model", None)
+        or getattr(config, "DEFAULT_EMBEDDING_MODEL", "text-embedding-3-small")
+    )
+
+    splitter = _build_splitter_for_preview(
         chunk_size=body.chunk_size,
         chunk_overlap=body.chunk_overlap,
         chunk_strategy=body.chunk_strategy,
+        embed_model=embed_model,
     )
 
-    flat_chunks: list[str] = []
+    max_chunks = int(getattr(body, "max_chunks", 0) or 0)
+    child_limit = max_chunks if max_chunks > 0 else None
+
+    items: List[ChunkPreviewItem] = []
+    total_chars = 0
+    total_tokens = 0
+
+    def _push(idx: int, t: str):
+        nonlocal total_chars, total_tokens
+        cc = len(t)
+        tk = _estimate_tokens(t, model=embed_model)
+        total_chars += cc
+        total_tokens += tk
+        items.append(
+            ChunkPreviewItem(
+                chunk_index=idx,
+                text=t,
+                char_count=cc,
+                approx_tokens=tk,
+            )
+        )
+
+    flat_index = 1
 
     if body.chunking_mode == "general":
-        flat_chunks = splitter.split_text(text)
+        chunks = splitter.split_text(text or "")
+        if child_limit is not None:
+            chunks = chunks[:child_limit]
+
+        for gi, ch in enumerate(chunks, start=1):
+            decorated = _decorate_chunk(gi, ch)
+            _push(flat_index, decorated)
+            flat_index += 1
+
     else:
         if not body.segment_separator:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="segment_separator is required when chunking_mode='parent_child'",
             )
-        parents = _split_parents(text, body.segment_separator)
-        for parent_text in parents:
-            flat_chunks.extend(splitter.split_text(parent_text))
-            if len(flat_chunks) >= body.max_chunks:
+
+        parents = _split_parents(text or "", body.segment_separator)
+
+        remaining = child_limit
+        global_child_idx = 1
+
+        for seg_idx, parent_text in enumerate(parents, start=1):
+            if remaining is not None and remaining <= 0:
                 break
 
-    flat_chunks = flat_chunks[: body.max_chunks]
+            # parent 먼저
+            _push(flat_index, _decorate_parent(seg_idx, parent_text))
+            flat_index += 1
 
-    items: List[ChunkPreviewItem] = []
-    total_chars = 0
-    total_tokens = 0
+            # child들
+            child_chunks = splitter.split_text(parent_text)
+            if remaining is not None:
+                child_chunks = child_chunks[:remaining]
 
-    for idx, ch in enumerate(flat_chunks, start=1):
-        cc = len(ch)
-        tk = _approx_tokens(ch)
-        total_chars += cc
-        total_tokens += tk
-        items.append(
-            ChunkPreviewItem(
-                chunk_index=idx,
-                text=ch,
-                char_count=cc,
-                approx_tokens=tk,
-            )
-        )
+            for child_idx, ch in enumerate(child_chunks, start=1):
+                decorated = _decorate_child(seg_idx, child_idx, global_child_idx, ch)
+                _push(flat_index, decorated)
+                flat_index += 1
+                global_child_idx += 1
+                if remaining is not None:
+                    remaining -= 1
+                    if remaining <= 0:
+                        break
 
     stats = ChunkPreviewStats(
         total_chunks=len(items),
@@ -572,7 +583,6 @@ def preview_document_chunks(
         approx_total_tokens=total_tokens,
     )
     return ChunkPreviewResponse(items=items, stats=stats)
-
 
 
 @router.get(
@@ -643,11 +653,9 @@ def reindex_document(
 ):
     _ensure_my_document(db, knowledge_id=knowledge_id, me=me)
 
-    # chunks 먼저 지우고 -> pages 삭제
     document_chunk_crud.delete_by_document(db, knowledge_id=knowledge_id)
     db.execute(sa_delete(DocumentPage).where(DocumentPage.knowledge_id == knowledge_id))
 
-    # 문서 상태 리셋
     document_crud.update(
         db,
         knowledge_id=knowledge_id,
@@ -662,4 +670,3 @@ def reindex_document(
 
     background_tasks.add_task(run_document_pipeline_background, me.user_id, knowledge_id)
     return None
-

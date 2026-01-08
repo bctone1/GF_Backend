@@ -5,7 +5,7 @@ import os
 import shutil
 import logging
 from uuid import uuid4
-from typing import List, Optional, Tuple, Any, Dict
+from typing import Optional, Tuple, Any, Dict
 from datetime import datetime, timezone
 
 from fastapi import UploadFile
@@ -23,15 +23,14 @@ from schemas.user.document import (
     DocumentCreate,
     DocumentUpdate,
     DocumentPageCreate,
-    DocumentChunkCreate,
 )
 
 from crud.user import document as doc_crud
 import crud.supervisor.api_usage as cost
 
 from langchain_community.document_loaders import PyMuPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_service.embedding.get_vector import texts_to_vectors
+
+from service.user.document_ingest import ingest_document_text
 
 log = logging.getLogger("api_cost")
 
@@ -112,17 +111,18 @@ def _validate_search_payload(p: Dict[str, Any]) -> None:
 # =========================================================
 class UploadPipeline:
     """
-    역할 분리 원칙:
-
+    역할 분리 원칙(통일안):
     - UploadPipeline
       * 파일 저장
       * 텍스트 추출
-      * general chunking
-      * embedding
-      * DB 저장 + 비용 집계
+      * 페이지 저장
+      * 상태 업데이트 / 비용 집계
+      * chunking/embedding/store_chunks 는 ingest service로 위임
 
-    - parent-child / segment 기반 chunking
-      → 별도 service (ex: ingest_document_text)
+    - document_ingest.ingest_document_text
+      * general / parent_child chunking
+      * child embedding
+      * chunk 저장 + chunk_count 갱신
     """
 
     def __init__(self, db: Session, user_id: int):
@@ -150,46 +150,18 @@ class UploadPipeline:
 
     def extract_text(self, file_path: str) -> Tuple[str, int]:
         docs = PyMuPDFLoader(file_path).load()
-        text = "\n".join(
-            d.page_content for d in docs if getattr(d, "page_content", "")
-        ).strip()
+        text = "\n".join(d.page_content for d in docs if getattr(d, "page_content", "")).strip()
         return text, len(docs)
-
-    # -----------------------------------------------------
-    # Chunk / Embed
-    # -----------------------------------------------------
-    def chunk_text(
-        self,
-        text: str,
-        *,
-        chunk_size: int,
-        chunk_overlap: int,
-        max_chunks: int,
-        chunk_strategy: str,
-    ) -> List[str]:
-        if chunk_strategy != "recursive":
-            raise ValueError("Only chunk_strategy='recursive' is supported")
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            length_function=_tok_len,
-            separators=["\n\n", "\n", " ", ""],
-        )
-        chunks = splitter.split_text(text)
-        return chunks[:max_chunks] if max_chunks else chunks
-
-    def embed_chunks(self, chunks: List[str]) -> Tuple[List[str], List[List[float]]]:
-        cleaned = [c for c in chunks if c and c.strip()]
-        if not cleaned:
-            return [], []
-        vectors = texts_to_vectors(cleaned)
-        return cleaned, vectors
 
     # -----------------------------------------------------
     # Store
     # -----------------------------------------------------
     def store_pages(self, knowledge_id: int, num_pages: int):
+        # 재처리 시 중복 방지(있으면 삭제)
+        deleter = getattr(doc_crud.document_page_crud, "delete_by_document", None)
+        if callable(deleter):
+            deleter(self.db, knowledge_id)
+
         pages = [
             DocumentPageCreate(
                 knowledge_id=knowledge_id,
@@ -199,33 +171,6 @@ class UploadPipeline:
         ]
         if pages:
             doc_crud.document_page_crud.bulk_create(self.db, pages)
-
-    def store_chunks(
-        self,
-        knowledge_id: int,
-        chunks: List[str],
-        vectors: List[List[float]],
-    ):
-        items: List[tuple[DocumentChunkCreate, List[float]]] = []
-        for idx, (txt, vec) in enumerate(zip(chunks, vectors), start=1):
-            items.append(
-                (
-                    DocumentChunkCreate(
-                        knowledge_id=knowledge_id,
-                        page_id=None,
-                        chunk_index=idx,
-                        chunk_text=txt,
-                    ),
-                    vec,
-                )
-            )
-
-        doc_crud.document_chunk_crud.bulk_create(self.db, items)
-        doc_crud.document_crud.update(
-            self.db,
-            knowledge_id=knowledge_id,
-            data=DocumentUpdate(chunk_count=len(items)),
-        )
 
     # -----------------------------------------------------
     # Init (sync)
@@ -299,6 +244,11 @@ class UploadPipeline:
             if not ing:
                 raise RuntimeError("ingestion setting not found")
 
+            embed_model = getattr(ing, "embedding_model", None) or getattr(
+                config, "DEFAULT_EMBEDDING_MODEL", "text-embedding-3-small"
+            )
+
+            # 1) 상태 업데이트
             doc_crud.document_crud.update(
                 self.db,
                 knowledge_id=knowledge_id,
@@ -306,38 +256,39 @@ class UploadPipeline:
             )
             self.db.commit()
 
+            # 2) 텍스트 추출 + 페이지 저장
             text, num_pages = self.extract_text(file_path)
             self.store_pages(knowledge_id, num_pages)
             self.db.commit()
 
-            chunks = self.chunk_text(
-                text,
-                chunk_size=ing.chunk_size,
-                chunk_overlap=ing.chunk_overlap,
-                max_chunks=ing.max_chunks,
-                chunk_strategy=ing.chunk_strategy,
+            # 3) chunking/embedding/store_chunks 위임
+            #    - ingest_document_text는 child chunk들만 임베딩
+            #    - (child_count, total_tokens) 리턴을 기대 (2번 파일에서 맞출 거야)
+            child_count, total_tokens = ingest_document_text(
+                self.db,
+                document=doc,
+                full_text=text,
             )
-            chunks, vectors = self.embed_chunks(chunks)
-            self.store_chunks(knowledge_id, chunks, vectors)
+            self.db.commit()
 
-            # 비용 집계
-            total_tokens = sum(_tok_len(c) for c in chunks)
-            usage = normalize_usage_embedding(total_tokens)
+            # 4) 비용 집계 (임베딩 토큰 기준)
+            usage = normalize_usage_embedding(int(total_tokens))
             usd = estimate_embedding_cost_usd(
-                model=getattr(config, "DEFAULT_EMBEDDING_MODEL"),
+                model=embed_model,
                 total_tokens=usage["embedding_tokens"],
             )
             cost.add_event(
                 self.db,
                 ts_utc=datetime.now(timezone.utc),
                 product="embedding",
-                model=getattr(config, "DEFAULT_EMBEDDING_MODEL"),
+                model=embed_model,
                 llm_tokens=0,
                 embedding_tokens=usage["embedding_tokens"],
                 audio_seconds=0,
                 cost_usd=usd,
             )
 
+            # 5) 완료
             doc_crud.document_crud.update(
                 self.db,
                 knowledge_id=knowledge_id,
