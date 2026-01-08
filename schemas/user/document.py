@@ -8,32 +8,154 @@ from typing import Any, Optional, List, Literal
 from pydantic import ConfigDict, Field, model_validator
 
 from schemas.base import ORMBase
+from core import config
 
 
 # =========================================================
-# Constants (정합성 고정)
+# Defaults from core.config (Single Source of Truth)
 # =========================================================
-EMBEDDING_DIM_FIXED: Literal[1536] = 1536
-KB_SCORE_TYPE_FIXED: Literal["cosine_similarity"] = "cosine_similarity"
+_DI: dict[str, Any] = dict(getattr(config, "DEFAULT_INGESTION", {}) or {})
+_DS: dict[str, Any] = dict(getattr(config, "DEFAULT_SEARCH", {}) or {})
 
-DEFAULT_CHILD_CHUNK_SIZE = 800
-DEFAULT_CHILD_CHUNK_OVERLAP = 200
-DEFAULT_MAX_CHUNKS = 100
-DEFAULT_CHUNK_STRATEGY: Literal["recursive"] = "recursive"
 
-DEFAULT_EMBEDDING_PROVIDER = "openai"
-DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"  # 1536 dim과 정합
+def _di(key: str, default: Any) -> Any:
+    return _DI.get(key, default)
 
-DEFAULT_PARENT_CHILD_SEPARATOR: Literal["\n\n"] = "\n\n"
 
-DEFAULT_PARENT_CHUNK_SIZE = 4000
-DEFAULT_PARENT_CHUNK_OVERLAP = 400
+def _ds(key: str, default: Any) -> Any:
+    return _DS.get(key, default)
 
+
+# =========================================================
+# Types (정합성 고정)
+# =========================================================
+EmbeddingDim = Literal[1536]
+ScoreType = Literal["cosine_similarity"]
 
 ChunkStrategy = Literal["recursive", "token", "semantic"]
 ChunkingMode = Literal["general", "parent_child"]
 ChunkLevel = Literal["child", "parent"]
 
+
+# =========================================================
+# json_schema_extra helpers (examples from config)
+# =========================================================
+def _ingestion_general_example() -> dict[str, Any]:
+    return {
+        "knowledge_id": 123,
+        "chunk_size": int(_di("chunk_size", 600)),
+        "chunk_overlap": int(_di("chunk_overlap", 200)),
+        "max_chunks": int(_di("max_chunks", 100)),
+        "chunk_strategy": str(_di("chunk_strategy", "recursive")),
+        "chunking_mode": "general",
+        "embedding_provider": str(_di("embedding_provider", "openai")),
+        "embedding_model": str(_di("embedding_model", "text-embedding-3-small")),
+        "embedding_dim": int(getattr(config, "EMBEDDING_DIM_FIXED", 1536)),
+        "extra": {},
+    }
+
+
+def _ingestion_parent_child_example() -> dict[str, Any]:
+    return {
+        "knowledge_id": 123,
+        "chunk_size": int(_di("chunk_size", 600)),
+        "chunk_overlap": int(_di("chunk_overlap", 200)),
+        "max_chunks": int(_di("max_chunks", 100)),
+        "chunk_strategy": str(_di("chunk_strategy", "recursive")),
+        "chunking_mode": "parent_child",
+        "segment_separator": str(_di("segment_separator", "\n\n")),
+        "parent_chunk_size": int(_di("parent_chunk_size", 1500)),
+        "parent_chunk_overlap": int(_di("parent_chunk_overlap", 400)),
+        "embedding_provider": str(_di("embedding_provider", "openai")),
+        "embedding_model": str(_di("embedding_model", "text-embedding-3-small")),
+        "embedding_dim": int(getattr(config, "EMBEDDING_DIM_FIXED", 1536)),
+        "extra": {},
+    }
+
+
+def _inject_ingestion_create_examples(schema: dict[str, Any]) -> None:
+    schema.setdefault("examples", [_ingestion_general_example(), _ingestion_parent_child_example()])
+
+
+def _inject_ingestion_update_examples(schema: dict[str, Any]) -> None:
+    schema.setdefault(
+        "examples",
+        [
+            {
+                "chunking_mode": "general",
+                "chunk_size": int(_di("chunk_size", 600)),
+                "chunk_overlap": int(_di("chunk_overlap", 200)),
+                "max_chunks": int(_di("max_chunks", 100)),
+                "chunk_strategy": str(_di("chunk_strategy", "recursive")),
+            },
+            {
+                "chunking_mode": "parent_child",
+                "segment_separator": str(_di("segment_separator", "\n\n")),
+                "parent_chunk_size": int(_di("parent_chunk_size", 1500)),
+                "parent_chunk_overlap": int(_di("parent_chunk_overlap", 400)),
+                "chunk_size": int(_di("chunk_size", 600)),
+                "chunk_overlap": int(_di("chunk_overlap", 200)),
+                "max_chunks": int(_di("max_chunks", 100)),
+                "chunk_strategy": str(_di("chunk_strategy", "recursive")),
+            },
+        ],
+    )
+
+
+def _search_example() -> dict[str, Any]:
+    return {
+        "knowledge_id": 123,
+        "top_k": int(_ds("top_k", 8)),
+        "min_score": str(_ds("min_score", "0.20")),  # Decimal은 문자열이 Swagger에서 안전
+        "score_type": str(getattr(config, "KB_SCORE_TYPE_FIXED", "cosine_similarity")),
+        "reranker_enabled": bool(_ds("reranker_enabled", False)),
+        "reranker_model": _ds("reranker_model", None),
+        "reranker_top_n": int(_ds("reranker_top_n", 5)),
+    }
+
+
+def _inject_search_create_examples(schema: dict[str, Any]) -> None:
+    schema.setdefault("examples", [_search_example()])
+
+
+def _inject_search_update_examples(schema: dict[str, Any]) -> None:
+    schema.setdefault(
+        "examples",
+        [
+            {
+                "top_k": int(_ds("top_k", 8)),
+                "min_score": str(_ds("min_score", "0.20")),
+                "reranker_enabled": bool(_ds("reranker_enabled", False)),
+                "reranker_model": _ds("reranker_model", None),
+                "reranker_top_n": int(_ds("reranker_top_n", 5)),
+            }
+        ],
+    )
+
+
+def _inject_preview_examples(schema: dict[str, Any]) -> None:
+    schema.setdefault(
+        "examples",
+        [
+            {
+                "chunk_size": int(_di("chunk_size", 600)),
+                "chunk_overlap": int(_di("chunk_overlap", 200)),
+                "max_chunks": int(_di("max_chunks", 100)),
+                "chunk_strategy": str(_di("chunk_strategy", "recursive")),
+                "chunking_mode": "general",
+            },
+            {
+                "chunk_size": int(_di("chunk_size", 600)),
+                "chunk_overlap": int(_di("chunk_overlap", 200)),
+                "max_chunks": int(_di("max_chunks", 100)),
+                "chunk_strategy": str(_di("chunk_strategy", "recursive")),
+                "chunking_mode": "parent_child",
+                "segment_separator": str(_di("segment_separator", "\n\n")),
+                "parent_chunk_size": int(_di("parent_chunk_size", 1500)),
+                "parent_chunk_overlap": int(_di("parent_chunk_overlap", 400)),
+            },
+        ],
+    )
 
 
 # =========================================================
@@ -48,10 +170,10 @@ class DocumentCreate(ORMBase):
     file_size_bytes: int
     folder_path: Optional[str] = None
 
-    status: Optional[str] = None  # default: 'uploading'
-    chunk_count: Optional[int] = None  # default: 0
-    progress: Optional[int] = None  # default: 0
-    error_message: Optional[str] = None  # default: None
+    status: Optional[str] = None
+    chunk_count: Optional[int] = None
+    progress: Optional[int] = None
+    error_message: Optional[str] = None
     uploaded_at: Optional[datetime] = None
 
 
@@ -64,7 +186,6 @@ class DocumentUpdate(ORMBase):
     chunk_count: Optional[int] = None
     progress: Optional[int] = None
     error_message: Optional[str] = None
-    # updated_at는 서버 관리
 
 
 class DocumentResponse(ORMBase):
@@ -77,14 +198,13 @@ class DocumentResponse(ORMBase):
     file_size_bytes: int
     folder_path: Optional[str] = None
 
-    status: str  # 'uploading' / 'embedding' / 'ready' / 'failed'
+    status: str
     chunk_count: int
-    progress: int  # 0 ~ 100
+    progress: int
     error_message: Optional[str] = None
 
     uploaded_at: datetime
     updated_at: datetime
-
 
 
 # =========================================================
@@ -93,63 +213,34 @@ class DocumentResponse(ORMBase):
 class DocumentIngestionSettingCreate(ORMBase):
     model_config = ConfigDict(
         from_attributes=False,
-        json_schema_extra={
-            "examples": [
-                {
-                    "chunk_size": 800,
-                    "chunk_overlap": 200,
-                    "max_chunks": 100,
-                    "chunk_strategy": "recursive",
-                    "chunking_mode": "general",
-                    "embedding_provider": "openai",
-                    "embedding_model": "text-embedding-3-small",
-                    "embedding_dim": 1536,
-                    "extra": {},
-                },
-                {
-                    "chunk_size": 800,
-                    "chunk_overlap": 200,
-                    "max_chunks": 100,
-                    "chunk_strategy": "recursive",
-                    "chunking_mode": "parent_child",
-                    "segment_separator": "\n\n",
-                    "parent_chunk_size": 4000,
-                    "parent_chunk_overlap": 400,
-                    "embedding_provider": "openai",
-                    "embedding_model": "text-embedding-3-small",
-                    "embedding_dim": 1536,
-                    "extra": {},
-                },
-            ]
-        },
+        json_schema_extra=_inject_ingestion_create_examples,
     )
 
     knowledge_id: int
 
-    # child chunking (추천 default)
-    chunk_size: int = Field(default=DEFAULT_CHILD_CHUNK_SIZE, ge=1)
-    chunk_overlap: int = Field(default=DEFAULT_CHILD_CHUNK_OVERLAP, ge=0)
-    max_chunks: int = Field(default=DEFAULT_MAX_CHUNKS, ge=1)
-    chunk_strategy: ChunkStrategy = DEFAULT_CHUNK_STRATEGY
+    # child chunking
+    chunk_size: int = Field(default=int(_di("chunk_size", 600)), ge=1)
+    chunk_overlap: int = Field(default=int(_di("chunk_overlap", 200)), ge=0)
+    max_chunks: int = Field(default=int(_di("max_chunks", 100)), ge=1)
+    chunk_strategy: ChunkStrategy = Field(default=str(_di("chunk_strategy", "recursive")))
 
     # mode
-    chunking_mode: ChunkingMode = "general"
+    chunking_mode: ChunkingMode = Field(default=str(_di("chunking_mode", "general")))
     segment_separator: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
     # parent chunking (parent_child에서만 의미)
     parent_chunk_size: Optional[int] = Field(default=None, ge=1)
     parent_chunk_overlap: Optional[int] = Field(default=None, ge=0)
 
-    # embedding (추천 default)
-    embedding_provider: str = DEFAULT_EMBEDDING_PROVIDER
-    embedding_model: str = DEFAULT_EMBEDDING_MODEL
+    # embedding
+    embedding_provider: str = Field(default=str(_di("embedding_provider", "openai")))
+    embedding_model: str = Field(default=str(_di("embedding_model", "text-embedding-3-small")))
+    embedding_dim: EmbeddingDim = Field(default=int(getattr(config, "EMBEDDING_DIM_FIXED", 1536)))
 
-    embedding_dim: Literal[1536] = EMBEDDING_DIM_FIXED
     extra: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_overlap_and_mode(self):
-        # MVP: recursive만
         if self.chunk_strategy != "recursive":
             raise ValueError("unsupported chunk_strategy (MVP): only 'recursive' is allowed")
 
@@ -157,20 +248,22 @@ class DocumentIngestionSettingCreate(ORMBase):
             raise ValueError("chunk_overlap must be < chunk_size")
 
         if self.chunking_mode == "parent_child":
-            # 디폴트 separator 채움 (Swagger/프론트도 직관적으로)
             if self.segment_separator is None:
-                self.segment_separator = DEFAULT_PARENT_CHILD_SEPARATOR
+                self.segment_separator = str(_di("segment_separator", "\n\n"))
 
-            if self.parent_chunk_size is not None and self.parent_chunk_overlap is not None:
-                if self.parent_chunk_overlap >= self.parent_chunk_size:
-                    raise ValueError("parent_chunk_overlap must be < parent_chunk_size")
+            # parent 기본값 주입(없으면 프리뷰에서 parent가 1개로만 뭉칠 수 있음)
+            if self.parent_chunk_size is None:
+                self.parent_chunk_size = int(_di("parent_chunk_size", 1500))
+            if self.parent_chunk_overlap is None:
+                self.parent_chunk_overlap = int(_di("parent_chunk_overlap", 400))
+
+            if self.parent_chunk_overlap >= self.parent_chunk_size:
+                raise ValueError("parent_chunk_overlap must be < parent_chunk_size")
         else:
-            # general이면 의미 없는 값은 정리
             self.segment_separator = None
             self.parent_chunk_size = None
             self.parent_chunk_overlap = None
 
-        # 위험한 separator 최소 방어(개행은 허용해야 해서 strip() 검사는 금지)
         if self.segment_separator is not None:
             if self.segment_separator == "":
                 raise ValueError("segment_separator cannot be empty string")
@@ -180,35 +273,10 @@ class DocumentIngestionSettingCreate(ORMBase):
         return self
 
 
-
-DEFAULT_PARENT_CHILD_SEPARATOR = "\n\n"
-
 class DocumentIngestionSettingUpdate(ORMBase):
     model_config = ConfigDict(
         from_attributes=False,
-        json_schema_extra={
-            "examples": [
-                {
-                    "chunk_size": 800,
-                    "chunk_overlap": 200,
-                    "max_chunks": 100,
-                    "chunk_strategy": "recursive",
-                    "chunking_mode": "general",
-                    "segment_separator": "\n\n",
-                    "embedding_provider": "openai",
-                    "embedding_model": "text-embedding-3-small",
-                    "extra": {},
-                },
-                {
-                    "chunking_mode": "parent_child",
-                    "segment_separator": "\n\n",
-                    "chunk_size": 800,
-                    "chunk_overlap": 200,
-                    "max_chunks": 100,
-                    "chunk_strategy": "recursive",
-                },
-            ]
-        },
+        json_schema_extra=_inject_ingestion_update_examples,
     )
 
     chunk_size: Optional[int] = Field(default=None, ge=1)
@@ -217,20 +285,14 @@ class DocumentIngestionSettingUpdate(ORMBase):
     chunk_strategy: Optional[ChunkStrategy] = None
 
     chunking_mode: Optional[ChunkingMode] = None
-
-
-    segment_separator: Optional[str] = Field(
-        default=DEFAULT_PARENT_CHILD_SEPARATOR,
-        min_length=1,
-        max_length=64,
-    )
+    segment_separator: Optional[str] = Field(default=None, min_length=1, max_length=64)
 
     parent_chunk_size: Optional[int] = Field(default=None, ge=1)
     parent_chunk_overlap: Optional[int] = Field(default=None, ge=0)
 
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
-    embedding_dim: Optional[Literal[1536]] = None
+    embedding_dim: Optional[EmbeddingDim] = None
     extra: Optional[dict[str, Any]] = None
 
     @model_validator(mode="after")
@@ -252,23 +314,20 @@ class DocumentIngestionSettingUpdate(ORMBase):
             if self.segment_separator in (" ", ".", ","):
                 raise ValueError("segment_separator is too generic (would explode segments)")
 
-        # general로 명시하면 parent 관련 정리
         if self.chunking_mode == "general":
             self.segment_separator = None
             self.parent_chunk_size = None
             self.parent_chunk_overlap = None
 
-        # parent_child로 명시했는데 segment_separator를 null로 보낸 건 막기
         if self.chunking_mode == "parent_child":
             if "segment_separator" in self.model_fields_set and self.segment_separator is None:
                 raise ValueError("segment_separator cannot be null when chunking_mode='parent_child'")
 
-            # 아예 안 보냈으면 디폴트(\n\n) 주입 (UX)
+            # 프리뷰/단독 사용 시 안전장치(필드셋엔 안 들어가서 patch payload에는 보통 안 섞임)
             if "segment_separator" not in self.model_fields_set and self.segment_separator is None:
-                self.segment_separator = DEFAULT_PARENT_CHILD_SEPARATOR
+                self.segment_separator = str(_di("segment_separator", "\n\n"))
 
         return self
-
 
 
 class DocumentIngestionSettingResponse(ORMBase):
@@ -276,13 +335,11 @@ class DocumentIngestionSettingResponse(ORMBase):
 
     knowledge_id: int
 
-    # child chunking
     chunk_size: int
     chunk_overlap: int
     max_chunks: int
     chunk_strategy: ChunkStrategy
 
-    # mode
     chunking_mode: ChunkingMode
     segment_separator: Optional[str] = None
     parent_chunk_size: Optional[int] = None
@@ -290,7 +347,7 @@ class DocumentIngestionSettingResponse(ORMBase):
 
     embedding_provider: str
     embedding_model: str
-    embedding_dim: Literal[1536]
+    embedding_dim: EmbeddingDim
 
     extra: dict[str, Any]
 
@@ -298,26 +355,30 @@ class DocumentIngestionSettingResponse(ORMBase):
     updated_at: datetime
 
 
-
 # =========================================================
 # user.document_search_settings
 # =========================================================
 class DocumentSearchSettingCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
+    model_config = ConfigDict(
+        from_attributes=False,
+        json_schema_extra=_inject_search_create_examples,
+    )
 
     knowledge_id: int
 
-    top_k: int = Field(ge=1)
+    top_k: int = Field(default=int(_ds("top_k", 8)), ge=1)
 
-    # 유사도(min_score) 기준 (0~1)
-    min_score: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
+    min_score: Decimal = Field(
+        default=Decimal(str(_ds("min_score", "0.20"))),
+        ge=Decimal("0"),
+        le=Decimal("1"),
+    )
 
-    # 고정(혼용 금지)
-    score_type: Literal["cosine_similarity"] = KB_SCORE_TYPE_FIXED
+    score_type: ScoreType = Field(default=str(getattr(config, "KB_SCORE_TYPE_FIXED", "cosine_similarity")))
 
-    reranker_enabled: bool = False
-    reranker_model: Optional[str] = None
-    reranker_top_n: int = Field(ge=1)
+    reranker_enabled: bool = Field(default=bool(_ds("reranker_enabled", False)))
+    reranker_model: Optional[str] = Field(default=_ds("reranker_model", None))
+    reranker_top_n: int = Field(default=int(_ds("reranker_top_n", 5)), ge=1)
 
     @model_validator(mode="after")
     def _validate_reranker_top_n(self):
@@ -327,13 +388,15 @@ class DocumentSearchSettingCreate(ORMBase):
 
 
 class DocumentSearchSettingUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
+    model_config = ConfigDict(
+        from_attributes=False,
+        json_schema_extra=_inject_search_update_examples,
+    )
 
     top_k: Optional[int] = Field(default=None, ge=1)
     min_score: Optional[Decimal] = Field(default=None, ge=Decimal("0"), le=Decimal("1"))
 
-    # 업데이트로 다른 값 못 넣게 (넣는다면 cosine_similarity만)
-    score_type: Optional[Literal["cosine_similarity"]] = None
+    score_type: Optional[ScoreType] = None
 
     reranker_enabled: Optional[bool] = None
     reranker_model: Optional[str] = None
@@ -369,37 +432,17 @@ class DocumentSearchSettingResponse(ORMBase):
 class ChunkPreviewRequest(ORMBase):
     model_config = ConfigDict(
         from_attributes=False,
-        json_schema_extra={
-            "examples": [
-                {
-                    "chunk_size": 800,
-                    "chunk_overlap": 200,
-                    "max_chunks": 100,
-                    "chunk_strategy": "recursive",
-                    "chunking_mode": "general",
-                    "segment_separator": "\n\n",
-                },
-                {
-                    "chunk_size": 800,
-                    "chunk_overlap": 200,
-                    "max_chunks": 100,
-                    "chunk_strategy": "recursive",
-                    "chunking_mode": "parent_child",
-                    "segment_separator": "\n\n",
-                    "parent_chunk_size": 4000,
-                    "parent_chunk_overlap": 400,
-                },
-            ]
-        },
+        json_schema_extra=_inject_preview_examples,
     )
 
-    chunk_size: int = Field(default=DEFAULT_CHILD_CHUNK_SIZE, ge=1)
-    chunk_overlap: int = Field(default=DEFAULT_CHILD_CHUNK_OVERLAP, ge=0)
-    max_chunks: int = Field(default=DEFAULT_MAX_CHUNKS, ge=1)
-    chunk_strategy: ChunkStrategy = DEFAULT_CHUNK_STRATEGY
+    chunk_size: int = Field(default=int(_di("chunk_size", 600)), ge=1)
+    chunk_overlap: int = Field(default=int(_di("chunk_overlap", 200)), ge=0)
+    max_chunks: int = Field(default=int(_di("max_chunks", 100)), ge=1)
+    chunk_strategy: ChunkStrategy = Field(default=str(_di("chunk_strategy", "recursive")))
 
-    chunking_mode: ChunkingMode = "general"
+    chunking_mode: ChunkingMode = Field(default=str(_di("chunking_mode", "general")))
     segment_separator: Optional[str] = Field(default=None, min_length=1, max_length=64)
+
     parent_chunk_size: Optional[int] = Field(default=None, ge=1)
     parent_chunk_overlap: Optional[int] = Field(default=None, ge=0)
 
@@ -413,11 +456,15 @@ class ChunkPreviewRequest(ORMBase):
 
         if self.chunking_mode == "parent_child":
             if self.segment_separator is None:
-                self.segment_separator = DEFAULT_PARENT_CHILD_SEPARATOR
+                self.segment_separator = str(_di("segment_separator", "\n\n"))
 
-            if self.parent_chunk_size is not None and self.parent_chunk_overlap is not None:
-                if self.parent_chunk_overlap >= self.parent_chunk_size:
-                    raise ValueError("parent_chunk_overlap must be < parent_chunk_size")
+            if self.parent_chunk_size is None:
+                self.parent_chunk_size = int(_di("parent_chunk_size", 1500))
+            if self.parent_chunk_overlap is None:
+                self.parent_chunk_overlap = int(_di("parent_chunk_overlap", 400))
+
+            if self.parent_chunk_overlap >= self.parent_chunk_size:
+                raise ValueError("parent_chunk_overlap must be < parent_chunk_size")
         else:
             self.segment_separator = None
             self.parent_chunk_size = None
@@ -465,7 +512,7 @@ class DocumentUsageCreate(ORMBase):
     knowledge_id: int
     user_id: Optional[int] = None
     usage_type: str
-    usage_count: Optional[int] = None  # server default 0
+    usage_count: Optional[int] = None
     last_used_at: Optional[datetime] = None
 
 
@@ -495,9 +542,9 @@ class DocumentPageCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     knowledge_id: int
-    page_no: Optional[int] = None  # 1부터, NULL 허용
+    page_no: Optional[int] = None
     image_url: Optional[str] = None
-    created_at: Optional[datetime] = None  # 보통 서버에서 채움
+    created_at: Optional[datetime] = None
 
 
 class DocumentPageUpdate(ORMBase):
@@ -523,8 +570,7 @@ class DocumentPageResponse(ORMBase):
 class DocumentChunkCreate(ORMBase):
     """
     생성은 보통 서버(ingestion)에서만 함.
-    - general: chunk_level='child', parent_chunk_id=None, segment_index=1,
-        chunk_index_in_segment=chunk_index(or 1 N)
+    - general: chunk_level='child', parent_chunk_id=None, segment_index=1
     - parent_child:
       - parent row: chunk_level='parent', chunk_index=None, vector 없음
       - child row : chunk_level='child', parent_chunk_id=..., chunk_index not null, vector 있음
@@ -540,9 +586,7 @@ class DocumentChunkCreate(ORMBase):
     segment_index: int = Field(default=1, ge=1)
     chunk_index_in_segment: Optional[int] = Field(default=None, ge=1)
 
-    # 글로벌 인덱스: parent는 None, child는 필수
-    chunk_index: Optional[int] = Field(default=None, ge=1)
-
+    chunk_index: Optional[int] = Field(default=None, ge=1)  # parent는 None, child는 필수
     chunk_text: str
     created_at: Optional[datetime] = None
 
@@ -563,7 +607,6 @@ class DocumentChunkUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     page_id: Optional[int] = None
-    # 인덱스/레벨/관계는 서버 로직에서만 관리하는 전제(수정 막는 게 안전)
     chunk_text: Optional[str] = None
 
 
@@ -583,4 +626,3 @@ class DocumentChunkResponse(ORMBase):
     chunk_index: Optional[int] = None
     chunk_text: str
     created_at: datetime
-    # vector_memory는 외부로 내보내지 않음

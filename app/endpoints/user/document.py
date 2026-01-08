@@ -58,6 +58,12 @@ from schemas.user.document import (
 from service.user.upload_pipeline import UploadPipeline
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from service.user.document_chunking import (
+    build_splitter,
+    split_segments,
+    clean_texts,
+)
+
 router = APIRouter()
 
 _EMBEDDING_DIM_FIXED = 1536
@@ -113,34 +119,6 @@ def _estimate_tokens(text: str, *, model: str) -> int:
         # 안전망(대략치)
         return max(1, len(text) // 4)
 
-
-def _build_splitter_for_preview(
-    *,
-    chunk_size: int,
-    chunk_overlap: int,
-    chunk_strategy: str,
-    embed_model: str,
-):
-    if chunk_strategy != "recursive":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"unsupported chunk_strategy: {chunk_strategy}",
-        )
-
-    def _tok_len(s: str) -> int:
-        return _estimate_tokens(s, model=embed_model)
-
-    return RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
-        length_function=_tok_len,
-        separators=["\n\n", "\n", " ", ""],
-    )
-
-
-def _split_parents(text: str, separator: str) -> list[str]:
-    parts = [p.strip() for p in (text or "").split(separator)]
-    return [p for p in parts if p]
 
 
 def _decorate_parent(seg_idx: int, parent_text: str) -> str:
@@ -501,15 +479,21 @@ def preview_document_chunks(
         or getattr(config, "DEFAULT_EMBEDDING_MODEL", "text-embedding-3-small")
     )
 
-    splitter = _build_splitter_for_preview(
-        chunk_size=body.chunk_size,
-        chunk_overlap=body.chunk_overlap,
-        chunk_strategy=body.chunk_strategy,
-        embed_model=embed_model,
+    # preview에서만 쓰는 length_function
+    def _tok_len(s: str) -> int:
+        return _estimate_tokens(s or "", model=embed_model)
+
+    # splitter는 ingest와 동일하게 build_splitter 사용
+    child_splitter = build_splitter(
+        chunk_size=int(body.chunk_size),
+        chunk_overlap=int(body.chunk_overlap),
+        strategy=str(body.chunk_strategy),
+        length_function=_tok_len,
     )
 
+    # max_chunks는 "child 기준"으로 제한 (ingest와 동일 컨셉)
     max_chunks = int(getattr(body, "max_chunks", 0) or 0)
-    child_limit = max_chunks if max_chunks > 0 else None
+    remaining = max_chunks if max_chunks > 0 else None
 
     items: List[ChunkPreviewItem] = []
     total_chars = 0
@@ -532,50 +516,89 @@ def preview_document_chunks(
 
     flat_index = 1
 
+    # -------------------------
+    # GENERAL
+    # -------------------------
     if body.chunking_mode == "general":
-        chunks = splitter.split_text(text or "")
-        if child_limit is not None:
-            chunks = chunks[:child_limit]
+        chunks = clean_texts(child_splitter.split_text(text or ""))
+        if remaining is not None:
+            chunks = chunks[:remaining]
 
         for gi, ch in enumerate(chunks, start=1):
-            decorated = _decorate_chunk(gi, ch)
-            _push(flat_index, decorated)
+            _push(flat_index, _decorate_chunk(gi, ch))
             flat_index += 1
 
+    # -------------------------
+    # PARENT_CHILD
+    # -------------------------
     else:
-        if not body.segment_separator:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="segment_separator is required when chunking_mode='parent_child'",
+        # separator: 요청에서 안 오면(혹은 None이면) 디폴트로 보강
+        separator = body.segment_separator or "\n\n"
+
+        # parent chunking 옵션 (프리뷰도 ingest와 동일하게 반영)
+        parent_chunk_size = getattr(body, "parent_chunk_size", None)
+        parent_chunk_overlap = getattr(body, "parent_chunk_overlap", None)
+
+        parent_splitter = None
+        if parent_chunk_size:
+            parent_splitter = build_splitter(
+                chunk_size=int(parent_chunk_size),
+                chunk_overlap=int(parent_chunk_overlap or 0),
+                strategy=str(body.chunk_strategy),
+                length_function=_tok_len,
             )
 
-        parents = _split_parents(text or "", body.segment_separator)
+        segments = split_segments(text=text or "", separator=separator)
 
-        remaining = child_limit
         global_child_idx = 1
 
-        for seg_idx, parent_text in enumerate(parents, start=1):
+        for seg_idx, segment_text in enumerate(segments, start=1):
             if remaining is not None and remaining <= 0:
                 break
 
-            # parent 먼저
-            _push(flat_index, _decorate_parent(seg_idx, parent_text))
-            flat_index += 1
+            # segment -> parent 단위(옵션)
+            if parent_splitter is not None:
+                parent_texts = clean_texts(parent_splitter.split_text(segment_text))
+            else:
+                st = (segment_text or "").strip()
+                parent_texts = [st] if st else []
 
-            # child들
-            child_chunks = splitter.split_text(parent_text)
-            if remaining is not None:
-                child_chunks = child_chunks[:remaining]
+            if not parent_texts:
+                continue
 
-            for child_idx, ch in enumerate(child_chunks, start=1):
-                decorated = _decorate_child(seg_idx, child_idx, global_child_idx, ch)
-                _push(flat_index, decorated)
-                flat_index += 1
-                global_child_idx += 1
+            child_in_segment = 1
+
+            for parent_idx, parent_text in enumerate(parent_texts, start=1):
+                if remaining is not None and remaining <= 0:
+                    break
+
+                parent_text = (parent_text or "").strip()
+                if not parent_text:
+                    continue
+
+                # child 먼저 만들어보고(없으면 parent도 표시 안 함) -> ingest와 동일
+                child_chunks = clean_texts(child_splitter.split_text(parent_text))
                 if remaining is not None:
-                    remaining -= 1
-                    if remaining <= 0:
-                        break
+                    child_chunks = child_chunks[:remaining]
+                if not child_chunks:
+                    continue
+
+                # parent 표시 (프리뷰용 prefix)
+                _push(flat_index, f"{_PARENT_PREFIX} seg={seg_idx} parent={parent_idx}\n{parent_text}".strip())
+                flat_index += 1
+
+                for ch in child_chunks:
+                    decorated = f"{_CHILD_PREFIX} seg={seg_idx} child={child_in_segment} global={global_child_idx}\n{ch.strip()}".strip()
+                    _push(flat_index, decorated)
+                    flat_index += 1
+
+                    child_in_segment += 1
+                    global_child_idx += 1
+
+                    if remaining is not None:
+                        remaining -= 1
+                        if remaining <= 0:
+                            break
 
     stats = ChunkPreviewStats(
         total_chunks=len(items),

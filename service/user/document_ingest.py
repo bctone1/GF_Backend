@@ -14,18 +14,18 @@ from crud.user.document import (
     document_ingestion_setting_crud,
 )
 from schemas.user.document import DocumentChunkCreate
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_service.embedding.get_vector import texts_to_vectors
 
+from service.user.document_chunking import (
+    build_splitter,
+    split_segments,
+    clean_texts,
+)
 
 # =========================================================
 # helpers
 # =========================================================
 def _count_tokens(model: str, texts: List[str]) -> int:
-    """
-    embedding 비용 계산용 토큰 카운트
-    - core.pricing.tokens_for_texts는 "총 토큰 수(int)"를 반환한다고 가정
-    """
     if not texts:
         return 0
     return int(tokens_for_texts(model, texts))
@@ -34,44 +34,8 @@ def _count_tokens(model: str, texts: List[str]) -> int:
 def _tok_len_factory(model: str) -> Callable[[str], int]:
     def _tok_len(s: str) -> int:
         return _count_tokens(model, [s])
+
     return _tok_len
-
-
-def _build_child_splitter(
-    *,
-    chunk_size: int,
-    chunk_overlap: int,
-    strategy: str,
-    length_function: Optional[Callable[[str], int]] = None,
-):
-    if strategy == "recursive":
-        return RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            length_function=length_function,
-            separators=["\n\n", "\n", " ", ""],
-        )
-    raise ValueError(f"Unsupported chunk_strategy: {strategy}")
-
-
-def _split_parents(
-    *,
-    text: str,
-    separator: Optional[str],
-) -> list[str]:
-    """
-    separator 기준으로 parent segment 분리
-    - separator 없으면 전체를 하나의 parent로 취급
-    """
-    if not separator:
-        return [text.strip()] if text and text.strip() else []
-
-    parts = [p.strip() for p in text.split(separator)]
-    return [p for p in parts if p]
-
-
-def _clean_texts(texts: List[str]) -> List[str]:
-    return [t.strip() for t in texts if t and t.strip()]
 
 
 # =========================================================
@@ -93,14 +57,26 @@ def ingest_document_text(
     if setting is None:
         raise RuntimeError("DocumentIngestionSetting not found")
 
-    # 기본값 방어
     chunking_mode = getattr(setting, "chunking_mode", "general")
     segment_separator = getattr(setting, "segment_separator", None)
 
-    chunk_size = int(getattr(setting, "chunk_size", 800) or 800)
-    chunk_overlap = int(getattr(setting, "chunk_overlap", 200) or 0)
+    # parent_child인데 separator가 비어있으면 디폴트로 보강(레거시 row 방어)
+    if chunking_mode == "parent_child" and not segment_separator:
+        segment_separator = "\n\n"
+
+    # child settings
+    child_chunk_size = int(getattr(setting, "chunk_size", 800) or 800)
+    child_chunk_overlap = int(getattr(setting, "chunk_overlap", 200) or 0)
     chunk_strategy = str(getattr(setting, "chunk_strategy", "recursive") or "recursive")
-    max_chunks = int(getattr(setting, "max_chunks", 0) or 0)  # 0이면 제한 없음(방어)
+    max_chunks = int(getattr(setting, "max_chunks", 0) or 0)  # 0이면 제한 없음
+
+    # parent settings (parent_child에서만 의미)
+    parent_chunk_size_raw = getattr(setting, "parent_chunk_size", None)
+    parent_chunk_overlap_raw = getattr(setting, "parent_chunk_overlap", None)
+
+    parent_chunk_size = int(parent_chunk_size_raw) if parent_chunk_size_raw is not None else None
+    parent_chunk_overlap = int(parent_chunk_overlap_raw) if parent_chunk_overlap_raw is not None else 0
+
     embed_model = (
         getattr(setting, "embedding_model", None)
         or getattr(config, "DEFAULT_EMBEDDING_MODEL", "text-embedding-3-small")
@@ -111,21 +87,31 @@ def ingest_document_text(
     # -----------------------------------------------------
     document_chunk_crud.delete_by_document(db, document.knowledge_id)
 
-    # 텍스트가 비면 바로 끝
     if not full_text or not full_text.strip():
         document.chunk_count = 0
         db.flush()
         return 0, 0
 
     # -----------------------------------------------------
-    # 1) child splitter 준비
+    # 1) splitter 준비
     # -----------------------------------------------------
-    child_splitter = _build_child_splitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap,
+    tok_len = _tok_len_factory(embed_model)
+
+    child_splitter = build_splitter(
+        chunk_size=child_chunk_size,
+        chunk_overlap=child_chunk_overlap,
         strategy=chunk_strategy,
-        length_function=_tok_len_factory(embed_model),
+        length_function=tok_len,
     )
+
+    parent_splitter = None
+    if chunking_mode == "parent_child" and parent_chunk_size:
+        parent_splitter = build_splitter(
+            chunk_size=parent_chunk_size,
+            chunk_overlap=parent_chunk_overlap,
+            strategy=chunk_strategy,
+            length_function=tok_len,
+        )
 
     chunk_rows: list[tuple[DocumentChunkCreate, Optional[Sequence[float]]]] = []
 
@@ -133,14 +119,13 @@ def ingest_document_text(
     total_child_count = 0
     total_tokens = 0
 
-    # max_chunks 제어용(전체 child 기준)
-    remaining = max_chunks if max_chunks > 0 else None  # None이면 무제한
+    remaining = max_chunks if max_chunks > 0 else None  # child 기준 제한(None이면 무제한)
 
     # =====================================================
     # 2) GENERAL MODE
     # =====================================================
     if chunking_mode == "general":
-        child_texts = _clean_texts(child_splitter.split_text(full_text))
+        child_texts = clean_texts(child_splitter.split_text(full_text))
         if remaining is not None:
             child_texts = child_texts[:remaining]
 
@@ -177,70 +162,82 @@ def ingest_document_text(
     # 3) PARENT–CHILD MODE
     # =====================================================
     else:
-        parents = _split_parents(
-            text=full_text,
-            separator=segment_separator,
-        )
+        segments = split_segments(text=full_text, separator=segment_separator)
 
-        for seg_idx, parent_text in enumerate(parents, start=1):
-            # child 제한 도달 시 종료
+        for seg_idx, segment_text in enumerate(segments, start=1):
             if remaining is not None and remaining <= 0:
                 break
 
-            # -------------------------
-            # 3-1) parent chunk (NO vector)
-            # -------------------------
-            parent_row = document_chunk_crud.create(
-                db,
-                DocumentChunkCreate(
-                    knowledge_id=document.knowledge_id,
-                    chunk_level="parent",
-                    parent_chunk_id=None,
-                    segment_index=seg_idx,
-                    chunk_index=None,
-                    chunk_index_in_segment=None,
-                    chunk_text=parent_text.strip(),
-                ),
-                vector=None,
-            )
+            # segment을 parent 단위로 추가 분할(옵션)
+            if parent_splitter is not None:
+                parent_texts = clean_texts(parent_splitter.split_text(segment_text))
+            else:
+                st = (segment_text or "").strip()
+                parent_texts = [st] if st else []
 
-            # -------------------------
-            # 3-2) child chunks
-            # -------------------------
-            child_texts = _clean_texts(child_splitter.split_text(parent_text))
-            if not child_texts:
+            if not parent_texts:
                 continue
 
-            if remaining is not None:
-                child_texts = child_texts[:remaining]
+            child_in_segment = 1  # segment 내 child 순번(여러 parent를 걸쳐 연속 증가)
 
-            if not child_texts:
-                continue
+            for parent_text in parent_texts:
+                if remaining is not None and remaining <= 0:
+                    break
 
-            vectors = texts_to_vectors(child_texts)
-            total_tokens += _count_tokens(embed_model, child_texts)
+                parent_text = (parent_text or "").strip()
+                if not parent_text:
+                    continue
 
-            for i, (text, vec) in enumerate(zip(child_texts, vectors), start=1):
-                chunk_rows.append(
-                    (
-                        DocumentChunkCreate(
-                            knowledge_id=document.knowledge_id,
-                            chunk_level="child",
-                            parent_chunk_id=parent_row.chunk_id,
-                            segment_index=seg_idx,
-                            chunk_index_in_segment=i,
-                            chunk_index=global_chunk_index,
-                            chunk_text=text,
-                        ),
-                        vec,
-                    )
-                )
-                global_chunk_index += 1
-                total_child_count += 1
+                # child 먼저 만들어보고(없으면 parent row도 만들 필요 없음)
+                child_texts = clean_texts(child_splitter.split_text(parent_text))
                 if remaining is not None:
-                    remaining -= 1
-                    if remaining <= 0:
-                        break
+                    child_texts = child_texts[:remaining]
+
+                if not child_texts:
+                    continue
+
+                # parent row 생성 (NO vector)
+                parent_row = document_chunk_crud.create(
+                    db,
+                    DocumentChunkCreate(
+                        knowledge_id=document.knowledge_id,
+                        chunk_level="parent",
+                        parent_chunk_id=None,
+                        segment_index=seg_idx,
+                        chunk_index=None,
+                        chunk_index_in_segment=None,
+                        chunk_text=parent_text,
+                    ),
+                    vector=None,
+                )
+
+                # child embedding + rows
+                vectors = texts_to_vectors(child_texts)
+                total_tokens += _count_tokens(embed_model, child_texts)
+
+                for text, vec in zip(child_texts, vectors):
+                    chunk_rows.append(
+                        (
+                            DocumentChunkCreate(
+                                knowledge_id=document.knowledge_id,
+                                chunk_level="child",
+                                parent_chunk_id=parent_row.chunk_id,
+                                segment_index=seg_idx,
+                                chunk_index_in_segment=child_in_segment,
+                                chunk_index=global_chunk_index,
+                                chunk_text=text,
+                            ),
+                            vec,
+                        )
+                    )
+                    child_in_segment += 1
+                    global_chunk_index += 1
+                    total_child_count += 1
+
+                    if remaining is not None:
+                        remaining -= 1
+                        if remaining <= 0:
+                            break
 
         if chunk_rows:
             document_chunk_crud.bulk_create(db, chunk_rows)

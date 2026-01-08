@@ -207,3 +207,36 @@ RESPONSE_LENGTH_PRESETS = {
     "normal": 512,
     "long": 2048,
 }
+
+# 정합성 고정값 (운영 중 바꾸면 사고나는 것들은 고정)
+EMBEDDING_DIM_FIXED = 1536
+KB_SCORE_TYPE_FIXED = "cosine_similarity"
+
+# 튜닝 가능한 기본값(운영 중 변경 가능)
+DEFAULT_INGESTION = {
+    # mode
+    "chunking_mode": "general",         # "general" | "parent_child"
+    "segment_separator": "\n\n",        # parent_child일 때 사용(빈줄 split)
+    # child chunk
+    "chunk_size": 600,
+    "chunk_overlap": 200,
+    "max_chunks": 100,
+    "chunk_strategy": "recursive",      # MVP: "recursive"만
+    # parent chunk (parent_child일 때만 의미)
+    "parent_chunk_size": 1500,
+    "parent_chunk_overlap": 400,
+    # embedding
+    "embedding_provider": "openai",
+    "embedding_model": "text-embedding-3-small",
+    # 기타
+    "extra": {},
+}
+
+DEFAULT_SEARCH = {
+    "top_k": 8,
+    "min_score": "0.20",                # Decimal로 파싱될 거라 문자열 추천
+    "score_type": KB_SCORE_TYPE_FIXED,  # 고정
+    "reranker_enabled": False,
+    "reranker_model": None,
+    "reranker_top_n": 5,                # <= top_k
+}
