@@ -1,10 +1,24 @@
 # main.py
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from core import config
 from core.middleware import ProcessTimeMiddleware
 from app.routers import register_routers
 
+
+def _configure_langsmith_tracing() -> None:
+    if config.LANGSMITH_TRACING and config.LANGSMITH_TRACING.lower() == "true":
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        if config.LANGSMITH_API_KEY:
+            os.environ["LANGCHAIN_API_KEY"] = config.LANGSMITH_API_KEY
+        if config.LANGSMITH_PROJECT:
+            os.environ["LANGCHAIN_PROJECT"] = config.LANGSMITH_PROJECT
+
+
+_configure_langsmith_tracing()
 
 app = FastAPI(
     title="GrowFit API",

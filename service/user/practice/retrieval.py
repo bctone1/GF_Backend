@@ -1,10 +1,12 @@
 # service/user/practice/retrieval.py
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
+import math
+from typing import Any, Callable, Dict, List, Mapping
 
 from sqlalchemy.orm import Session
 
+from core import config
 from models.user.account import AppUser
 
 from langchain_service.embedding.get_vector import texts_to_vectors
@@ -38,6 +40,67 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
     vec_cache: dict[str, list[float]] = {}
     ret_cache: dict[tuple, Dict[str, Any]] = {}
 
+    def _coerce_int(value: Any) -> int | None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _coerce_float(value: Any) -> float | None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _get_search_params(raw_payload: dict | None) -> Mapping[str, Any]:
+        if not isinstance(raw_payload, Mapping):
+            return {}
+        params = raw_payload.get("search_params") or raw_payload.get("retrieval_params") or {}
+        return params if isinstance(params, Mapping) else {}
+
+    def _default_threshold() -> float:
+        return float(getattr(config, "DEFAULT_SEARCH", {}).get("min_score", 0.2))
+
+    def _normalize_threshold(value: float | None) -> float:
+        if value is None:
+            value = _default_threshold()
+        else:
+            try:
+                if not math.isfinite(float(value)):
+                    value = _default_threshold()
+            except (TypeError, ValueError):
+                value = _default_threshold()
+        return float(min(max(float(value), 0.0), 1.0))
+
+    def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float | None:
+        if not vec_a or not vec_b or len(vec_a) != len(vec_b):
+            return None
+        dot = 0.0
+        norm_a = 0.0
+        norm_b = 0.0
+        for a, b in zip(vec_a, vec_b):
+            dot += a * b
+            norm_a += a * a
+            norm_b += b * b
+        if norm_a <= 0.0 or norm_b <= 0.0:
+            return None
+        return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+
+    def _chunk_score(chunk: Any, query_vector: list[float]) -> float | None:
+        existing = getattr(chunk, "score", None)
+        if existing is None:
+            existing = getattr(chunk, "similarity", None)
+        if existing is not None:
+            return _coerce_float(existing)
+        vec = getattr(chunk, "vector_memory", None)
+        if vec is None:
+            return None
+        try:
+            vector = list(vec)
+        except TypeError:
+            return None
+        return _cosine_similarity(query_vector, vector)
+
     def _retrieve(
         *,
         knowledge_ids: List[int] | None = None,
@@ -53,8 +116,44 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
             return {"context": "", "sources": []}
 
         max_chunks = int(top_k) if isinstance(top_k, int) and top_k > 0 else 10
+        search_params = _get_search_params(raw)
 
-        cache_key = (tuple(kids), q, max_chunks, float(threshold) if threshold is not None else None)
+        effective_threshold = _normalize_threshold(threshold)
+
+        candidate_top_k = _coerce_int(
+            search_params.get("candidate_top_k")
+            or search_params.get("vector_top_k")
+            or search_params.get("initial_top_k")
+        )
+        if candidate_top_k is None or candidate_top_k < 1:
+            candidate_top_k = max(max_chunks * 5, max_chunks)
+        candidate_top_k = max(candidate_top_k, max_chunks)
+
+        reranker_model = search_params.get("reranker_model")
+        reranker_enabled = search_params.get("reranker_enabled")
+        if reranker_enabled is None:
+            reranker_enabled = True
+
+        rerank_top_n = _coerce_int(
+            search_params.get("reranker_top_n")
+            or search_params.get("rerank_top_n")
+            or search_params.get("rerank_top_k")
+        )
+        if rerank_top_n is None and reranker_model:
+            rerank_top_n = max(max_chunks * 2, max_chunks)
+        if rerank_top_n is not None:
+            rerank_top_n = max(1, min(rerank_top_n, candidate_top_k))
+
+        cache_key = (
+            tuple(kids),
+            q,
+            max_chunks,
+            effective_threshold,
+            candidate_top_k,
+            reranker_model,
+            reranker_enabled,
+            rerank_top_n,
+        )
         cached = ret_cache.get(cache_key)
         if cached is not None:
             return cached
@@ -99,8 +198,6 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
             ret_cache[cache_key] = out
             return out
 
-        per_doc_top_k = max(1, max_chunks // len(valid_docs))
-
         chunks: list[Any] = []
         for doc in valid_docs:
             kid = getattr(doc, "knowledge_id", None)
@@ -111,7 +208,8 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
                     db_outer,
                     query_vector=query_vector,
                     knowledge_id=kid,
-                    top_k=per_doc_top_k,
+                    top_k=candidate_top_k,
+                    min_score=effective_threshold,
                 )
             except Exception:
                 doc_chunks = []
@@ -124,11 +222,44 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
             ret_cache[cache_key] = out
             return out
 
-        chunks = chunks[:max_chunks]
+        scored_chunks: list[tuple[float, Any]] = []
+        for chunk in chunks:
+            score = _chunk_score(chunk, query_vector)
+            score = score if score is not None else 0.0
+            if score < effective_threshold:
+                continue
+            scored_chunks.append((score, chunk))
+
+        if not scored_chunks:
+            out = {"context": "", "sources": []}
+            ret_cache[cache_key] = out
+            return out
+
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
+        scored_chunks = scored_chunks[:candidate_top_k]
+
+        chunk_score_map = {id(chunk): score for score, chunk in scored_chunks}
+
+        if reranker_model and rerank_top_n and reranker_enabled and len(scored_chunks) > 1:
+            try:
+                from service.user.rerank import rerank_chunks  # lazy import
+
+                top_candidates = [chunk for _, chunk in scored_chunks[:rerank_top_n]]
+                reranked = rerank_chunks(
+                    q,
+                    top_candidates,
+                    model_name=str(reranker_model),
+                    top_n=int(rerank_top_n),
+                )
+                final_chunks = reranked[:max_chunks]
+            except Exception:
+                final_chunks = [chunk for _, chunk in scored_chunks[:max_chunks]]
+        else:
+            final_chunks = [chunk for _, chunk in scored_chunks[:max_chunks]]
 
         texts: List[str] = []
         sources: List[Dict[str, Any]] = []
-        for c in chunks:
+        for c in final_chunks:
             chunk_text = (
                 getattr(c, "chunk_text", None)
                 or getattr(c, "text", None)
@@ -138,11 +269,12 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
             if chunk_text:
                 texts.append(str(chunk_text))
 
+            score = chunk_score_map.get(id(c))
             sources.append(
                 {
                     "knowledge_id": getattr(c, "knowledge_id", None),
                     "chunk_id": getattr(c, "chunk_id", None) or getattr(c, "id", None),
-                    "score": getattr(c, "score", None) or getattr(c, "similarity", None),
+                    "score": score,
                     "preview": (str(chunk_text)[:200] if chunk_text else ""),
                 }
             )
@@ -160,10 +292,15 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
             "위 내용을 참고해서 아래 질문에 답변해 주세요."
         )
 
-        _ = raw
-        _ = threshold
-
-        out = {"context": context, "sources": sources}
+        out = {
+            "context": context,
+            "sources": sources,
+            "retrieval": {
+                "retrieved_count": len(sources),
+                "top_k": max_chunks,
+                "threshold": effective_threshold,
+            },
+        }
         ret_cache[cache_key] = out
         return out
 
