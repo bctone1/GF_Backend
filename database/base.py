@@ -8,7 +8,7 @@ from models.base import Base, metadata  # 여기서 declarative_base() 절대 �
 
 # 2) 여기서 모델 모듈 import 해서 Base.metadata 에 테이블들을 올려줌
 import models.user.project  # noqa: F401
-import models.user.agent    # noqa: F401
+import models.user.prompt    # noqa: F401
 # 필요하면 나중에 models.user.practice, models.partner.* 등도 추가
 
 # 3) DATABASE_URL 구성

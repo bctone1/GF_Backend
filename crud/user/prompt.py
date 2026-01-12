@@ -1,25 +1,25 @@
-# crud/user/agent.py
+# crud/user/prompt.py
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from crud.base import CRUDBase
-from models.user.agent import AIAgent, AgentShare
-from schemas.user.agent import (
-    AIAgentCreate,
-    AIAgentUpdate,
-    AgentShareCreate,
-    AgentShareUpdate,
+from models.user.prompt import AIPrompt, PromptShare
+from schemas.user.prompt import (
+    AIPromptCreate,
+    AIPromptUpdate,
+    PromptShareCreate,
+    PromptShareUpdate,
 )
 
 
 # =========================================================
-# user.ai_agents 전용 CRUD
+# user.ai_agents 전용 CRUD (prompt)
 # =========================================================
-class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
+class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
     """
-    내 에이전트(AIAgent) 전용 CRUD.
+    내 프롬프트(AIPrompt) 전용 CRUD.
     - 생성 시 owner_id를 항상 서버에서 주입하도록 create 시그니처를 확장.
     """
 
@@ -27,9 +27,9 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         self,
         db: Session,
         *,
-        obj_in: AIAgentCreate,
+        obj_in: AIPromptCreate,
         owner_id: int,
-    ) -> AIAgent:
+    ) -> AIPrompt:
         """
         owner_id는 항상 현재 로그인 유저(me.user_id)에서 받아서 넣는다.
         """
@@ -39,7 +39,7 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         if data.get("is_active", "__missing__") is None:
             data.pop("is_active", None)
 
-        db_obj = AIAgent(
+        db_obj = AIPrompt(
             owner_id=owner_id,
             **data,
         )
@@ -56,19 +56,19 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         limit: int,
         offset: int,
         q: Optional[str] = None,
-    ) -> Tuple[int, List[AIAgent]]:
+    ) -> Tuple[int, List[AIPrompt]]:
         """
-        owner_id 기준 에이전트 목록 + 페이징/검색.
+        owner_id 기준 프롬프트 목록 + 페이징/검색.
         - q: name / role_description LIKE 검색
         """
-        query = db.query(AIAgent).filter(AIAgent.owner_id == owner_id)
+        query = db.query(AIPrompt).filter(AIPrompt.owner_id == owner_id)
 
         if q:
             like = f"%{q}%"
             query = query.filter(
                 or_(
-                    AIAgent.name.ilike(like),
-                    AIAgent.role_description.ilike(like),
+                    AIPrompt.name.ilike(like),
+                    AIPrompt.role_description.ilike(like),
                 )
             )
 
@@ -76,7 +76,7 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         total = query.order_by(None).count()
 
         items = (
-            query.order_by(AIAgent.created_at.desc())
+            query.order_by(AIPrompt.created_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -89,17 +89,17 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         db: Session,
         *,
         owner_id: int,
-        agent_id: int,
-    ) -> Optional[AIAgent]:
+        prompt_id: int,
+    ) -> Optional[AIPrompt]:
         """
-        owner_id 기준으로 내 에이전트 한 건 조회.
-        (없거나 남의 에이전트면 None)
+        owner_id 기준으로 내 프롬프트 한 건 조회.
+        (없거나 남의 프롬프트면 None)
         """
         return (
-            db.query(AIAgent)
+            db.query(AIPrompt)
             .filter(
-                AIAgent.agent_id == agent_id,
-                AIAgent.owner_id == owner_id,
+                AIPrompt.prompt_id == prompt_id,
+                AIPrompt.owner_id == owner_id,
             )
             .first()
         )
@@ -109,14 +109,14 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         db: Session,
         *,
         owner_id: int,
-        agent_id: int,
-        obj_in: AIAgentUpdate,
-    ) -> Optional[AIAgent]:
+        prompt_id: int,
+        obj_in: AIPromptUpdate,
+    ) -> Optional[AIPrompt]:
         """
         owner_id 기준으로만 수정 가능.
         - 없으면 None 리턴 (엔드포인트/서비스에서 404 처리)
         """
-        db_obj = self.get_for_owner(db, owner_id=owner_id, agent_id=agent_id)
+        db_obj = self.get_for_owner(db, owner_id=owner_id, prompt_id=prompt_id)
         if db_obj is None:
             return None
 
@@ -136,15 +136,15 @@ class CRUDAIAgent(CRUDBase[AIAgent, AIAgentCreate, AIAgentUpdate]):
         return db_obj
 
 
-ai_agent_crud = CRUDAIAgent(AIAgent)
+ai_prompt_crud = CRUDAIPrompt(AIPrompt)
 
 
 # =========================================================
-# user.agent_shares 전용 CRUD
+# user.agent_shares 전용 CRUD (prompt)
 # =========================================================
-class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
+class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate]):
     """
-    user.agent_shares 전용 CRUD.
+    user.agent_shares 전용 CRUD (prompt).
     - 기본 CRUDBase 기능 + 공유 시나리오용 헬퍼 메서드들.
     """
 
@@ -152,14 +152,14 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         self,
         db: Session,
         *,
-        obj_in: AgentShareCreate,
+        obj_in: PromptShareCreate,
         shared_by_user_id: int,
-    ) -> AgentShare:
+    ) -> PromptShare:
         """
         실제 공유를 수행한 유저(shared_by_user_id)는 서비스 레이어에서 me.user_id로 넣어줌.
         """
-        db_obj = AgentShare(
-            agent_id=obj_in.agent_id,
+        db_obj = PromptShare(
+            prompt_id=obj_in.prompt_id,
             class_id=obj_in.class_id,
             shared_by_user_id=shared_by_user_id,
             is_active=obj_in.is_active if obj_in.is_active is not None else True,
@@ -169,33 +169,33 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         db.refresh(db_obj)
         return db_obj
 
-    def get_by_agent_and_class(
+    def get_by_prompt_and_class(
         self,
         db: Session,
         *,
-        agent_id: int,
+        prompt_id: int,
         class_id: int,
-    ) -> Optional[AgentShare]:
+    ) -> Optional[PromptShare]:
         return (
-            db.query(AgentShare)
+            db.query(PromptShare)
             .filter(
-                AgentShare.agent_id == agent_id,
-                AgentShare.class_id == class_id,
+                PromptShare.prompt_id == prompt_id,
+                PromptShare.class_id == class_id,
             )
             .first()
         )
 
-    def list_by_agent(
+    def list_by_prompt(
         self,
         db: Session,
         *,
-        agent_id: int,
+        prompt_id: int,
         active_only: bool = True,
-    ) -> List[AgentShare]:
-        query = db.query(AgentShare).filter(AgentShare.agent_id == agent_id)
+    ) -> List[PromptShare]:
+        query = db.query(PromptShare).filter(PromptShare.prompt_id == prompt_id)
         if active_only:
-            query = query.filter(AgentShare.is_active.is_(True))
-        return query.order_by(AgentShare.created_at.desc()).all()
+            query = query.filter(PromptShare.is_active.is_(True))
+        return query.order_by(PromptShare.created_at.desc()).all()
 
     def list_by_class(
         self,
@@ -203,19 +203,19 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         *,
         class_id: int,
         active_only: bool = True,
-    ) -> List[AgentShare]:
-        query = db.query(AgentShare).filter(AgentShare.class_id == class_id)
+    ) -> List[PromptShare]:
+        query = db.query(PromptShare).filter(PromptShare.class_id == class_id)
         if active_only:
-            query = query.filter(AgentShare.is_active.is_(True))
-        return query.order_by(AgentShare.created_at.desc()).all()
+            query = query.filter(PromptShare.is_active.is_(True))
+        return query.order_by(PromptShare.created_at.desc()).all()
 
     def set_active(
         self,
         db: Session,
         *,
-        share: AgentShare,
+        share: PromptShare,
         is_active: bool,
-    ) -> AgentShare:
+    ) -> PromptShare:
         share.is_active = is_active
         db.add(share)
         db.commit()
@@ -226,16 +226,16 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         self,
         db: Session,
         *,
-        obj_in: AgentShareCreate,
+        obj_in: PromptShareCreate,
         shared_by_user_id: int,
-    ) -> AgentShare:
+    ) -> PromptShare:
         """
-        같은 agent_id + class_id 조합이 이미 있으면 재사용하고,
+        같은 prompt_id + class_id 조합이 이미 있으면 재사용하고,
         없으면 새로 생성.
         """
-        existing = self.get_by_agent_and_class(
+        existing = self.get_by_prompt_and_class(
             db,
-            agent_id=obj_in.agent_id,
+            prompt_id=obj_in.prompt_id,
             class_id=obj_in.class_id,
         )
         if existing:
@@ -249,4 +249,4 @@ class CRUDAgentShare(CRUDBase[AgentShare, AgentShareCreate, AgentShareUpdate]):
         return self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
 
 
-agent_share_crud = CRUDAgentShare(AgentShare)
+prompt_share_crud = CRUDPromptShare(PromptShare)

@@ -43,15 +43,14 @@ class PracticeSession(Base):
         nullable=True,
     )
 
-    # knowledge_ids(JSON 배열)로 통일 [1, 2, 3]
     knowledge_ids = Column(
         JSONB,
         nullable=False,
         server_default=text("'[]'::jsonb"),
     )
 
-    # Agent 템플릿 연결
-    agent_id = Column(
+    prompt_id = Column(
+        "agent_id",
         BigInteger,
         ForeignKey("user.ai_agents.agent_id", ondelete="SET NULL"),
         nullable=True,
@@ -126,8 +125,9 @@ class PracticeSessionSetting(Base):
         server_default=text("'{}'::jsonb"),
     )
 
-    # Agent 스냅샷(세션 시작 시점의 agent 상태를 고정해서 재현성 확보)
-    agent_snapshot = Column(
+    # Prompt 스냅샷(세션 시작 시점의 prompt 상태를 고정해서 재현성 확보)
+    prompt_snapshot = Column(
+        "agent_snapshot",
         JSONB,
         nullable=False,
         server_default=text("'{}'::jsonb"),

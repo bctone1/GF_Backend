@@ -170,8 +170,8 @@ class PracticeSessionSettingResponse(ORMBase):
     # DB(JSONB) 그대로 내려줌
     generation_params: Dict[str, Any] = Field(default_factory=dict)
 
-    # agent 템플릿 스냅샷(세션 생성 시점 재현성)
-    agent_snapshot: Dict[str, Any] = Field(default_factory=dict)
+    # prompt 템플릿 스냅샷(세션 생성 시점 재현성)
+    prompt_snapshot: Dict[str, Any] = Field(default_factory=dict)
 
     # 매핑 테이블 기반
     few_shot_links: List[PracticeSessionSettingFewShotResponse] = Field(default_factory=list)
@@ -190,7 +190,7 @@ class PracticeSessionCreate(ORMBase):
     project_id: Optional[int] = None
     knowledge_ids: Optional[List[int]] = None
 
-    agent_id: Optional[int] = None
+    prompt_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -207,7 +207,7 @@ class PracticeSessionUpdate(ORMBase):
     project_id: Optional[int] = None
     knowledge_ids: Optional[List[int]] = None
 
-    agent_id: Optional[int] = None
+    prompt_id: Optional[int] = None
     title: Optional[str] = None
     notes: Optional[str] = None
 
@@ -228,7 +228,7 @@ class PracticeSessionResponse(ORMBase):
     # 항상 list로 내려주기(ORM에서 None 들어와도 안전)
     knowledge_ids: List[int] = Field(default_factory=list)
 
-    agent_id: Optional[int] = None
+    prompt_id: Optional[int] = None
     title: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -338,9 +338,9 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
     """
     POST /sessions/run
     - 새 세션 생성 + 첫 턴
-    - agent_id / project_id / knowledge_ids + (settings 튜닝 값들)까지 받는다.
+    - prompt_id / project_id / knowledge_ids + (settings 튜닝 값들)까지 받는다.
     """
-    agent_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
+    prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
     project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
 
     knowledge_ids: Optional[List[int]] = Field(

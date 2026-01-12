@@ -14,7 +14,7 @@ from langchain_service.llm.runner import generate_session_title_llm
 
 from crud.user.practice import practice_response_crud, practice_session_crud
 from models.user.account import AppUser
-from models.user.agent import AIAgent, AgentShare
+from models.user.prompt import AIPrompt, PromptShare
 from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
@@ -80,49 +80,49 @@ def _is_none_style(style_key: Any) -> bool:
 
 
 # =========================================
-# agent system_prompt 로드 (내 소유 or class 공유)
+# prompt system_prompt 로드 (내 소유 or class 공유)
 # =========================================
-def _load_agent_system_prompt_for_practice(
+def _load_prompt_system_prompt_for_practice(
     db: Session,
     *,
-    agent_id: int,
+    prompt_id: int,
     me: AppUser,
     class_id: Optional[int],
     strict: bool,
 ) -> Optional[str]:
-    # 1) 내 소유 에이전트
-    stmt = select(AIAgent).where(AIAgent.agent_id == agent_id)
-    if hasattr(AIAgent, "is_active"):
-        stmt = stmt.where(AIAgent.is_active.is_(True))
-    agent = db.execute(stmt).scalar_one_or_none()
+    # 1) 내 소유 프롬프트
+    stmt = select(AIPrompt).where(AIPrompt.prompt_id == prompt_id)
+    if hasattr(AIPrompt, "is_active"):
+        stmt = stmt.where(AIPrompt.is_active.is_(True))
+    prompt = db.execute(stmt).scalar_one_or_none()
 
-    if agent is not None and getattr(agent, "owner_id", None) == me.user_id:
-        sp = (getattr(agent, "system_prompt", "") or "").strip()
+    if prompt is not None and getattr(prompt, "owner_id", None) == me.user_id:
+        sp = (getattr(prompt, "system_prompt", "") or "").strip()
         return sp or None
 
-    # 2) class 공유 에이전트
+    # 2) class 공유 프롬프트
     if class_id:
         conds = [
-            AgentShare.agent_id == agent_id,
-            AgentShare.class_id == class_id,
+            PromptShare.prompt_id == prompt_id,
+            PromptShare.class_id == class_id,
         ]
-        if hasattr(AgentShare, "is_active"):
-            conds.append(AgentShare.is_active.is_(True))
-        if hasattr(AIAgent, "is_active"):
-            conds.append(AIAgent.is_active.is_(True))
+        if hasattr(PromptShare, "is_active"):
+            conds.append(PromptShare.is_active.is_(True))
+        if hasattr(AIPrompt, "is_active"):
+            conds.append(AIPrompt.is_active.is_(True))
 
         stmt2 = (
-            select(AIAgent)
-            .join(AgentShare, AgentShare.agent_id == AIAgent.agent_id)
+            select(AIPrompt)
+            .join(PromptShare, PromptShare.prompt_id == AIPrompt.prompt_id)
             .where(*conds)
         )
-        agent2 = db.execute(stmt2).scalar_one_or_none()
-        if agent2 is not None:
-            sp = (getattr(agent2, "system_prompt", "") or "").strip()
+        prompt2 = db.execute(stmt2).scalar_one_or_none()
+        if prompt2 is not None:
+            sp = (getattr(prompt2, "system_prompt", "") or "").strip()
             return sp or None
 
     if strict:
-        raise HTTPException(status_code=404, detail="agent not found or not accessible")
+        raise HTTPException(status_code=404, detail="prompt not found or not accessible")
     return None
 
 
@@ -206,7 +206,7 @@ def run_practice_turn(
     knowledge_ids: Optional[List[int]] = None,
     generate_title: bool = True,
     # --- per-turn overrides (orchestrator에서 넘겨주도록) ---
-    requested_agent_id: Optional[int] = None,
+    requested_prompt_id: Optional[int] = None,
     requested_generation_params: Optional[Dict[str, Any]] = None,
     requested_style_preset: Optional[str] = None,
     requested_style_params: Optional[Dict[str, Any]] = None,
@@ -214,11 +214,11 @@ def run_practice_turn(
     if session.user_id != user.user_id:
         raise HTTPException(status_code=403, detail="session not owned by user")
 
-    # ---- settings/agent base generation ----
+    # ---- settings/prompt base generation ----
     session_base_gen = normalize_generation_params_dict(getattr(settings, "generation_params", None) or {})
-    agent_snapshot = getattr(settings, "agent_snapshot", None) or {}
-    agent_gen = agent_snapshot.get("generation_params") if isinstance(agent_snapshot, dict) else {}
-    agent_gen = normalize_generation_params_dict(agent_gen) if isinstance(agent_gen, dict) else {}
+    prompt_snapshot = getattr(settings, "prompt_snapshot", None) or {}
+    prompt_gen = prompt_snapshot.get("generation_params") if isinstance(prompt_snapshot, dict) else {}
+    prompt_gen = normalize_generation_params_dict(prompt_gen) if isinstance(prompt_gen, dict) else {}
 
     # ---- selected few-shots (setting 선택) ----
     selected_few_shots = _load_selected_few_shots_for_setting(
@@ -231,15 +231,15 @@ def run_practice_turn(
     style_key = requested_style_preset if requested_style_preset is not None else getattr(settings, "style_preset", None)
     style_is_none = _is_none_style(style_key)
 
-    # ---- agent system_prompt (요청 > 세션 저장값) ----
-    effective_agent_id = requested_agent_id if requested_agent_id is not None else getattr(session, "agent_id", None)
-    agent_system_prompt: Optional[str] = None
-    if effective_agent_id:
-        # 요청으로 들어온 agent_id면 strict, 세션에 박힌 값이면 soft(깨진 세션을 살리기)
-        strict = requested_agent_id is not None
-        agent_system_prompt = _load_agent_system_prompt_for_practice(
+    # ---- prompt system_prompt (요청 > 세션 저장값) ----
+    effective_prompt_id = requested_prompt_id if requested_prompt_id is not None else getattr(session, "prompt_id", None)
+    prompt_system_prompt: Optional[str] = None
+    if effective_prompt_id:
+        # 요청으로 들어온 prompt_id면 strict, 세션에 박힌 값이면 soft(깨진 세션을 살리기)
+        strict = requested_prompt_id is not None
+        prompt_system_prompt = _load_prompt_system_prompt_for_practice(
             db,
-            agent_id=int(effective_agent_id),
+            prompt_id=int(effective_prompt_id),
             me=user,
             class_id=getattr(session, "class_id", None),
             strict=strict,
@@ -280,9 +280,9 @@ def run_practice_turn(
         req_gp = normalize_generation_params_dict(requested_generation_params or {}) if isinstance(requested_generation_params, dict) else {}
 
         # 우선순위:
-        # settings(base) -> agent_gen -> runtime_defaults -> model_gp -> request(turn override)
+        # settings(base) -> prompt_gen -> runtime_defaults -> model_gp -> request(turn override)
         effective_gp_full: Dict[str, Any] = normalize_generation_params_dict(
-            {**session_base_gen, **agent_gen, **runtime_defaults, **model_gp, **req_gp}
+            {**session_base_gen, **prompt_gen, **runtime_defaults, **model_gp, **req_gp}
         )
 
         max_out = get_model_max_output_tokens(
@@ -293,17 +293,17 @@ def run_practice_turn(
         effective_gp_full = clamp_generation_params_max_tokens(effective_gp_full, max_out=max_out)
         effective_gp_full = normalize_generation_params_dict(effective_gp_full)
 
-        # ---- agent_snapshot fallback (settings에 저장된 스냅샷) ----
-        if isinstance(agent_snapshot, dict):
+        # ---- prompt_snapshot fallback (settings에 저장된 스냅샷) ----
+        if isinstance(prompt_snapshot, dict):
             for k in ("system_prompt", "few_shot_examples"):
-                if k in agent_snapshot and not effective_gp_full.get(k):
-                    effective_gp_full[k] = agent_snapshot.get(k)
+                if k in prompt_snapshot and not effective_gp_full.get(k):
+                    effective_gp_full[k] = prompt_snapshot.get(k)
 
-        # ---- 최신 agent system_prompt 합치기 (스냅샷보다 우선 반영) ----
-        if agent_system_prompt:
-            effective_gp_full["system_prompt"] = _merge_prompt(effective_gp_full.get("system_prompt"), agent_system_prompt)
+        # ---- 최신 prompt system_prompt 합치기 (스냅샷보다 우선 반영) ----
+        if prompt_system_prompt:
+            effective_gp_full["system_prompt"] = _merge_prompt(effective_gp_full.get("system_prompt"), prompt_system_prompt)
 
-        # ---- few-shots: request/agent_snapshot 없으면 setting 선택 값 사용 ----
+        # ---- few-shots: request/prompt_snapshot 없으면 setting 선택 값 사용 ----
         if not effective_gp_full.get("few_shot_examples") and selected_few_shots:
             effective_gp_full["few_shot_examples"] = selected_few_shots
 
@@ -312,7 +312,7 @@ def run_practice_turn(
         if sys_from_fs:
             effective_gp_full["system_prompt"] = _merge_prompt(effective_gp_full.get("system_prompt"), sys_from_fs)
 
-        # ---- 최종 system_prompt 구성 (style + user_override + agent/derived) ----
+        # ---- 최종 system_prompt 구성 (style + user_override + prompt/derived) ----
         user_override_sys = style_params.get("system_prompt") if isinstance(style_params.get("system_prompt"), str) else None
 
         base_style_prompt: Optional[str] = None

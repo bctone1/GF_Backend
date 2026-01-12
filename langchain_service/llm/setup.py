@@ -924,13 +924,13 @@ def get_llm(
         raise ValueError(f"지원되지 않는 제공자: {provider}")
 
 
-def get_backend_agent(
+def get_backend_prompt(
     provider: str | None = None,
     model: str | None = None,
     **kwargs: Any,
 ):
     """
-    백엔드용 Agent LLM.
+    백엔드용 Prompt LLM.
     - 기본적으로 get_llm()을 감싸되, 키 우선순위를 조금 다르게 가져갈 수 있음.
     """
     provider = (provider or getattr(config, "LLM_PROVIDER", "openai")).lower()

@@ -113,7 +113,7 @@ class PracticeSessionCRUD:
             class_id=data.class_id,
             project_id=data.project_id,
             knowledge_ids=knowledge_ids,
-            agent_id=getattr(data, "agent_id", None),
+            prompt_id=getattr(data, "prompt_id", None),
             title=data.title,
             notes=data.notes,
         )
@@ -193,7 +193,7 @@ class PracticeSessionSettingCRUD:
         default_style_params: Optional[dict[str, Any]] = None,
         style_preset: Optional[str] = None,
         default_few_shot_example_ids: Optional[list[int]] = None,
-        default_agent_snapshot: Optional[dict[str, Any]] = None,
+        default_prompt_snapshot: Optional[dict[str, Any]] = None,
     ) -> PracticeSessionSetting:
         """
         세션당 settings 1개 보장.
@@ -210,7 +210,7 @@ class PracticeSessionSettingCRUD:
         gen = _normalize_generation_params_dict(dict(gen))
 
         style = default_style_params if isinstance(default_style_params, dict) else {}
-        agent_snapshot = dict(default_agent_snapshot) if isinstance(default_agent_snapshot, dict) else {}
+        prompt_snapshot = dict(default_prompt_snapshot) if isinstance(default_prompt_snapshot, dict) else {}
 
         try:
             with db.begin_nested():
@@ -219,7 +219,7 @@ class PracticeSessionSettingCRUD:
                     style_preset=style_preset,
                     style_params=dict(style),
                     generation_params=gen,
-                    agent_snapshot=agent_snapshot,
+                    prompt_snapshot=prompt_snapshot,
                 )
                 db.add(obj)
                 db.flush()
@@ -277,7 +277,7 @@ class PracticeSessionSettingCRUD:
     ) -> Optional[PracticeSessionSetting]:
         """
         session_id 기준 settings PATCH.
-        - style_params/generation_params/agent_snapshot: merge
+        - style_params/generation_params/prompt_snapshot: merge
         - few_shot_example_ids: replace(매핑 테이블)
         """
         row = self.get_by_session(db, session_id=session_id)
@@ -303,11 +303,11 @@ class PracticeSessionSettingCRUD:
             base_gen.update(incoming_gen)
             row.generation_params = _normalize_generation_params_dict(base_gen)
 
-        if "agent_snapshot" in values:
-            incoming_snap = _coerce_dict(values.get("agent_snapshot"))
-            base_snap = dict(getattr(row, "agent_snapshot", None) or {})
+        if "prompt_snapshot" in values:
+            incoming_snap = _coerce_dict(values.get("prompt_snapshot"))
+            base_snap = dict(getattr(row, "prompt_snapshot", None) or {})
             base_snap.update(incoming_snap)
-            row.agent_snapshot = base_snap
+            row.prompt_snapshot = base_snap
 
         if "few_shot_example_ids" in values:
             ids = values.get("few_shot_example_ids") or []

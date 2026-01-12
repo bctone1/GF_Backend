@@ -54,7 +54,7 @@ FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 *
 * **Student/User**:
 
   * 학생(Student): 초대 코드 기반 수강, 실습/대화/문서 사용
-  * 일반 User: 기본 계정, 프로젝트·문서·에이전트·AI 실습 사용
+  * 일반 User: 기본 계정, 프로젝트·문서·프롬프트·AI 실습 사용
   * 기능: 문서 업로드 → 임베딩 → 대화 연계, 히스토리에서 실습/문서로 이동
 
 ---
@@ -78,11 +78,11 @@ FastAPI + SQLAlchemy + PostgreSQL + Alembic 기반. 초기 벡터 스토어는 *
 └── service/             # 도메인 서비스 계층
 ```
 
-프론트 샘플(문서·실습·에이전트 등)과 공통 자원:
+프론트 샘플(문서·실습·프롬프트 등)과 공통 자원:
 
 * `my-documents.html` 문서 업로드·RAG 처리·실습 연계
 * `practice.html` 모델별 응답 카드, 토큰·시간 지표
-* `my-agents.html` 에이전트 빌더·공유·통계
+* `my-prompts.html` 프롬프트 빌더·공유·통계
 * (있다면) 공통 유틸 `utils.js` 날짜·숫자·토스트 API
 
 ---
@@ -182,7 +182,7 @@ uvicorn main:app --reload --port 8000
 
   * `supervisor.*` : 플랫폼 전역 설정/메트릭/리포트/백업 등
   * `partner.*`    : 조직·파트너·코스·강의·학생·LLM 설정·Usage
-  * `user.*`       : 개인 계정, 프로젝트, 실습 세션, 문서, 에이전트 등
+  * `user.*`       : 개인 계정, 프로젝트, 실습 세션, 문서, 프롬프트 등
 
 * 외래키는 상위 → 하위 방향으로 제약
 
@@ -321,4 +321,3 @@ VECTOR_BACKEND=pgvector  # or qdrant
 ## 라이선스
 
 사내/프로젝트 정책에 따름.
-

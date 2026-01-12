@@ -1,4 +1,4 @@
-# models/user/agent.py
+# models/user/prompt.py
 from sqlalchemy import (
     Column,
     BigInteger,
@@ -19,11 +19,11 @@ from sqlalchemy.orm import relationship
 from models.base import Base
 
 
-# ========== user.ai_agents ==========
-class AIAgent(Base):
+# ========== user.ai_agents (legacy table name for prompts) ==========
+class AIPrompt(Base):
     __tablename__ = "ai_agents"
 
-    agent_id = Column(BigInteger, primary_key=True, autoincrement=True)
+    prompt_id = Column("agent_id", BigInteger, primary_key=True, autoincrement=True)
 
     owner_id = Column(
         BigInteger,
@@ -56,19 +56,19 @@ class AIAgent(Base):
     )
 
     examples = relationship(
-        "AgentExample",
-        back_populates="agent",
+        "PromptExample",
+        back_populates="prompt",
         passive_deletes=True,
     )
     usage_stat = relationship(
-        "AgentUsageStat",
-        back_populates="agent",
+        "PromptUsageStat",
+        back_populates="prompt",
         uselist=False,
         passive_deletes=True,
     )
     shares = relationship(
-        "AgentShare",
-        back_populates="agent",
+        "PromptShare",
+        back_populates="prompt",
         passive_deletes=True,
     )
 
@@ -79,13 +79,14 @@ class AIAgent(Base):
     )
 
 
-# ========== user.agent_examples ==========
-class AgentExample(Base):
+# ========== user.agent_examples (legacy table name for prompt examples) ==========
+class PromptExample(Base):
     __tablename__ = "agent_examples"
 
     example_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    agent_id = Column(
+    prompt_id = Column(
+        "agent_id",
         BigInteger,
         ForeignKey("user.ai_agents.agent_id", ondelete="CASCADE"),
         nullable=False,
@@ -100,7 +101,7 @@ class AgentExample(Base):
     position = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    agent = relationship("AIAgent", back_populates="examples", passive_deletes=True)
+    prompt = relationship("AIPrompt", back_populates="examples", passive_deletes=True)
 
     __table_args__ = (
         CheckConstraint(
@@ -112,13 +113,14 @@ class AgentExample(Base):
     )
 
 
-# ========== user.agent_usage_stats ==========
-class AgentUsageStat(Base):
+# ========== user.agent_usage_stats (legacy table name for prompt usage) ==========
+class PromptUsageStat(Base):
     __tablename__ = "agent_usage_stats"
 
     usage_stat_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    agent_id = Column(
+    prompt_id = Column(
+        "agent_id",
         BigInteger,
         ForeignKey("user.ai_agents.agent_id", ondelete="CASCADE"),
         nullable=False,
@@ -129,7 +131,7 @@ class AgentUsageStat(Base):
     avg_rating = Column(Numeric(3, 2), nullable=True)  # 0.00~5.00 권장
     total_tokens = Column(BigInteger, nullable=False, server_default=text("0"))
 
-    agent = relationship("AIAgent", back_populates="usage_stat", passive_deletes=True)
+    prompt = relationship("AIPrompt", back_populates="usage_stat", passive_deletes=True)
 
     __table_args__ = (
         CheckConstraint("usage_count >= 0", name="chk_agent_usage_stats_count_nonneg"),
@@ -143,19 +145,20 @@ class AgentUsageStat(Base):
     )
 
 
-# ========== user.agent_shares ==========
-class AgentShare(Base):
+# ========== user.agent_shares (legacy table name for prompt shares) ==========
+class PromptShare(Base):
     """
-    강사의 개인 에이전트를 특정 class 에 공유하는 매핑 테이블.
-    - 하나의 agent 를 여러 class 에 공유 가능
-    - 같은 agent_id + class_id 는 한 번만(유니크)
+    강사의 개인 프롬프트를 특정 class 에 공유하는 매핑 테이블.
+    - 하나의 prompt 를 여러 class 에 공유 가능
+    - 같은 prompt_id + class_id 는 한 번만(유니크)
     """
 
     __tablename__ = "agent_shares"
 
     share_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    agent_id = Column(
+    prompt_id = Column(
+        "agent_id",
         BigInteger,
         ForeignKey("user.ai_agents.agent_id", ondelete="CASCADE"),
         nullable=False,
@@ -176,7 +179,7 @@ class AgentShare(Base):
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    agent = relationship("AIAgent", back_populates="shares", passive_deletes=True)
+    prompt = relationship("AIPrompt", back_populates="shares", passive_deletes=True)
 
     __table_args__ = (
         UniqueConstraint("agent_id", "class_id", name="uq_agent_shares_agent_class"),

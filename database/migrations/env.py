@@ -47,7 +47,7 @@ import models.user.account
 import models.user.prefs
 import models.user.project
 import models.user.document
-import models.user.agent
+import models.user.prompt
 import models.user.practice
 import models.user.activity
 import models.user.account_delete
@@ -107,5 +107,4 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-
 

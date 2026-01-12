@@ -97,12 +97,12 @@ def run_practice_turn_for_session(
     - session_id > 0   : 기존 세션 턴
 
     공통:
-    - body의 per-turn override 값들(agent/style/generation)은 run_practice_turn에 그대로 전달(세션 저장값은 유지).
+    - body의 per-turn override 값들(prompt/style/generation)은 run_practice_turn에 그대로 전달(세션 저장값은 유지).
     """
     # ---------------------------------
     # per-turn overrides (body에 있으면 전달)
     # ---------------------------------
-    requested_agent_id: Optional[int] = getattr(body, "agent_id", None)
+    requested_prompt_id: Optional[int] = getattr(body, "prompt_id", None)
     requested_style_preset: Optional[str] = getattr(body, "style_preset", None)
     requested_style_params: Optional[Dict[str, Any]] = getattr(body, "style_params", None)
     requested_generation_params: Optional[Dict[str, Any]] = getattr(body, "generation_params", None)
@@ -126,7 +126,7 @@ def run_practice_turn_for_session(
                 class_id=class_id,
                 project_id=requested_project_id,
                 knowledge_ids=requested_knowledge_ids,
-                agent_id=requested_agent_id,
+                prompt_id=requested_prompt_id,
                 title=None,
                 notes=None,
             ),
@@ -213,7 +213,7 @@ def run_practice_turn_for_session(
         user=me,
         knowledge_ids=ctx_knowledge_ids,
         generate_title=generate_title,
-        requested_agent_id=requested_agent_id,
+        requested_prompt_id=requested_prompt_id,
         requested_generation_params=requested_generation_params,
         requested_style_preset=requested_style_preset,
         requested_style_params=requested_style_params,

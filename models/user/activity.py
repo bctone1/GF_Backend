@@ -20,7 +20,7 @@ class UserActivityEvent(Base):
         nullable=False,
     )
     event_type = Column(Text, nullable=False)
-    related_type = Column(Text, nullable=True)  # 'project' | 'document' | 'agent' | ...
+    related_type = Column(Text, nullable=True)  # 'project' | 'document' | 'prompt' | ...
     related_id = Column(BigInteger, nullable=True)
     meta = Column("metadata", JSONB, nullable=True)
     occurred_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -14,7 +14,7 @@ class UserActivityEventCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
     user_id: int
     event_type: str
-    related_type: Optional[str] = None  # 'project' | 'document' | 'agent' | ...
+    related_type: Optional[str] = None  # 'project' | 'document' | 'prompt' | ...
     related_id: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
 

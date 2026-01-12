@@ -324,7 +324,7 @@ def get_practice_session(
         class_id=session.class_id,
         project_id=session.project_id,
         knowledge_ids=knowledge_ids,
-        agent_id=getattr(session, "agent_id", None),
+        prompt_id=getattr(session, "prompt_id", None),
         title=session.title,
         created_at=session.created_at,
         updated_at=session.updated_at,

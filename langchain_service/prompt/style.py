@@ -15,14 +15,14 @@ def _as_bool(v, default=True)->bool:
     return str(v).strip().lower() in ("1","true","yes","on","y","t")
 
 def policy_text(
-    *, block_inappropriate: bool=True, restrict_non_tech: bool=True, suggest_agent_handoff: bool=True
+    *, block_inappropriate: bool=True, restrict_non_tech: bool=True, suggest_prompt_handoff: bool=True
 ) -> str:
     lines=[]
     if _as_bool(block_inappropriate, True):
         lines.append("부적절하거나 욕설 포함 질문은 정중히 거절하고 대안을 제시.")
     if _as_bool(restrict_non_tech, True):
         lines.append("기술지원 외 주제는 답변하지 말고 기술 범위를 안내 해 준다.")
-    if _as_bool(suggest_agent_handoff, True):
+    if _as_bool(suggest_prompt_handoff, True):
         lines.append("확신 낮음 또는 범위 밖이면 상담원 연결을 제안.")
     return "\n".join(lines)
 
@@ -30,7 +30,7 @@ def build_system_prompt(style: Style, **flags) -> str:
     flags = {
         "block_inappropriate": _as_bool(flags.get("block_inappropriate"), True),
         "restrict_non_tech": _as_bool(flags.get("restrict_non_tech"), True),
-        "suggest_agent_handoff": _as_bool(flags.get("suggest_agent_handoff"), True),
+        "suggest_prompt_handoff": _as_bool(flags.get("suggest_prompt_handoff"), True),
     }
     return "\n".join([
         "너의 역할: knowledge 기반 RAG 응답 엔진.",
