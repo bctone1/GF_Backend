@@ -3,7 +3,6 @@ import os
 import time
 import threading
 import inspect
-from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Optional, Dict, List, Iterable, Tuple
 
@@ -30,11 +29,6 @@ try:
 except ImportError:
     OpenAIClient = None  # type: ignore
 
-# LangSmith 수동 트레이싱용
-try:
-    from langsmith import Client as LangSmithClient  # type: ignore
-except ImportError:
-    LangSmithClient = None  # type: ignore
 
 
 # =========================================================
@@ -50,16 +44,6 @@ _OPENAI_CLIENT_CACHE_MAX = 32
 _LLM_CACHE: Dict[Tuple[Any, ...], Any] = {}
 _LLM_CACHE_LOCK = threading.Lock()
 _LLM_CACHE_MAX = 64
-
-
-ls_client: Any
-if LangSmithClient is not None:
-    try:
-        ls_client = LangSmithClient()
-    except Exception:
-        ls_client = None
-else:
-    ls_client = None
 
 
 @dataclass
@@ -421,18 +405,6 @@ def iter_llm_chat_stream(
 
     lc_messages = _to_lc_messages(messages)
 
-    run = None
-    if ls_client is not None:
-        try:
-            run = ls_client.create_run(
-                name="llm_stream_call",
-                run_type="llm",
-                inputs={"messages": messages, "model": resolved_model, "provider": provider},
-                tags=["stream", provider],
-            )
-        except Exception:
-            run = None
-
     collected_parts: List[str] = []
     try:
         for chunk in llm.stream(lc_messages):
@@ -441,22 +413,7 @@ def iter_llm_chat_stream(
                 collected_parts.append(part)
                 yield part
     except Exception as e:
-        if run is not None:
-            try:
-                ls_client.update_run(run.id, error=str(e), end_time=datetime.now(timezone.utc))
-            except Exception:
-                pass
         raise
-    else:
-        if run is not None:
-            try:
-                ls_client.update_run(
-                    run.id,
-                    outputs={"text": "".join(collected_parts)},
-                    end_time=datetime.now(timezone.utc),
-                )
-            except Exception:
-                pass
 
 
 # =========================================================
@@ -516,18 +473,6 @@ def call_llm_chat(
         if max_tokens is not None:
             base_kwargs["max_output_tokens"] = max_tokens
 
-        run = None
-        if ls_client is not None:
-            try:
-                run = ls_client.create_run(
-                    name="gpt5_llm_call",
-                    run_type="llm",
-                    inputs={"messages": messages, "model": resolved_model, "provider": provider},
-                    tags=["gpt5", "openai"],
-                )
-            except Exception:
-                run = None
-
         try:
             start = time.perf_counter()
             resp = client.responses.create(
@@ -550,24 +495,9 @@ def call_llm_chat(
                     "total_tokens": getattr(usage_obj, "total_tokens", None),
                 }
 
-            if run is not None:
-                try:
-                    ls_client.update_run(
-                        run.id,
-                        outputs={"text": text, "token_usage": token_usage},
-                        end_time=datetime.now(timezone.utc),
-                    )
-                except Exception:
-                    pass
-
             return LLMCallResult(text=text, token_usage=token_usage, latency_ms=latency_ms, raw=resp)
 
         except Exception as e:
-            if run is not None:
-                try:
-                    ls_client.update_run(run.id, error=str(e), end_time=datetime.now(timezone.utc))
-                except Exception:
-                    pass
             raise
 
     # ------------------------- Friendli / EXAONE: OpenAI 호환 엔드포인트 -------------------------
@@ -597,18 +527,6 @@ def call_llm_chat(
         if max_tokens is not None:
             base_kwargs["max_tokens"] = max_tokens
 
-        run = None
-        if ls_client is not None:
-            try:
-                run = ls_client.create_run(
-                    name="friendli_llm_call",
-                    run_type="llm",
-                    inputs={"messages": messages, "model": resolved_model, "provider": provider},
-                    tags=["friendli", "openai_compatible"],
-                )
-            except Exception:
-                run = None
-
         start = time.perf_counter()
         try:
             resp = client.chat.completions.create(
@@ -634,23 +552,8 @@ def call_llm_chat(
                     "total_tokens": total_tokens,
                 }
 
-            if run is not None:
-                try:
-                    ls_client.update_run(
-                        run.id,
-                        outputs={"text": text, "token_usage": token_usage},
-                        end_time=datetime.now(timezone.utc),
-                    )
-                except Exception:
-                    pass
-
             return LLMCallResult(text=text, token_usage=token_usage, latency_ms=latency_ms, raw=resp)
         except Exception as e:
-            if run is not None:
-                try:
-                    ls_client.update_run(run.id, error=str(e), end_time=datetime.now(timezone.utc))
-                except Exception:
-                    pass
             raise
 
     # ------------------------- 나머지: LangChain LLM 사용 -------------------------
@@ -672,18 +575,6 @@ def call_llm_chat(
 
     # ✅ messages를 문자열로 뭉개지 말고 chat 메시지로 호출(정확도/일관성 + 스트리밍 호환)
     lc_messages = _to_lc_messages(messages)
-
-    run = None
-    if ls_client is not None:
-        try:
-            run = ls_client.create_run(
-                name="langchain_llm_call",
-                run_type="llm",
-                inputs={"messages": messages, "model": resolved_model, "provider": provider},
-                tags=["langchain", provider],
-            )
-        except Exception:
-            run = None
 
     try:
         res = llm.invoke(lc_messages)
@@ -713,23 +604,8 @@ def call_llm_chat(
                     "total_tokens": total_tokens,
                 }
 
-        if run is not None:
-            try:
-                ls_client.update_run(
-                    run.id,
-                    outputs={"text": text, "token_usage": token_usage},
-                    end_time=datetime.now(timezone.utc),
-                )
-            except Exception:
-                pass
-
         return LLMCallResult(text=text, token_usage=token_usage, latency_ms=latency_ms, raw=res)
     except Exception as e:
-        if run is not None:
-            try:
-                ls_client.update_run(run.id, error=str(e), end_time=datetime.now(timezone.utc))
-            except Exception:
-                pass
         raise
 
 

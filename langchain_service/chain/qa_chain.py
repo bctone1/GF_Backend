@@ -129,10 +129,14 @@ def make_qa_chain(
         if not isinstance(sp, dict):
             sp = {}
 
-        # 기본 규칙 자동 부착 여부(옵션): 기본 True
+        # 기본 규칙 자동 부착 여부(옵션): 기본은 RAG 사용 시에만 True
         use_default_rule = sp.get("use_default_rule")
         if use_default_rule is None:
-            use_default_rule = True
+            raw_kids = d.get(GF_KNOWLEDGE_IDS) or d.get("knowledge_ids") or []
+            if not isinstance(raw_kids, list):
+                raw_kids = [raw_kids] if raw_kids else []
+            has_context = bool(d.get(GF_CONTEXT)) or bool(context_text)
+            use_default_rule = bool(raw_kids) or has_context
         use_default_rule = bool(use_default_rule)
 
         existing = sp.get("system_prompt")

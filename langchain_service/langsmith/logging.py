@@ -16,6 +16,11 @@ def _is_tracing_enabled() -> bool:
     return value in {"true", "1", "yes", "on"}
 
 
+def _is_manual_logging_enabled() -> bool:
+    mode = str(getattr(config, "LANGSMITH_LOGGING_MODE", "full")).strip().lower()
+    return mode in {"full", "default"}
+
+
 def _apply_env() -> None:
     if config.LANGSMITH_ENDPOINT:
         os.environ.setdefault("LANGCHAIN_ENDPOINT", config.LANGSMITH_ENDPOINT)
@@ -39,6 +44,8 @@ def _get_client() -> Optional[LangSmithClient]:
 
 
 def start_run(name: str, inputs: Dict[str, Any], run_type: str = "chain") -> Optional[Any]:
+    if not _is_manual_logging_enabled():
+        return None
     client = _get_client()
     if client is None:
         return None
