@@ -149,6 +149,9 @@ def run_practice_turn_for_session(
             sync_existing=True,
         )
 
+        db.flush()
+        db.commit()
+
         # 요청에서 모델 선택이 들어오면 필터
         if body.model_names:
             s = set(body.model_names)
@@ -187,6 +190,9 @@ def run_practice_turn_for_session(
             generation_overrides=None,
             sync_existing=True,
         )
+
+        db.flush()
+        db.commit()
 
         models = _select_models_for_existing_session(
             db,

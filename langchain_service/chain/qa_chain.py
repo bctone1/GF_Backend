@@ -294,6 +294,8 @@ def make_qa_chain(
 
         # model: model_names[0] > factory default
         model_names = d.get(GF_MODEL_NAMES)
+        if isinstance(model_names, list) and len(model_names) > 1:
+            raise ContractError("[stage3] model_names must be a single model; parallelism is handled upstream")
         chosen_model = None
         if isinstance(model_names, list) and model_names and isinstance(model_names[0], str) and model_names[0]:
             chosen_model = model_names[0]
