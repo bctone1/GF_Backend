@@ -44,6 +44,35 @@ from langchain_service.chain.contracts import (
 )
 
 
+def lc_messages_to_role_dicts(messages: List[Any]) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for m in messages:
+        role = "user"
+        content = ""
+
+        try:
+            from langchain_core.messages import SystemMessage, HumanMessage, AIMessage  # local import
+            if isinstance(m, SystemMessage):
+                role = "system"
+            elif isinstance(m, HumanMessage):
+                role = "user"
+            elif isinstance(m, AIMessage):
+                role = "assistant"
+        except Exception:
+            pass
+
+        if hasattr(m, "content"):
+            content = m.content if isinstance(m.content, str) else str(m.content)
+        elif isinstance(m, dict):
+            role = str(m.get("role") or role)
+            content = str(m.get("content") or "")
+        else:
+            content = str(m)
+
+        out.append({"role": role, "content": content})
+    return out
+
+
 def make_qa_chain(
     *,
     call_llm_chat: Callable[..., Any],
@@ -255,34 +284,6 @@ def make_qa_chain(
     # =========================================================
     # (3) call_llm (call_llm_chat 기반, stage3 계약 dict로 맞춤)
     # =========================================================
-    def _lc_messages_to_role_dicts(messages: List[Any]) -> List[Dict[str, str]]:
-        out: List[Dict[str, str]] = []
-        for m in messages:
-            role = "user"
-            content = ""
-
-            try:
-                from langchain_core.messages import SystemMessage, HumanMessage, AIMessage  # local import
-                if isinstance(m, SystemMessage):
-                    role = "system"
-                elif isinstance(m, HumanMessage):
-                    role = "user"
-                elif isinstance(m, AIMessage):
-                    role = "assistant"
-            except Exception:
-                pass
-
-            if hasattr(m, "content"):
-                content = m.content if isinstance(m.content, str) else str(m.content)
-            elif isinstance(m, dict):
-                role = str(m.get("role") or role)
-                content = str(m.get("content") or "")
-            else:
-                content = str(m)
-
-            out.append({"role": role, "content": content})
-        return out
-
     def _stage3_call_llm(d: Dict[str, Any]) -> Dict[str, Any]:
         messages = d.get(GF_MESSAGES)
         if not isinstance(messages, list) or not messages:
@@ -319,7 +320,7 @@ def make_qa_chain(
             mct = _max_tokens_default
 
         _ = streaming
-        msg_dicts = _lc_messages_to_role_dicts(messages)
+        msg_dicts = lc_messages_to_role_dicts(messages)
 
         t0 = time.perf_counter()
         res = call_llm_chat(

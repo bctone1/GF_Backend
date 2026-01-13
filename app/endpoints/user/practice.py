@@ -13,6 +13,7 @@ from fastapi import (
     Body,
     BackgroundTasks,
 )
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy import select, func
 
@@ -63,9 +64,11 @@ from service.user.practice.ids import coerce_int_list
 from service.user.practice.params import normalize_generation_params_dict
 from service.user.practice.models_sync import init_models_for_session_from_class
 from service.user.practice.orchestrator import (
+    prepare_practice_turn_for_session,
     run_practice_turn_for_session,
     ensure_session_settings,
 )
+from service.user.practice.turn_runner import stream_practice_turn
 from service.user.practice_task import generate_session_title_task
 router = APIRouter()
 
@@ -692,10 +695,37 @@ def delete_practice_session_model(
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
     class_id: int = Query(..., ge=1),
+    stream: bool = Query(False, description="SSE 스트리밍 응답 여부"),
     body: PracticeTurnRequestNewSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    if stream:
+        session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+            db=db,
+            me=me,
+            session_id=0,
+            class_id=class_id,
+            body=body,
+        )
+        generator = stream_practice_turn(
+            db=db,
+            session=session,
+            settings=settings,
+            models=models,
+            prompt_text=body.prompt_text,
+            user=me,
+            knowledge_ids=ctx_knowledge_ids,
+            generate_title=True,
+            requested_prompt_id=body.prompt_id,
+            requested_generation_params=body.generation_params.model_dump()
+            if body.generation_params is not None
+            else None,
+            requested_style_preset=body.style_preset,
+            requested_style_params=body.style_params,
+        )
+        return StreamingResponse(generator, media_type="text/event-stream")
+
     turn_result = run_practice_turn_for_session(
         db=db,
         me=me,
@@ -729,6 +759,7 @@ def run_practice_turn_new_session_endpoint(
 def run_practice_turn_endpoint(
     background_tasks: BackgroundTasks,
     session_id: int = Path(..., ge=1, description="1 이상: 해당 세션에서 이어서 대화"),
+    stream: bool = Query(False, description="SSE 스트리밍 응답 여부"),
     body: PracticeTurnRequestExistingSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -736,6 +767,29 @@ def run_practice_turn_endpoint(
     session = ensure_my_session(db, session_id, me)
     if session.class_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
+
+    if stream:
+        session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+            db=db,
+            me=me,
+            session_id=session_id,
+            class_id=session.class_id,
+            body=body,
+        )
+        generator = stream_practice_turn(
+            db=db,
+            session=session,
+            settings=settings,
+            models=models,
+            prompt_text=body.prompt_text,
+            user=me,
+            knowledge_ids=ctx_knowledge_ids,
+            generate_title=True,
+            requested_generation_params=None,
+            requested_style_preset=None,
+            requested_style_params=None,
+        )
+        return StreamingResponse(generator, media_type="text/event-stream")
 
     turn_result = run_practice_turn_for_session(
         db=db,

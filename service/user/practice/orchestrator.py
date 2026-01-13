@@ -82,35 +82,15 @@ def _select_models_for_existing_session(
 # =========================================
 # 엔드포인트용 진입점: new/existing 분기 + 준비
 # =========================================
-def run_practice_turn_for_session(
+def prepare_practice_turn_for_session(
     db: Session,
     *,
     me: AppUser,
     session_id: int,
     class_id: int | None,
     body: PracticeTurnRequestNewSession | PracticeTurnRequestExistingSession,
-    project_id: Optional[int] = None,
-    generate_title: bool = True,
-) -> PracticeTurnResponse:
-    """
-    - session_id == 0  : 새 세션 생성 + 첫 턴
-    - session_id > 0   : 기존 세션 턴
-
-    공통:
-    - body의 per-turn override 값들(prompt/style/generation)은 run_practice_turn에 그대로 전달(세션 저장값은 유지).
-    """
-    # ---------------------------------
-    # per-turn overrides (body에 있으면 전달)
-    # ---------------------------------
-    requested_prompt_id: Optional[int] = getattr(body, "prompt_id", None)
-    requested_style_preset: Optional[str] = getattr(body, "style_preset", None)
-    requested_style_params: Optional[Dict[str, Any]] = getattr(body, "style_params", None)
-    requested_generation_params: Optional[Dict[str, Any]] = getattr(body, "generation_params", None)
-
+) -> tuple[PracticeSession, PracticeSessionSetting, List[PracticeSessionModel], List[int]]:
     if session_id == 0:
-        # -----------------------------
-        # new-session 경로
-        # -----------------------------
         if class_id is None:
             raise HTTPException(status_code=400, detail="class_id_required")
 
@@ -126,7 +106,7 @@ def run_practice_turn_for_session(
                 class_id=class_id,
                 project_id=requested_project_id,
                 knowledge_ids=requested_knowledge_ids,
-                prompt_id=requested_prompt_id,
+                prompt_id=getattr(body, "prompt_id", None),
                 title=None,
                 notes=None,
             ),
@@ -152,7 +132,6 @@ def run_practice_turn_for_session(
         db.flush()
         db.commit()
 
-        # 요청에서 모델 선택이 들어오면 필터
         if body.model_names:
             s = set(body.model_names)
             picked = [m for m in models if m.model_name in s]
@@ -161,11 +140,7 @@ def run_practice_turn_for_session(
             models = picked
 
         ctx_knowledge_ids = get_session_knowledge_ids(session)
-
     else:
-        # -----------------------------
-        # existing-session 경로
-        # -----------------------------
         if not isinstance(body, PracticeTurnRequestExistingSession):
             raise HTTPException(status_code=400, detail="invalid_body_for_existing_session")
 
@@ -179,7 +154,6 @@ def run_practice_turn_for_session(
             getattr(settings, "generation_params", None) or get_default_generation_params()
         )
 
-        # class 설정과 세션 모델 동기화(필요시 신규 모델 추가/응답 없으면 제거)
         init_models_for_session_from_class(
             db,
             me=me,
@@ -201,11 +175,46 @@ def run_practice_turn_for_session(
             class_id=class_id,
         )
 
-        # project_id는 외부에서 강제로 걸 수 있는데, 세션과 불일치하면 차단
-        if project_id is not None and session.project_id is not None and session.project_id != project_id:
-            raise HTTPException(status_code=400, detail="요청한 project_id와 세션의 project_id가 일치하지 않습니다.")
-
         ctx_knowledge_ids = get_session_knowledge_ids(session)
+
+    return session, settings, models, ctx_knowledge_ids
+
+
+def run_practice_turn_for_session(
+    db: Session,
+    *,
+    me: AppUser,
+    session_id: int,
+    class_id: int | None,
+    body: PracticeTurnRequestNewSession | PracticeTurnRequestExistingSession,
+    project_id: Optional[int] = None,
+    generate_title: bool = True,
+) -> PracticeTurnResponse:
+    """
+    - session_id == 0  : 새 세션 생성 + 첫 턴
+    - session_id > 0   : 기존 세션 턴
+
+    공통:
+    - body의 per-turn override 값들(prompt/style/generation)은 run_practice_turn에 그대로 전달(세션 저장값은 유지).
+    """
+    # ---------------------------------
+    # per-turn overrides (body에 있으면 전달)
+    # ---------------------------------
+    requested_prompt_id: Optional[int] = getattr(body, "prompt_id", None)
+    requested_style_preset: Optional[str] = getattr(body, "style_preset", None)
+    requested_style_params: Optional[Dict[str, Any]] = getattr(body, "style_params", None)
+    requested_generation_params: Optional[Dict[str, Any]] = getattr(body, "generation_params", None)
+
+    session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+        db=db,
+        me=me,
+        session_id=session_id,
+        class_id=class_id,
+        body=body,
+    )
+
+    if project_id is not None and session.project_id is not None and session.project_id != project_id:
+        raise HTTPException(status_code=400, detail="요청한 project_id와 세션의 project_id가 일치하지 않습니다.")
 
     # -----------------------------
     # 공통: 턴 실행 (per-turn override 전달)
