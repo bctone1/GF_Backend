@@ -274,7 +274,7 @@ def make_retrieve_fn_for_practice(db_outer: Session, me: AppUser) -> Callable[..
                 {
                     "knowledge_id": getattr(c, "knowledge_id", None),
                     "chunk_id": getattr(c, "chunk_id", None) or getattr(c, "id", None),
-                    "score": score,
+                    "score": float(score) if score is not None else None,
                     "preview": (str(chunk_text)[:200] if chunk_text else ""),
                 }
             )
