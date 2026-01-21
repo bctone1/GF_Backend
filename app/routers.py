@@ -60,8 +60,8 @@ def register_routers(app: FastAPI) -> None:
     # ==============================
     # User
     # ==============================
+    app.include_router(practice,          prefix="/user/practice",        tags=["user/practice : AI실습"])
+    app.include_router(project,           prefix="",                      tags=["user/project : 프로젝트"])
+    app.include_router(user_document,     prefix="/user",                 tags=["user/document : 지식베이스"])
+    app.include_router(prompt,            prefix="",                      tags=["user/prompt : 템플릿"])
     app.include_router(account,           prefix="/user",                 tags=["user/account"])
-    app.include_router(user_document,     prefix="/user",                 tags=["user/document"])
-    app.include_router(practice,          prefix="/user/practice",        tags=["user/practice"])
-    app.include_router(prompt,            prefix="",                      tags=["user/prompt"])
-    app.include_router(project,           prefix="",                      tags=["user/project"])

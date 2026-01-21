@@ -200,7 +200,7 @@ PRACTICE_DEFAULT_GENERATION = {
     "temperature": 0.7,
     "top_p": 0.9,
     "response_length_preset": None,
-    "max_completion_tokens": 10240,
+    "max_completion_tokens": 20480,
 }
 
 RESPONSE_LENGTH_PRESETS = {
@@ -222,7 +222,7 @@ DEFAULT_INGESTION = {
     "chunk_size": 600,
     "chunk_overlap": 200,
     "max_chunks": 100,
-    "chunk_strategy": "recursive",      # MVP: "recursive"만
+    "chunk_strategy": "recursive",
     # parent chunk (parent_child일 때만 의미)
     "parent_chunk_size": 1500,
     "parent_chunk_overlap": 400,

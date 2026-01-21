@@ -695,7 +695,7 @@ def delete_practice_session_model(
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
     class_id: int = Query(..., ge=1),
-    stream: bool = Query(False, description="SSE 스트리밍 응답 여부"),
+    stream: bool = Query(True, description="SSE 스트리밍 응답 여부"),
     body: PracticeTurnRequestNewSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
