@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict, List, Literal
 
 from pydantic import ConfigDict, Field, model_validator, field_validator
 
@@ -333,8 +333,8 @@ class PracticeComparisonRunCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     prompt_text: str
-    panel_a_config: Optional[Dict[str, Any]] = None
-    panel_b_config: Optional[Dict[str, Any]] = None
+    panel_a_config: Dict[str, Any] = Field(default_factory=dict)
+    panel_b_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PracticeComparisonRunUpdate(ORMBase):
@@ -354,6 +354,51 @@ class PracticeComparisonRunResponse(ORMBase):
     panel_a_config: Dict[str, Any] = Field(default_factory=dict)
     panel_b_config: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
+
+
+class PracticeComparisonPanelRagSettings(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    top_k: Optional[int] = Field(default=None, ge=1)
+    chunk_size: Optional[int] = Field(default=None, ge=1)
+    threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class PracticeComparisonPanelRequest(ORMBase):
+    model_config = ConfigDict(from_attributes=False, extra="forbid")
+
+    mode: Literal["pure_llm", "document", "rag"]
+    rag_settings: Optional[PracticeComparisonPanelRagSettings] = None
+
+    @model_validator(mode="after")
+    def _validate_rag_settings(self) -> "PracticeComparisonPanelRequest":
+        if self.mode == "rag" and self.rag_settings is None:
+            raise ValueError("rag_settings_required_for_rag_mode")
+        return self
+
+
+class PracticeComparisonTurnRequest(ORMBase):
+    model_config = ConfigDict(from_attributes=False, extra="forbid")
+
+    prompt_text: str
+    model_names: Optional[list[str]] = Field(
+        default=None,
+        description="이 세션에서 호출할 논리 모델 이름 목록",
+    )
+    prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
+    project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
+    knowledge_ids: Optional[List[int]] = Field(
+        default=None,
+        json_schema_extra={"example": None},
+        description="새 세션에서만 설정되는 지식베이스 ID 목록",
+    )
+    panel_a: PracticeComparisonPanelRequest
+    panel_b: PracticeComparisonPanelRequest
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeComparisonTurnRequest":
+        self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        return self
 
 
 # =========================================
@@ -446,6 +491,21 @@ class PracticeTurnResponse(ORMBase):
     session_title: Optional[str] = None
     prompt_text: str
     results: List[PracticeTurnModelResult]
+
+
+class PracticeComparisonTurnPanelResult(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    panel_key: str
+    mode: str
+    turn: PracticeTurnResponse
+
+
+class PracticeComparisonTurnResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    run: PracticeComparisonRunResponse
+    panel_results: List[PracticeComparisonTurnPanelResult]
 
 
 # ForwardRef

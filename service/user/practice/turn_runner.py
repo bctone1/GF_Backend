@@ -275,6 +275,7 @@ def _prepare_model_payload(
     session: PracticeSession,
     user: AppUser,
     requested_generation_params: Optional[Dict[str, Any]],
+    requested_retrieval_params: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     provider, real_model, runtime_defaults = resolve_runtime_model(model.model_name)
     runtime_defaults = normalize_generation_params_dict(runtime_defaults or {})
@@ -367,6 +368,8 @@ def _prepare_model_payload(
         "few_shot_examples": few_shots,
         "trace": {"chain_version": CHAIN_VERSION, "logical_model_name": model.model_name},
     }
+    if isinstance(requested_retrieval_params, dict) and requested_retrieval_params:
+        chain_in["retrieval_params"] = dict(requested_retrieval_params)
     if provider:
         chain_in["provider"] = provider
 
@@ -396,6 +399,7 @@ def stream_practice_turn(
     generate_title: bool = True,
     requested_prompt_id: Optional[int] = None,
     requested_generation_params: Optional[Dict[str, Any]] = None,
+    requested_retrieval_params: Optional[Dict[str, Any]] = None,
     requested_style_preset: Optional[str] = None,
     requested_style_params: Optional[Dict[str, Any]] = None,
 ) -> Iterable[str]:
@@ -431,6 +435,7 @@ def stream_practice_turn(
                 session=session,
                 user=user,
                 requested_generation_params=requested_generation_params,
+                requested_retrieval_params=requested_retrieval_params,
             )
 
             chain_in = prepared["chain_in"]
@@ -546,6 +551,7 @@ def run_practice_turn(
     # --- per-turn overrides (orchestrator에서 넘겨주도록) ---
     requested_prompt_id: Optional[int] = None,
     requested_generation_params: Optional[Dict[str, Any]] = None,
+    requested_retrieval_params: Optional[Dict[str, Any]] = None,
     requested_style_preset: Optional[str] = None,
     requested_style_params: Optional[Dict[str, Any]] = None,
 ) -> PracticeTurnResponse:
@@ -577,6 +583,7 @@ def run_practice_turn(
                 session=session,
                 user=user,
                 requested_generation_params=requested_generation_params,
+                requested_retrieval_params=requested_retrieval_params,
             )
             chain_task = make_qa_chain(
                 call_llm_chat=call_llm_chat,
