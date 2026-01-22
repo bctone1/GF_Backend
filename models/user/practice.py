@@ -43,12 +43,14 @@ class PracticeSession(Base):
         nullable=True,
     )
 
+    # knowledge_ids(JSON 배열)로 통일 [1, 2, 3]
     knowledge_ids = Column(
         JSONB,
         nullable=False,
         server_default=text("'[]'::jsonb"),
     )
 
+    # Prompt 템플릿 연결
     prompt_id = Column(
         "agent_id",
         BigInteger,
@@ -69,6 +71,11 @@ class PracticeSession(Base):
     )
     responses = relationship(
         "PracticeResponse",
+        back_populates="session",
+        passive_deletes=True,
+    )
+    comparison_runs = relationship(
+        "PracticeComparisonRun",
         back_populates="session",
         passive_deletes=True,
     )
@@ -295,6 +302,14 @@ class PracticeResponse(Base):
         nullable=False,
     )
 
+    comparison_run_id = Column(
+        BigInteger,
+        ForeignKey("user.practice_comparison_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    panel_key = Column(Text, nullable=True)
+
     model_name = Column(Text, nullable=False)
     prompt_text = Column(Text, nullable=False)
     response_text = Column(Text, nullable=False)
@@ -316,4 +331,12 @@ class PracticeResponse(Base):
         passive_deletes=True,
     )
 
-    __table_args__ = ({"schema": "user"},)
+    comparison_run = relationship(
+        "PracticeComparisonRun",
+        back_populates="responses",
+    )
+
+    __table_args__ = (
+        Index("idx_practice_responses_comparison_run", "comparison_run_id"),
+        {"schema": "user"},
+    )
