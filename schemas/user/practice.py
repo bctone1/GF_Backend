@@ -293,6 +293,8 @@ class PracticeResponseCreate(ORMBase):
     session_id: int
     prompt_text: str
     response_text: str
+    comparison_run_id: Optional[int] = Field(default=None, ge=1)
+    panel_key: Optional[str] = None
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
 
@@ -302,6 +304,8 @@ class PracticeResponseUpdate(ORMBase):
 
     prompt_text: Optional[str] = None
     response_text: Optional[str] = None
+    comparison_run_id: Optional[int] = Field(default=None, ge=1)
+    panel_key: Optional[str] = None
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
 
@@ -315,8 +319,40 @@ class PracticeResponseResponse(ORMBase):
     model_name: str
     prompt_text: str
     response_text: str
+    comparison_run_id: Optional[int] = None
+    panel_key: Optional[str] = None
     token_usage: Optional[Dict[str, Any]] = None
     latency_ms: Optional[int] = None
+    created_at: datetime
+
+
+# =========================================
+# user.practice_comparison_runs
+# =========================================
+class PracticeComparisonRunCreate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    prompt_text: str
+    panel_a_config: Optional[Dict[str, Any]] = None
+    panel_b_config: Optional[Dict[str, Any]] = None
+
+
+class PracticeComparisonRunUpdate(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    prompt_text: Optional[str] = None
+    panel_a_config: Optional[Dict[str, Any]] = None
+    panel_b_config: Optional[Dict[str, Any]] = None
+
+
+class PracticeComparisonRunResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    session_id: int
+    prompt_text: str
+    panel_a_config: Dict[str, Any] = Field(default_factory=dict)
+    panel_b_config: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 

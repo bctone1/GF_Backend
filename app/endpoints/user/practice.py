@@ -32,6 +32,7 @@ from crud.user.practice import (
     practice_response_crud,
     practice_session_setting_crud,
     user_few_shot_example_crud,
+    practice_comparison_run_crud,
 )
 
 from schemas.base import Page
@@ -45,6 +46,9 @@ from schemas.user.practice import (
     PracticeResponseCreate,
     PracticeResponseUpdate,
     PracticeResponseResponse,
+    PracticeComparisonRunCreate,
+    PracticeComparisonRunUpdate,
+    PracticeComparisonRunResponse,
     PracticeTurnRequestNewSession,
     PracticeTurnRequestExistingSession,
     PracticeTurnResponse,
@@ -59,6 +63,7 @@ from service.user.practice.ownership import (
     ensure_my_session,
     ensure_my_session_model,
     ensure_my_response,
+    ensure_my_comparison_run,
 )
 from service.user.practice.ids import coerce_int_list
 from service.user.practice.params import normalize_generation_params_dict
@@ -695,7 +700,7 @@ def delete_practice_session_model(
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
     class_id: int = Query(..., ge=1),
-    stream: bool = Query(True, description="SSE 스트리밍 응답 여부"),
+    stream: bool = Query(False, description="SSE 스트리밍 응답 여부"),
     body: PracticeTurnRequestNewSession = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -815,6 +820,96 @@ def run_practice_turn_endpoint(
     return turn_result
 
 # =========================================================
+# Practice Comparison Runs
+# =========================================================
+@router.get(
+    "/sessions/{session_id}/comparison-runs",
+    response_model=Page[PracticeComparisonRunResponse],
+    operation_id="list_practice_comparison_runs",
+)
+def list_practice_comparison_runs(
+    session_id: int = Path(..., ge=1),
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    ensure_my_session(db, session_id, me)
+    rows, total = practice_comparison_run_crud.list_by_session(
+        db,
+        session_id=session_id,
+        page=page,
+        size=size,
+    )
+    items = [PracticeComparisonRunResponse.model_validate(r) for r in rows]
+    return {"items": items, "total": total, "page": page, "size": size}
+
+
+@router.post(
+    "/sessions/{session_id}/comparison-runs",
+    response_model=PracticeComparisonRunResponse,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_practice_comparison_run",
+)
+def create_practice_comparison_run(
+    session_id: int = Path(..., ge=1),
+    payload: PracticeComparisonRunCreate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    ensure_my_session(db, session_id, me)
+    obj = practice_comparison_run_crud.create(db, session_id=session_id, data=payload)
+    db.commit()
+    return PracticeComparisonRunResponse.model_validate(obj)
+
+
+@router.get(
+    "/comparison-runs/{run_id}",
+    response_model=PracticeComparisonRunResponse,
+    operation_id="get_practice_comparison_run",
+)
+def get_practice_comparison_run(
+    run_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    run, _session = ensure_my_comparison_run(db, run_id, me)
+    return PracticeComparisonRunResponse.model_validate(run)
+
+
+@router.patch(
+    "/comparison-runs/{run_id}",
+    response_model=PracticeComparisonRunResponse,
+    operation_id="update_practice_comparison_run",
+)
+def update_practice_comparison_run(
+    run_id: int = Path(..., ge=1),
+    payload: PracticeComparisonRunUpdate = ...,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    run, _session = ensure_my_comparison_run(db, run_id, me)
+    updated = practice_comparison_run_crud.update(db, run=run, data=payload)
+    db.commit()
+    return PracticeComparisonRunResponse.model_validate(updated)
+
+
+@router.delete(
+    "/comparison-runs/{run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="delete_practice_comparison_run",
+)
+def delete_practice_comparison_run(
+    run_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    run, _session = ensure_my_comparison_run(db, run_id, me)
+    practice_comparison_run_crud.delete(db, run=run)
+    db.commit()
+    return None
+
+# =========================================================
 # Practice Responses
 # =========================================================
 @router.get(
@@ -846,6 +941,11 @@ def create_practice_response(
     me: AppUser = Depends(get_current_user),
 ):
     _model, _session = ensure_my_session_model(db, session_model_id, me)
+
+    if data.comparison_run_id:
+        _, session_for_run = ensure_my_comparison_run(db, data.comparison_run_id, me)
+        if session_for_run.session_id != _session.session_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="comparison_run_session_mismatch")
 
     data_in = data.model_copy(
         update={
@@ -885,6 +985,10 @@ def update_practice_response(
     me: AppUser = Depends(get_current_user),
 ):
     _resp, _model, _session = ensure_my_response(db, response_id, me)
+    if data.comparison_run_id:
+        _, session_for_run = ensure_my_comparison_run(db, data.comparison_run_id, me)
+        if session_for_run.session_id != _session.session_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="comparison_run_session_mismatch")
     updated = practice_response_crud.update(db, response_id=response_id, data=data)
     db.commit()
     if not updated:

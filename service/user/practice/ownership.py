@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 
 from models.user.account import AppUser
 from models.user.practice import PracticeSession, PracticeSessionModel, PracticeResponse
+from models.user.comparison import PracticeComparisonRun
 
 from crud.user.practice import (
     practice_session_crud,
     practice_session_model_crud,
     practice_response_crud,
+    practice_comparison_run_crud,
 )
 
 
@@ -63,3 +65,22 @@ def ensure_my_response(
 
     model, session = ensure_my_session_model(db, resp.session_model_id, me)
     return resp, model, session
+
+
+def ensure_my_comparison_run(
+    db: Session,
+    run_id: int,
+    me: AppUser,
+) -> Tuple[PracticeComparisonRun, PracticeSession]:
+    """
+    비교 실행(run)이 존재하고, 해당 세션이 me 소유인지 검증.
+    """
+    run = practice_comparison_run_crud.get(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="comparison_run not found")
+
+    session = practice_session_crud.get(db, run.session_id)
+    if not session or session.user_id != me.user_id:
+        raise HTTPException(status_code=404, detail="comparison_run not found")
+
+    return run, session
