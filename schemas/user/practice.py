@@ -367,7 +367,7 @@ class PracticeComparisonPanelRagSettings(ORMBase):
 class PracticeComparisonPanelRequest(ORMBase):
     model_config = ConfigDict(from_attributes=False, extra="forbid")
 
-    mode: Literal["pure_llm", "document", "rag"]
+    mode: Literal["llm", "doc", "rag"]
     rag_settings: Optional[PracticeComparisonPanelRagSettings] = None
 
     @model_validator(mode="after")

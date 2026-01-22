@@ -937,6 +937,7 @@ def create_practice_comparison_run(
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_comparison_turn",
     summary="비교 학습 실행(패널 A/B)",
+    description='모드는 "llm", "doc", "rag" 중 하나로',
 )
 def run_practice_comparison_turn(
     session_id: int = Path(..., ge=0),
