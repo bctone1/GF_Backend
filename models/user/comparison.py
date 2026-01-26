@@ -1,4 +1,5 @@
 # models/user/comparison.py
+from __future__ import annotations
 
 from sqlalchemy import (
     Column,
@@ -8,6 +9,9 @@ from sqlalchemy import (
     ForeignKey,
     CheckConstraint,
     Index,
+    Integer,
+    String,
+    Numeric,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -18,33 +22,38 @@ from models.base import Base
 
 
 # =========================
-# user.practice_comparison_runs
+# user.practice_comparison_runs  (v2: panel 단일 실행 로그)
 # =========================
 class PracticeComparisonRun(Base):
     """
-    비교 모드 실행 1번의 '헤더(그룹)'.
-    결과는 practice_responses에 (comparison_run_id + panel_key)로 매핑.
-    panel_a_config / panel_b_config에는 모드(llm|doc|rag), knowledge_ids, rag params 등을 스냅샷으로 저장.
+    비교 모드의 '패널 1회 실행' 레코드
+    실행 버튼이 A/B 각각이므로, 한 row가 panel(a|b) 하나만 가짐
+    결과는 practice_responses에 comparison_run_id(+optional panel_key)로 매핑 가능
     """
 
     __tablename__ = "practice_comparison_runs"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    # 어느 practice session에서 발생했는지
     session_id = Column(
         BigInteger,
         ForeignKey("user.practice_sessions.session_id", ondelete="CASCADE"),
         nullable=False,
     )
 
-    # 공통 프롬프트 스냅샷
+    # panel: 'a' or 'b'
+    panel = Column(String(1), nullable=False)
     prompt_text = Column(Text, nullable=False)
+    model_names = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
 
-    # A/B 패널 설정 스냅샷
-    panel_a_config = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
-    panel_b_config = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    # mode: llm | doc | rag
+    mode = Column(String(10), nullable=False)
 
+    knowledge_ids = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"))
+
+    top_k = Column(Integer, nullable=True)
+    chunk_size = Column(Integer, nullable=True)
+    threshold = Column(Numeric(10, 6), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     session = relationship(
@@ -61,6 +70,8 @@ class PracticeComparisonRun(Base):
 
     __table_args__ = (
         CheckConstraint("length(prompt_text) > 0", name="chk_practice_comparison_runs_prompt_nonempty"),
-        Index("idx_practice_comparison_runs_session_time", "session_id", "created_at"),
+        CheckConstraint("panel in ('a','b')", name="chk_practice_comparison_runs_panel"),
+        CheckConstraint("mode in ('llm','doc','rag')", name="chk_practice_comparison_runs_mode"),
+        Index("idx_practice_comparison_runs_session_panel_time", "session_id", "panel", "created_at"),
         {"schema": "user"},
     )

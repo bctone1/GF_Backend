@@ -16,7 +16,6 @@ from models.user.practice import (
     PracticeSessionModel,
     PracticeResponse,
 )
-from models.user.comparison import PracticeComparisonRun
 
 from schemas.user.practice import (
     PracticeSessionCreate,
@@ -28,8 +27,6 @@ from schemas.user.practice import (
     PracticeResponseUpdate,
     UserFewShotExampleCreate,
     UserFewShotExampleUpdate,
-    PracticeComparisonRunCreate,
-    PracticeComparisonRunUpdate,
 )
 
 
@@ -198,11 +195,6 @@ class PracticeSessionSettingCRUD:
         default_few_shot_example_ids: Optional[list[int]] = None,
         default_prompt_snapshot: Optional[dict[str, Any]] = None,
     ) -> PracticeSessionSetting:
-        """
-        세션당 settings 1개 보장.
-        - 없으면 생성
-        - UNIQUE(session_id) 레이스컨디션은 SAVEPOINT로 안전 처리
-        """
         row = self.get_by_session(db, session_id=session_id)
         if row:
             return row
@@ -278,11 +270,6 @@ class PracticeSessionSettingCRUD:
         session_id: int,
         data: Union[PracticeSessionSettingUpdate, Mapping[str, Any]],
     ) -> Optional[PracticeSessionSetting]:
-        """
-        session_id 기준 settings PATCH.
-        - style_params/generation_params/prompt_snapshot: merge
-        - few_shot_example_ids: replace(매핑 테이블)
-        """
         row = self.get_by_session(db, session_id=session_id)
         if not row:
             return None
@@ -575,79 +562,3 @@ class PracticeResponseCRUD:
 
 
 practice_response_crud = PracticeResponseCRUD()
-
-
-# =========================================================
-# PracticeComparisonRun CRUD
-# =========================================================
-class PracticeComparisonRunCRUD:
-    def create(
-        self,
-        db: Session,
-        *,
-        session_id: int,
-        data: PracticeComparisonRunCreate,
-    ) -> PracticeComparisonRun:
-        obj = PracticeComparisonRun(
-            session_id=session_id,
-            prompt_text=data.prompt_text,
-            panel_a_config=_coerce_dict(data.panel_a_config),
-            panel_b_config=_coerce_dict(data.panel_b_config),
-        )
-        db.add(obj)
-        db.flush()
-        db.refresh(obj)
-        return obj
-
-    def get(self, db: Session, run_id: int) -> Optional[PracticeComparisonRun]:
-        stmt = select(PracticeComparisonRun).where(PracticeComparisonRun.id == run_id)
-        return db.scalar(stmt)
-
-    def list_by_session(
-        self,
-        db: Session,
-        *,
-        session_id: int,
-        page: int = 1,
-        size: int = 50,
-    ) -> Tuple[Sequence[PracticeComparisonRun], int]:
-        base = select(PracticeComparisonRun).where(PracticeComparisonRun.session_id == session_id)
-        total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
-        stmt = (
-            base.order_by(PracticeComparisonRun.created_at.desc(), PracticeComparisonRun.id.desc())
-            .offset((page - 1) * size)
-            .limit(size)
-        )
-        rows = db.scalars(stmt).all()
-        return rows, total
-
-    def update(
-        self,
-        db: Session,
-        *,
-        run: PracticeComparisonRun,
-        data: PracticeComparisonRunUpdate,
-    ) -> PracticeComparisonRun:
-        values = data.model_dump(exclude_unset=True)
-        if not values:
-            return run
-
-        if "panel_a_config" in values:
-            values["panel_a_config"] = _coerce_dict(values.get("panel_a_config"))
-        if "panel_b_config" in values:
-            values["panel_b_config"] = _coerce_dict(values.get("panel_b_config"))
-
-        for k, v in values.items():
-            setattr(run, k, v)
-
-        db.add(run)
-        db.flush()
-        db.refresh(run)
-        return run
-
-    def delete(self, db: Session, *, run: PracticeComparisonRun) -> None:
-        db.delete(run)
-        db.flush()
-
-
-practice_comparison_run_crud = PracticeComparisonRunCRUD()

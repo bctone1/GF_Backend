@@ -22,7 +22,6 @@ from schemas.user.comparison import (
     PracticeComparisonTurnPanelResult,
     PracticeComparisonTurnRequest,
     PracticeComparisonTurnResponse,
-    # PracticeTurnResponse,
 )
 from schemas.user.practice import (
     PracticeResponseUpdate,
@@ -39,23 +38,23 @@ router = APIRouter()
 
 
 # =========================================================
-# Practice Comparison Runs
+# helpers
 # =========================================================
-def _build_panel_retrieval_params(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _build_retrieval_params_from_body(body: PracticeComparisonTurnRequest) -> Optional[Dict[str, Any]]:
+    if body.mode != "rag":
+        return None
+
     params: Dict[str, Any] = {}
-    top_k = payload.get("top_k")
-    threshold = payload.get("threshold")
-    chunk_size = payload.get("chunk_size")
-    if top_k is not None:
-        params["top_k"] = top_k
-    if threshold is not None:
-        params["threshold"] = threshold
-    if chunk_size is not None:
-        params["chunk_size"] = chunk_size
-    return params
+    if body.top_k is not None:
+        params["top_k"] = body.top_k
+    if body.chunk_size is not None:
+        params["chunk_size"] = body.chunk_size
+    if body.threshold is not None:
+        params["threshold"] = float(body.threshold)
+    return params or None
 
 
-def _run_comparison_turn(
+def _run_single_panel_turn(
     *,
     db: Session,
     me: AppUser,
@@ -63,23 +62,17 @@ def _run_comparison_turn(
     settings: PracticeSessionSetting,
     models: List[Any],
     body: PracticeComparisonTurnRequest,
-    ctx_knowledge_ids: List[int],
     run_obj: Any,
-    panel_key: str,
-    panel_payload: Dict[str, Any],
 ) -> PracticeTurnResponse:
-    mode = panel_payload.get("mode")
-    if mode == "pure_llm":
-        panel_knowledge_ids: List[int] = []
-        panel_retrieval_params = None
+    # mode: llm/doc/rag
+    if body.mode == "llm":
+        knowledge_ids: List[int] = []
+        retrieval_params = None
     else:
-        if not ctx_knowledge_ids:
+        if not body.knowledge_ids:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="knowledge_ids_required")
-        panel_knowledge_ids = ctx_knowledge_ids
-        rag_settings = panel_payload.get("rag_settings") or {}
-        panel_retrieval_params = (
-            _build_panel_retrieval_params(rag_settings) if mode == "rag" else None
-        )
+        knowledge_ids = body.knowledge_ids
+        retrieval_params = _build_retrieval_params_from_body(body)
 
     turn = run_practice_turn(
         db=db,
@@ -88,22 +81,28 @@ def _run_comparison_turn(
         models=models,
         prompt_text=body.prompt_text,
         user=me,
-        knowledge_ids=panel_knowledge_ids,
-        requested_retrieval_params=panel_retrieval_params,
+        knowledge_ids=knowledge_ids,
+        requested_retrieval_params=retrieval_params,
         generate_title=False,
     )
+
+    # practice_responses에 comparison_run_id + panel 태깅
     for result in turn.results:
         practice_response_crud.update(
             db,
             response_id=result.response_id,
             data=PracticeResponseUpdate(
                 comparison_run_id=run_obj.id,
-                panel_key=panel_key,
+                panel_key=body.panel,  # 기존 컬럼 유지 가정
             ),
         )
+
     return turn
 
 
+# =========================================================
+# Practice Comparison Runs
+# =========================================================
 @router.get(
     "/sessions/{session_id}/comparison-runs",
     response_model=Page[PracticeComparisonRunResponse],
@@ -150,7 +149,7 @@ def create_practice_comparison_run(
     response_model=PracticeComparisonTurnResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_comparison_turn",
-    summary="비교 학습 실행(패널 A/B)",
+    summary="비교 학습 실행(패널 1개: a 또는 b)",
 )
 def run_practice_comparison_turn(
     session_id: int = Path(..., ge=0),
@@ -159,10 +158,12 @@ def run_practice_comparison_turn(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    # 1) 세션 준비 (새 세션 or 기존 세션)
     if session_id == 0:
         if class_id is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id_required")
-        session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+
+        session, settings, models, _ctx_knowledge_ids = prepare_practice_turn_for_session(
             db=db,
             me=me,
             session_id=0,
@@ -170,13 +171,15 @@ def run_practice_comparison_turn(
             body=PracticeTurnRequestNewSession(
                 prompt_text=body.prompt_text,
                 model_names=body.model_names,
-                prompt_id=body.prompt_id,
-                project_id=body.project_id,
-                knowledge_ids=body.knowledge_ids,
+                # 비교 실행에서는 prompt_id/project_id를 안 쓰는 구조라면 None으로
+                prompt_id=None,
+                project_id=None,
+                knowledge_ids=body.knowledge_ids or [],
             ),
         )
     else:
-        session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+        ensure_my_session(db, session_id, me)
+        session, settings, models, _ctx_knowledge_ids = prepare_practice_turn_for_session(
             db=db,
             me=me,
             session_id=session_id,
@@ -187,56 +190,42 @@ def run_practice_comparison_turn(
             ),
         )
 
-    panel_a_config = body.panel_a.model_dump()
-    panel_b_config = body.panel_b.model_dump()
+    # 2) comparison run row 생성 (패널 1개)
     run_obj = practice_comparison_run_crud.create(
         db,
-        session_id=session.session_id,
+        session_id=session.session_id,  # PracticeSession PK가 session_id인 구조 가정
         data=PracticeComparisonRunCreate(
+            panel=body.panel,
             prompt_text=body.prompt_text,
-            panel_a_config=panel_a_config,
-            panel_b_config=panel_b_config,
+            model_names=body.model_names,
+            mode=body.mode,
+            knowledge_ids=body.knowledge_ids,
+            top_k=body.top_k,
+            chunk_size=body.chunk_size,
+            threshold=body.threshold,
         ),
     )
-    panel_results = [
-        PracticeComparisonTurnPanelResult(
-            panel_key="a",
-            mode=body.panel_a.mode,
-            turn=_run_comparison_turn(
-                db=db,
-                me=me,
-                session=session,
-                settings=settings,
-                models=models,
-                body=body,
-                ctx_knowledge_ids=ctx_knowledge_ids,
-                run_obj=run_obj,
-                panel_key="a",
-                panel_payload=panel_a_config,
-            ),
-        ),
-        PracticeComparisonTurnPanelResult(
-            panel_key="b",
-            mode=body.panel_b.mode,
-            turn=_run_comparison_turn(
-                db=db,
-                me=me,
-                session=session,
-                settings=settings,
-                models=models,
-                body=body,
-                ctx_knowledge_ids=ctx_knowledge_ids,
-                run_obj=run_obj,
-                panel_key="b",
-                panel_payload=panel_b_config,
-            ),
-        ),
-    ]
+
+    # 3) 실행
+    turn = _run_single_panel_turn(
+        db=db,
+        me=me,
+        session=session,
+        settings=settings,
+        models=models,
+        body=body,
+        run_obj=run_obj,
+    )
 
     db.commit()
+
     return PracticeComparisonTurnResponse(
         run=PracticeComparisonRunResponse.model_validate(run_obj),
-        panel_results=panel_results,
+        panel_result=PracticeComparisonTurnPanelResult(
+            panel=body.panel,
+            mode=body.mode,
+            turn=turn,
+        ),
     )
 
 

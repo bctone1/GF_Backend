@@ -12,10 +12,12 @@ from models.user.comparison import PracticeComparisonRun
 
 from crud.user.practice import (
     practice_session_crud,
+    practice_session_setting_crud,
     practice_session_model_crud,
     practice_response_crud,
-    practice_comparison_run_crud,
 )
+from crud.user.comparison import practice_comparison_run_crud
+
 
 
 # =========================================
@@ -67,20 +69,13 @@ def ensure_my_response(
     return resp, model, session
 
 
-def ensure_my_comparison_run(
-    db: Session,
-    run_id: int,
-    me: AppUser,
-) -> Tuple[PracticeComparisonRun, PracticeSession]:
-    """
-    비교 실행(run)이 존재하고, 해당 세션이 me 소유인지 검증.
-    """
-    run = practice_comparison_run_crud.get(db, run_id)
+def ensure_my_comparison_run(db: Session, run_id: int, me: AppUser):
+    run = practice_comparison_run_crud.get(db, run_id=run_id)
     if not run:
-        raise HTTPException(status_code=404, detail="comparison_run not found")
+        raise HTTPException(status_code=404, detail="comparison_run_not_found")
 
     session = practice_session_crud.get(db, run.session_id)
     if not session or session.user_id != me.user_id:
-        raise HTTPException(status_code=404, detail="comparison_run not found")
+        raise HTTPException(status_code=404, detail="session_not_found")
 
     return run, session
