@@ -58,7 +58,7 @@ router = APIRouter()
 @router.get(
     "/classes",
     response_model=StudentClassPage,
-    summary="내 강의 리스트",
+    summary="내강의목록",
 )
 def list_my_classes(
     status: Optional[EnrollmentStatus] = Query(
@@ -165,7 +165,7 @@ def list_my_classes(
 @router.delete(
     "/class/enrollments/{enrollment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="내 수강 삭제(수강 취소)",
+    summary="수강취소",
 )
 def delete_my_enrollment(
     enrollment_id: int,
@@ -190,7 +190,7 @@ def delete_my_enrollment(
 @router.post(
     "/email/send-code",
     response_model=EmailCodeSendResponse,
-    summary="가입 전 인증 코드 발송",
+    summary="가입인증코드",
 )
 def send_email_code(
     payload: EmailCodeSendRequest,
@@ -241,7 +241,7 @@ def send_email_code(
 @router.post(
     "/email/verify-code",
     response_model=EmailCodeVerifyResponse,
-    summary="이메일 코드 인증",
+    summary="이메일인증",
 )
 def verify_email_code(
     payload: EmailCodeVerifyRequest,
@@ -302,7 +302,7 @@ def user_signup(
 @router.post(
     "/login",
     response_model=AuthTokens,
-    summary="이메일/비밀번호 로그인",
+    summary="이메일로그인",
 )
 def user_login(
     payload: LoginInput,
@@ -325,14 +325,22 @@ def user_login(
 # ==============================
 # Me: 기본 계정 정보
 # ==============================
-@router.get("/my", response_model=UserResponse)
+@router.get(
+    "/my",
+    response_model=UserResponse,
+    summary="내계정조회",
+)
 def get_my_account(
     me: AppUser = Depends(get_current_user),
 ) -> UserResponse:
     return UserResponse.model_validate(me)
 
 
-@router.patch("/my", response_model=UserResponse)
+@router.patch(
+    "/my",
+    response_model=UserResponse,
+    summary="내계정수정",
+)
 def update_my_account(
     payload: UserUpdate,
     db: Session = Depends(get_db),
@@ -356,7 +364,11 @@ def update_my_account(
 # ==============================
 # Me: 프로필
 # ==============================
-@router.get("/my/profile", response_model=UserProfileResponse)
+@router.get(
+    "/my/profile",
+    response_model=UserProfileResponse,
+    summary="내프로필조회",
+)
 def get_my_profile(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -367,7 +379,11 @@ def get_my_profile(
     return UserProfileResponse.model_validate(profile)
 
 
-@router.patch("/my/profile", response_model=UserProfileResponse)
+@router.patch(
+    "/my/profile",
+    response_model=UserProfileResponse,
+    summary="내프로필수정",
+)
 def update_my_profile(
     payload: UserProfileUpdate,
     db: Session = Depends(get_db),
@@ -384,7 +400,11 @@ def update_my_profile(
 # ==============================
 # Me: 보안 설정
 # ==============================
-@router.get("/my/security", response_model=UserSecuritySettingResponse)
+@router.get(
+    "/my/security",
+    response_model=UserSecuritySettingResponse,
+    summary="보안설정조회",
+)
 def get_my_security(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -395,7 +415,11 @@ def get_my_security(
     return UserSecuritySettingResponse.model_validate(sec)
 
 
-@router.patch("/my/security", response_model=UserSecuritySettingResponse)
+@router.patch(
+    "/my/security",
+    response_model=UserSecuritySettingResponse,
+    summary="보안설정수정",
+)
 def update_my_security(
     payload: UserSecuritySettingUpdate,
     db: Session = Depends(get_db),
@@ -409,7 +433,11 @@ def update_my_security(
 # ==============================
 # Me: 프라이버시 설정
 # ==============================
-@router.get("/my/privacy", response_model=UserPrivacySettingResponse)
+@router.get(
+    "/my/privacy",
+    response_model=UserPrivacySettingResponse,
+    summary="프라이버시조회",
+)
 def get_my_privacy(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -420,7 +448,11 @@ def get_my_privacy(
     return UserPrivacySettingResponse.model_validate(privacy)
 
 
-@router.patch("/my/privacy", response_model=UserPrivacySettingResponse)
+@router.patch(
+    "/my/privacy",
+    response_model=UserPrivacySettingResponse,
+    summary="프라이버시수정",
+)
 def update_my_privacy(
     payload: UserPrivacySettingUpdate,
     db: Session = Depends(get_db),
@@ -434,7 +466,11 @@ def update_my_privacy(
 # ==============================
 # Me: 로그인 세션 목록
 # ==============================
-@router.get("/my/sessions", response_model=list[UserLoginSessionResponse])
+@router.get(
+    "/my/sessions",
+    response_model=list[UserLoginSessionResponse],
+    summary="로그인세션",
+)
 def list_my_login_sessions(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -456,7 +492,7 @@ def list_my_login_sessions(
     "/partner-promotion-requests",
     response_model=PartnerPromotionRequestResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="강사 권한 요청",
+    summary="강사승격요청",
 )
 def create_partner_promotion_request(
     payload: PartnerPromotionRequestCreate,
@@ -487,7 +523,7 @@ class InviteRedeemRequest(BaseModel):
     "/class/invites/redeem",
     response_model=EnrollmentResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="초대코드 수강 등록",
+    summary="초대코드등록",
 )
 def redeem_invite_code(
     payload: InviteRedeemRequest,
@@ -500,5 +536,4 @@ def redeem_invite_code(
         raw_code=payload.code,
     )
     return EnrollmentResponse.model_validate(enrollment)
-
 

@@ -156,7 +156,7 @@ def run_document_pipeline_background(user_id: int, knowledge_id: int) -> None:
     "/document",
     response_model=Page[DocumentResponse],
     operation_id="list_my_document",
-    summary="내 문서 리스트 조회",
+    summary="내문서목록",
 )
 def list_my_document(
     page: int = Query(1, ge=1),
@@ -185,6 +185,7 @@ def list_my_document(
     "/document/{knowledge_id}/usage",
     response_model=List[DocumentUsageResponse],
     operation_id="list_document_usage",
+    summary="문서사용처",
 )
 def list_document_usage(
     knowledge_id: int = Path(..., ge=1),
@@ -203,6 +204,7 @@ def list_document_usage(
     "/document/{knowledge_id}/pages",
     response_model=List[DocumentPageResponse],
     operation_id="list_document_pages",
+    summary="문서페이지",
 )
 def list_document_pages(
     knowledge_id: int = Path(..., ge=1),
@@ -218,6 +220,7 @@ def list_document_pages(
     "/document/{knowledge_id}/chunks",
     response_model=List[DocumentChunkResponse],
     operation_id="list_document_chunks",
+    summary="문서청크",
 )
 def list_document_chunks(
     knowledge_id: int = Path(..., ge=1),
@@ -243,6 +246,7 @@ def list_document_chunks(
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_document",
+    summary="문서생성",
 )
 def create_document(
     data: DocumentCreate,
@@ -263,7 +267,7 @@ def create_document(
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document",
-    summary="지식베이스 파일 업로드 (비동기 처리)",
+    summary="문서업로드",
 )
 def upload_document(
     background_tasks: BackgroundTasks,
@@ -302,7 +306,7 @@ def upload_document(
     response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document_advanced",
-    summary="지식베이스 파일 업로드(고급)-비동기",
+    summary="문서고급업로드",
 )
 def upload_document_advanced(
     background_tasks: BackgroundTasks,
@@ -346,6 +350,7 @@ def upload_document_advanced(
     "/document/{knowledge_id}",
     response_model=DocumentResponse,
     operation_id="get_document_detail",
+    summary="문서상세",
 )
 def get_document_detail(
     knowledge_id: int = Path(..., ge=1),
@@ -360,6 +365,7 @@ def get_document_detail(
     "/document/{knowledge_id}",
     response_model=DocumentResponse,
     operation_id="update_document",
+    summary="문서수정",
 )
 def update_document(
     knowledge_id: int = Path(..., ge=1),
@@ -380,6 +386,7 @@ def update_document(
     "/document/{knowledge_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_document",
+    summary="문서삭제",
 )
 def delete_document(
     knowledge_id: int = Path(..., ge=1),
@@ -399,7 +406,7 @@ def delete_document(
     "/document/{knowledge_id}/settings/ingestion",
     response_model=DocumentIngestionSettingResponse,
     operation_id="get_document_ingestion_settings",
-    summary="임베딩 파라미터 불러오기",
+    summary="임베딩설정",
 )
 def get_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -424,7 +431,7 @@ def get_document_ingestion_settings(
     "/document/{knowledge_id}/settings/ingestion",
     response_model=DocumentIngestionSettingResponse,
     operation_id="patch_document_ingestion_settings",
-    summary="청킹 설정",
+    summary="청킹설정",
     description="**chunking_mode** : `general`(일반) | `parent_child` (부모자식)",
 )
 def patch_document_ingestion_settings(
@@ -457,7 +464,7 @@ def patch_document_ingestion_settings(
     "/document/{knowledge_id}/chunks/preview",
     response_model=ChunkPreviewResponse,
     operation_id="preview_document_chunks",
-    summary="청크 프리뷰-미리보기 새로고침(저장 x)",
+    summary="청크프리뷰",
     description="저장되지 않고 미리보기 새로고침을 통하여 볼수 있음 확정되면,\n 청킹 설정 patch 통하여 확정",
 )
 def preview_document_chunks(
@@ -612,6 +619,7 @@ def preview_document_chunks(
     "/document/{knowledge_id}/settings/search",
     response_model=DocumentSearchSettingResponse,
     operation_id="get_document_search_settings",
+    summary="검색설정조회",
 )
 def get_document_search_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -636,7 +644,7 @@ def get_document_search_settings(
     "/document/{knowledge_id}/settings/search",
     response_model=DocumentSearchSettingResponse,
     operation_id="patch_document_search_settings",
-    summary="검색설정 : rerank 파라미터 튜닝",
+    summary="검색설정수정",
 )
 def patch_document_search_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -666,7 +674,7 @@ def patch_document_search_settings(
     "/document/{knowledge_id}/reindex",
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="reindex_document",
-    summary="지식베이스 생성(백그라운드)",
+    summary="문서 재색인",
 )
 def reindex_document(
     background_tasks: BackgroundTasks,

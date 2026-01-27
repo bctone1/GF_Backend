@@ -45,7 +45,7 @@ router = APIRouter()
 @router.get(
     "/prompts/shared",
     response_model=List[AIPromptResponse],
-    summary="class 에 공유된 프롬프트 목록 조회",
+    summary="공유프롬프트",
     operation_id="list_shared_prompts_for_class",
 )
 def list_shared_prompts_for_class_endpoint(
@@ -83,7 +83,7 @@ def list_shared_prompts_for_class_endpoint(
     "/prompts/{prompt_id}/fork",
     response_model=AIPromptResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="공유 프롬프트를 내 프롬프트로 복제(수강생 전용)",
+    summary="프롬프트복제",
     operation_id="fork_shared_prompt_to_my_prompt",
 )
 def fork_shared_prompt_to_my_prompt_endpoint(
@@ -117,7 +117,7 @@ def fork_shared_prompt_to_my_prompt_endpoint(
     "/prompts",
     response_model=AIPromptResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="새 프롬프트 생성",
+    summary="프롬프트생성",
     operation_id="create_my_prompt",
 )
 def create_my_prompt_endpoint(
@@ -137,7 +137,7 @@ def create_my_prompt_endpoint(
 @router.get(
     "/prompts",
     response_model=Page[AIPromptResponse],
-    summary="내 프롬프트 목록 조회",
+    summary="프롬프트목록",
     operation_id="list_my_prompts",
 )
 def list_my_prompts_endpoint(
@@ -171,7 +171,7 @@ def list_my_prompts_endpoint(
 @router.get(
     "/prompts/{prompt_id}",
     response_model=AIPromptResponse,
-    summary="내 프롬프트 상세 조회",
+    summary="프롬프트조회",
     operation_id="get_my_prompt",
 )
 def get_my_prompt_endpoint(
@@ -194,7 +194,7 @@ def get_my_prompt_endpoint(
 @router.patch(
     "/prompts/{prompt_id}",
     response_model=AIPromptResponse,
-    summary="내 프롬프트 수정",
+    summary="프롬프트수정",
     operation_id="update_my_prompt",
 )
 def update_my_prompt_endpoint(
@@ -222,7 +222,7 @@ def update_my_prompt_endpoint(
     "/prompts/{prompt_id}/share",
     response_model=PromptShareResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="내 프롬프트를 내 class 에 공유",
+    summary="프롬프트공유",
     operation_id="share_prompt_to_class",
 )
 def share_prompt_to_class_endpoint(
@@ -259,7 +259,7 @@ def share_prompt_to_class_endpoint(
 @router.delete(
     "/prompts/{prompt_id}/share",
     response_model=PromptShareResponse,
-    summary="특정 class 에 대한 프롬프트 공유 비활성화",
+    summary="공유해제",
     operation_id="deactivate_prompt_share",
 )
 def deactivate_prompt_share_endpoint(

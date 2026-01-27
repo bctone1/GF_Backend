@@ -236,7 +236,7 @@ def _ensure_my_few_shot_example(db: Session, *, example_id: int, me: AppUser) ->
     "/sessions",
     response_model=Page[PracticeSessionResponse],
     operation_id="list_my_practice_sessions",
-    summary="내 세션 불러오기",
+    summary="내세션목록",
 )
 def list_my_practice_sessions(
     page: int = Query(1, ge=1),
@@ -259,7 +259,7 @@ def list_my_practice_sessions(
     response_model=PracticeSessionResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session",
-    summary="새 채팅(세션): 세션 생성 + settings 생성 + class 기준 모델 생성",
+    summary="세션생성",
 )
 def create_practice_session(
     data: PracticeSessionCreate,
@@ -287,7 +287,7 @@ def create_practice_session(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="get_practice_session",
-    summary="세션 채팅목록",
+    summary="세션조회",
 )
 def get_practice_session(
     session_id: int = Path(..., ge=1),
@@ -327,7 +327,7 @@ def get_practice_session(
     "/sessions/{session_id}",
     response_model=PracticeSessionResponse,
     operation_id="update_practice_session",
-    summary="세션 제목/메타 수정",
+    summary="세션수정",
 )
 def update_practice_session(
     session_id: int = Path(..., ge=1),
@@ -367,7 +367,7 @@ def delete_practice_session(
     "/sessions/{session_id}/settings",
     response_model=PracticeSessionSettingResponse,
     operation_id="get_practice_session_settings",
-    summary="세션 settings 조회",
+    summary="설정조회",
 )
 def get_practice_session_settings(
     session_id: int = Path(..., ge=1),
@@ -387,7 +387,7 @@ def get_practice_session_settings(
     "/sessions/{session_id}/settings",
     response_model=PracticeSessionSettingResponse,
     operation_id="update_practice_session_settings",
-    summary="세션 settings 수정(style/generation/few-shot 선택)",
+    summary="설정수정",
 )
 def update_practice_session_settings(
     session_id: int = Path(..., ge=1),
@@ -448,7 +448,7 @@ def update_practice_session_settings(
     "/few-shot-examples",
     response_model=Page[UserFewShotExampleResponse],
     operation_id="list_my_few_shot_examples",
-    summary="내 few-shot 예시 목록",
+    summary="few-shot목록",
 )
 def list_my_few_shot_examples(
     page: int = Query(1, ge=1),
@@ -473,7 +473,7 @@ def list_my_few_shot_examples(
     response_model=UserFewShotExampleResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_my_few_shot_example",
-    summary="내 few-shot 예시 생성",
+    summary="few-shot생성",
 )
 def create_my_few_shot_example(
     data: UserFewShotExampleCreate,
@@ -489,7 +489,7 @@ def create_my_few_shot_example(
     "/few-shot-examples/{example_id}",
     response_model=UserFewShotExampleResponse,
     operation_id="get_my_few_shot_example",
-    summary="내 few-shot 예시 단건",
+    summary="few-shot조회",
 )
 def get_my_few_shot_example(
     example_id: int = Path(..., ge=1),
@@ -504,7 +504,7 @@ def get_my_few_shot_example(
     "/few-shot-examples/{example_id}",
     response_model=UserFewShotExampleResponse,
     operation_id="update_my_few_shot_example",
-    summary="내 few-shot 예시 수정",
+    summary="few-shot수정",
 )
 def update_my_few_shot_example(
     example_id: int = Path(..., ge=1),
@@ -524,7 +524,7 @@ def update_my_few_shot_example(
     "/few-shot-examples/{example_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_my_few_shot_example",
-    summary="내 few-shot 예시 삭제",
+    summary="few-shot삭제",
 )
 def delete_my_few_shot_example(
     example_id: int = Path(..., ge=1),
@@ -544,7 +544,7 @@ def delete_my_few_shot_example(
     "/sessions/{session_id}/models",
     response_model=List[PracticeSessionModelResponse],
     operation_id="list_practice_session_models",
-    summary="해당 세션에 생성된 모델 목록 확인",
+    summary="세션모델목록",
 )
 def list_practice_session_models(
     session_id: int = Path(..., ge=1),
@@ -565,7 +565,7 @@ def list_practice_session_models(
     response_model=PracticeSessionModelResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session_model",
-    summary="세션에 모델 추가(실제 소스는 class 기준; 허용 모델만 보장 + 옵션 적용)",
+    summary="세션모델추가",
 )
 def create_practice_session_model(
     session_id: int = Path(..., ge=1),
@@ -614,7 +614,7 @@ def create_practice_session_model(
     "/models/{session_model_id}",
     response_model=PracticeSessionModelResponse,
     operation_id="user_update_practice_session_model",
-    summary="LLM 파라미터 튜닝/primary 변경",
+    summary="모델설정수정",
 )
 def update_practice_session_model(
     session_model_id: int = Path(..., ge=1),
@@ -659,6 +659,7 @@ def update_practice_session_model(
     "/models/{session_model_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_session_model",
+    summary="세션모델삭제",
 )
 def delete_practice_session_model(
     session_model_id: int = Path(..., ge=1),
@@ -678,7 +679,7 @@ def delete_practice_session_model(
     "/sessions/run",
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Quick 입력 세션",
+    summary="빠른실행",
 )
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
@@ -749,7 +750,7 @@ def run_practice_turn_new_session_endpoint(
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_turn_for_existing_session",
-    summary="기존 세션에서 실습 턴 실행",
+    summary="세션턴실행",
 )
 def run_practice_turn_endpoint(
     background_tasks: BackgroundTasks,
@@ -817,6 +818,7 @@ def run_practice_turn_endpoint(
     "/models/{session_model_id}/responses",
     response_model=List[PracticeResponseResponse],
     operation_id="list_practice_responses_by_model",
+    summary="응답목록",
 )
 def list_practice_responses_by_model(
     session_model_id: int = Path(..., ge=1),
@@ -833,7 +835,7 @@ def list_practice_responses_by_model(
     response_model=PracticeResponseResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_response",
-    summary="실습 응답 생성(수동)",
+    summary="응답생성",
 )
 def create_practice_response(
     session_model_id: int = Path(..., ge=1),
@@ -864,6 +866,7 @@ def create_practice_response(
     "/responses/{response_id}",
     response_model=PracticeResponseResponse,
     operation_id="get_practice_response",
+    summary="응답조회",
 )
 def get_practice_response(
     response_id: int = Path(..., ge=1),
@@ -878,6 +881,7 @@ def get_practice_response(
     "/responses/{response_id}",
     response_model=PracticeResponseResponse,
     operation_id="update_practice_response",
+    summary="응답수정",
 )
 def update_practice_response(
     response_id: int = Path(..., ge=1),
@@ -902,6 +906,7 @@ def update_practice_response(
     "/responses/{response_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_response",
+    summary="응답삭제",
 )
 def delete_practice_response(
     response_id: int = Path(..., ge=1),

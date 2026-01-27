@@ -107,6 +107,7 @@ def _run_single_panel_turn(
     "/sessions/{session_id}/comparison-runs",
     response_model=Page[PracticeComparisonRunResponse],
     operation_id="list_practice_comparison_runs",
+    summary="비교런목록",
 )
 def list_practice_comparison_runs(
     session_id: int = Path(..., ge=1),
@@ -131,6 +132,7 @@ def list_practice_comparison_runs(
     response_model=PracticeComparisonRunResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_comparison_run",
+    summary="비교런생성",
 )
 def create_practice_comparison_run(
     session_id: int = Path(..., ge=1),
@@ -149,7 +151,7 @@ def create_practice_comparison_run(
     response_model=PracticeComparisonTurnResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_comparison_turn",
-    summary="비교 학습 실행(패널 1개: a 또는 b)",
+    summary="비교학습실행",
 )
 def run_practice_comparison_turn(
     session_id: int = Path(..., ge=0),
@@ -233,6 +235,7 @@ def run_practice_comparison_turn(
     "/comparison-runs/{run_id}",
     response_model=PracticeComparisonRunResponse,
     operation_id="get_practice_comparison_run",
+    summary="비교런조회",
 )
 def get_practice_comparison_run(
     run_id: int = Path(..., ge=1),
@@ -247,6 +250,7 @@ def get_practice_comparison_run(
     "/comparison-runs/{run_id}",
     response_model=PracticeComparisonRunResponse,
     operation_id="update_practice_comparison_run",
+    summary="비교런수정",
 )
 def update_practice_comparison_run(
     run_id: int = Path(..., ge=1),
@@ -264,6 +268,7 @@ def update_practice_comparison_run(
     "/comparison-runs/{run_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_comparison_run",
+    summary="비교런삭제",
 )
 def delete_practice_comparison_run(
     run_id: int = Path(..., ge=1),

@@ -39,7 +39,7 @@ router = APIRouter()
 @router.get(
     "/projects",
     response_model=Page[UserProjectResponse],
-    summary="내 프로젝트 목록 조회",
+    summary="내프로젝트",
     operation_id="list_my_projects",
 )
 def list_my_projects_endpoint(
@@ -72,7 +72,7 @@ def list_my_projects_endpoint(
     "/projects",
     response_model=UserProjectResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="새 프로젝트 생성",
+    summary="프로젝트생성",
     operation_id="create_project",
 )
 def create_project_endpoint(
@@ -87,7 +87,7 @@ def create_project_endpoint(
 @router.get(
     "/projects/{project_id}",
     response_model=UserProjectResponse,
-    summary="프로젝트 상세 조회",
+    summary="프로젝트조회",
     operation_id="get_project",
 )
 def get_project_endpoint(
@@ -102,7 +102,7 @@ def get_project_endpoint(
 @router.patch(
     "/projects/{project_id}",
     response_model=UserProjectResponse,
-    summary="프로젝트 정보 수정",
+    summary="프로젝트수정",
     operation_id="update_project",
 )
 def update_project_endpoint(
@@ -123,7 +123,7 @@ def update_project_endpoint(
 @router.delete(
     "/projects/{project_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="프로젝트 삭제",
+    summary="프로젝트삭제",
     operation_id="delete_project",
 )
 def delete_project_endpoint(
@@ -143,7 +143,7 @@ def delete_project_endpoint(
 @router.get(
     "/projects/{project_id}/sessions",
     response_model=List[ProjectSessionSummaryResponse],
-    summary="프로젝트 안의 세션(대화) 목록",
+    summary="프로젝트세션",
     operation_id="list_project_sessions",
 )
 def list_project_sessions_endpoint(
