@@ -26,7 +26,6 @@ from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
     PracticeSessionSetting,
-    PracticeSessionSettingFewShot,
     UserFewShotExample,
 )
 
@@ -86,6 +85,27 @@ def _is_none_style(style_key: Any) -> bool:
     return False
 
 
+def _normalize_example_ids(v: Any) -> list[int]:
+    if v is None:
+        return []
+    if not isinstance(v, list):
+        return []
+    out: list[int] = []
+    seen: set[int] = set()
+    for x in v:
+        try:
+            ix = int(x)
+        except (TypeError, ValueError):
+            continue
+        if ix <= 0:
+            continue
+        if ix in seen:
+            continue
+        seen.add(ix)
+        out.append(ix)
+    return out
+
+
 # =========================================
 # prompt system_prompt 로드 (내 소유 or class 공유)
 # =========================================
@@ -134,7 +154,8 @@ def _load_prompt_system_prompt_for_practice(
 
 
 # =========================================
-# settings에 선택된 few-shot 예시 로드
+# settings에 선택된 few-shot 예시 로드 (A안: JSONB list)
+# - 우선순위: few_shot_example_ids(JSONB) -> (레거시) few_shot_example_id
 # =========================================
 def _load_selected_few_shots_for_setting(
     db: Session,
@@ -142,6 +163,39 @@ def _load_selected_few_shots_for_setting(
     setting: PracticeSessionSetting,
     me: AppUser,
 ) -> List[Dict[str, Any]]:
+    # A안: JSONB list
+    ids = _normalize_example_ids(getattr(setting, "few_shot_example_ids", None))
+    if ids:
+        stmt = (
+            select(
+                UserFewShotExample.example_id,
+                UserFewShotExample.input_text,
+                UserFewShotExample.output_text,
+                UserFewShotExample.meta,
+            )
+            .where(UserFewShotExample.user_id == me.user_id)
+            .where(UserFewShotExample.is_active.is_(True))
+            .where(UserFewShotExample.example_id.in_(ids))
+        )
+        rows = db.execute(stmt).all()
+
+        by_id: dict[int, tuple[str, str, Any]] = {}
+        for eid, input_text, output_text, meta in rows:
+            by_id[int(eid)] = (input_text or "", output_text or "", meta or {})
+
+        out: List[Dict[str, Any]] = []
+        for eid in ids:  # 입력 순서 유지
+            row = by_id.get(int(eid))
+            if not row:
+                continue
+            it, ot, meta = row
+            it = (it or "").strip()
+            ot = (ot or "").strip()
+            if it and ot:
+                out.append({"input": it, "output": ot, "meta": meta or {}})
+        return out
+
+    # (레거시) 단일 선택 유지하고 있으면 호환
     example_id = getattr(setting, "few_shot_example_id", None)
     if example_id:
         stmt = (
@@ -161,32 +215,7 @@ def _load_selected_few_shots_for_setting(
             ot = (output_text or "").strip()
             if it and ot:
                 return [{"input": it, "output": ot, "meta": meta or {}}]
-        return []
-
-    stmt = (
-        select(
-            UserFewShotExample.input_text,
-            UserFewShotExample.output_text,
-            UserFewShotExample.meta,
-        )
-        .join(
-            PracticeSessionSettingFewShot,
-            PracticeSessionSettingFewShot.example_id == UserFewShotExample.example_id,
-        )
-        .where(PracticeSessionSettingFewShot.setting_id == setting.setting_id)
-        .where(UserFewShotExample.user_id == me.user_id)
-        .where(UserFewShotExample.is_active.is_(True))
-        .order_by(PracticeSessionSettingFewShot.sort_order.asc())
-    )
-    rows = db.execute(stmt).all()
-
-    out: List[Dict[str, Any]] = []
-    for input_text, output_text, meta in rows:
-        it = (input_text or "").strip()
-        ot = (output_text or "").strip()
-        if it and ot:
-            out.append({"input": it, "output": ot, "meta": meta or {}})
-    return out
+    return []
 
 
 # =========================================

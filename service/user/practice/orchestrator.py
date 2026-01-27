@@ -31,17 +31,25 @@ from service.user.practice.turn_runner import run_practice_turn
 
 # =========================================
 # 세션 settings 보장(세션당 1개)
+# - A안(JSONB): default_few_shot_example_ids는 settings.few_shot_example_ids(JSONB)에 들어가는 값
 # =========================================
-def ensure_session_settings(db: Session, *, session_id: int) -> PracticeSessionSetting:
+def ensure_session_settings(
+    db: Session,
+    *,
+    session_id: int,
+    default_few_shot_example_ids: Optional[list[int]] = None,
+) -> PracticeSessionSetting:
     """
     - practice_session_settings는 세션당 1개(uselist=False) 전제
     - 없으면 default_generation_params로 생성
     """
     default_gen = get_default_generation_params()
+    fs_ids = coerce_int_list(default_few_shot_example_ids)
     return practice_session_setting_crud.get_or_create_default(
         db,
         session_id=session_id,
         default_generation_params=default_gen,
+        default_few_shot_example_ids=fs_ids if fs_ids else None,
     )
 
 
@@ -112,7 +120,14 @@ def prepare_practice_turn_for_session(
             ),
             user_id=me.user_id,
         )
-        settings = ensure_session_settings(db, session_id=session.session_id)
+
+        # A안(JSONB): 세션 생성 시 선택된 few-shot ids를 settings 기본값으로 주입
+        requested_few_shot_example_ids = coerce_int_list(getattr(body, "few_shot_example_ids", None))
+        settings = ensure_session_settings(
+            db,
+            session_id=session.session_id,
+            default_few_shot_example_ids=requested_few_shot_example_ids if requested_few_shot_example_ids else None,
+        )
 
         base_gen = normalize_generation_params_dict(
             getattr(settings, "generation_params", None) or get_default_generation_params()
@@ -140,6 +155,7 @@ def prepare_practice_turn_for_session(
             models = picked
 
         ctx_knowledge_ids = get_session_knowledge_ids(session)
+
     else:
         if not isinstance(body, PracticeTurnRequestExistingSession):
             raise HTTPException(status_code=400, detail="invalid_body_for_existing_session")
@@ -203,7 +219,15 @@ def run_practice_turn_for_session(
     requested_prompt_id: Optional[int] = getattr(body, "prompt_id", None)
     requested_style_preset: Optional[str] = getattr(body, "style_preset", None)
     requested_style_params: Optional[Dict[str, Any]] = getattr(body, "style_params", None)
-    requested_generation_params: Optional[Dict[str, Any]] = getattr(body, "generation_params", None)
+
+    # GenerationParams(피딕틱 모델) -> dict로 통일
+    rgp = getattr(body, "generation_params", None)
+    if rgp is not None and hasattr(rgp, "model_dump"):
+        requested_generation_params: Optional[Dict[str, Any]] = rgp.model_dump(exclude_unset=True)
+    elif isinstance(rgp, dict):
+        requested_generation_params = rgp
+    else:
+        requested_generation_params = None
 
     session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
         db=db,

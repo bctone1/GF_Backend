@@ -8,7 +8,6 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     ForeignKey,
-    UniqueConstraint,
     Index,
     text,
 )
@@ -62,7 +61,12 @@ class PracticeSession(Base):
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     models = relationship(
         "PracticeSessionModel",
@@ -132,10 +136,11 @@ class PracticeSessionSetting(Base):
         server_default=text("'{}'::jsonb"),
     )
 
-    few_shot_example_id = Column(
-        BigInteger,
-        ForeignKey("user.few_shot_examples.example_id", ondelete="SET NULL"),
-        nullable=True,
+
+    few_shot_example_ids = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
     )
 
     # Prompt 스냅샷(세션 시작 시점의 prompt 상태를 고정해서 재현성 확보)
@@ -147,7 +152,12 @@ class PracticeSessionSetting(Base):
     )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     session = relationship(
         "PracticeSession",
@@ -155,16 +165,14 @@ class PracticeSessionSetting(Base):
         passive_deletes=True,
     )
 
-    few_shot_links = relationship(
-        "PracticeSessionSettingFewShot",
-        back_populates="setting",
-        passive_deletes=True,
-        order_by="PracticeSessionSettingFewShot.sort_order",
-    )
-
     __table_args__ = (
         Index("idx_practice_session_settings_session", "session_id"),
-        Index("idx_practice_session_settings_few_shot_example", "few_shot_example_id"),
+        # JSONB 배열 검색(@>) 대비 GIN 인덱스
+        Index(
+            "idx_practice_session_settings_few_shot_ids",
+            "few_shot_example_ids",
+            postgresql_using="gin",
+        ),
         {"schema": "user"},
     )
 
@@ -195,57 +203,15 @@ class UserFewShotExample(Base):
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    setting_links = relationship(
-        "PracticeSessionSettingFewShot",
-        back_populates="example",
-        passive_deletes=True,
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
     )
 
     __table_args__ = (
         Index("idx_few_shot_examples_user", "user_id"),
-        {"schema": "user"},
-    )
-
-
-# ========== user.practice_session_setting_few_shots (매핑) ==========
-class PracticeSessionSettingFewShot(Base):
-    __tablename__ = "practice_session_setting_few_shots"
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-
-    setting_id = Column(
-        BigInteger,
-        ForeignKey("user.practice_session_settings.setting_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    example_id = Column(
-        BigInteger,
-        ForeignKey("user.few_shot_examples.example_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-
-    sort_order = Column(Integer, nullable=False, server_default=text("0"))
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    setting = relationship(
-        "PracticeSessionSetting",
-        back_populates="few_shot_links",
-        passive_deletes=True,
-    )
-
-    example = relationship(
-        "UserFewShotExample",
-        back_populates="setting_links",
-        passive_deletes=True,
-    )
-
-    __table_args__ = (
-        UniqueConstraint("setting_id", "example_id", name="uq_setting_example"),
-        Index("idx_setting_few_shots_setting", "setting_id"),
-        Index("idx_setting_few_shots_example", "example_id"),
         {"schema": "user"},
     )
 

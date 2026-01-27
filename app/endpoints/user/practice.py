@@ -14,7 +14,7 @@ from fastapi import (
     BackgroundTasks,
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from core.deps import get_db, get_current_user
@@ -23,7 +23,6 @@ from models.user.account import AppUser
 from models.user.practice import (
     PracticeSession,
     PracticeSessionSetting,
-    PracticeSessionSettingFewShot,
     UserFewShotExample,
 )
 
@@ -70,8 +69,9 @@ from service.user.practice.orchestrator import (
     run_practice_turn_for_session,
     ensure_session_settings,
 )
-from service.user.practice.turn_runner import run_practice_turn, stream_practice_turn
+from service.user.practice.turn_runner import stream_practice_turn
 from service.user.practice_task import generate_session_title_task
+
 router = APIRouter()
 
 
@@ -95,19 +95,12 @@ def _pick_answer_text(turn_result: PracticeTurnResponse) -> str:
     return (primary.response_text or "").strip()
 
 
-def _get_settings_with_links(db: Session, *, session_id: int) -> PracticeSessionSetting:
+def _get_settings(db: Session, *, session_id: int) -> PracticeSessionSetting:
     """
-    settings + few_shot_links(+example)까지 같이 로드해서 N+1 완화
+    settings 단건 로드(세션당 1개)
+    - A안(JSONB array)에서는 매핑 테이블/relationship 로딩 불필요
     """
-    stmt = (
-        select(PracticeSessionSetting)
-        .where(PracticeSessionSetting.session_id == session_id)
-        .options(
-            selectinload(PracticeSessionSetting.few_shot_links).selectinload(
-                PracticeSessionSettingFewShot.example
-            )
-        )
-    )
+    stmt = select(PracticeSessionSetting).where(PracticeSessionSetting.session_id == session_id)
     row = db.scalar(stmt)
     if row:
         return row
@@ -122,7 +115,6 @@ def set_primary_model_for_session(
     target_session_model_id: int,
 ):
     """
-    (기존 monolith service에서 endpoint가 쓰던 기능)
     - 세션 소유권 검사
     - 세션 내 모델들 is_primary 토글
     """
@@ -168,14 +160,11 @@ def _sync_session_models_with_class(
     if session.class_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="session_has_no_class_id")
 
-    # 동기화 전 primary 기억(이름 기준)
     before = list(practice_session_model_crud.list_by_session(db, session_id=session.session_id))
     prev_primary_name = next((m.model_name for m in before if getattr(m, "is_primary", False)), None)
 
     setting = _ensure_session_settings_row(db, session_id=session.session_id)
-    base_gen = normalize_generation_params_dict(
-        getattr(setting, "generation_params", None) or {}
-    )
+    base_gen = normalize_generation_params_dict(getattr(setting, "generation_params", None) or {})
 
     init_models_for_session_from_class(
         db,
@@ -188,7 +177,6 @@ def _sync_session_models_with_class(
         sync_existing=True,
     )
 
-    # 동기화 후에도 이전 primary가 남아있으면 복구
     if prev_primary_name:
         after = list(practice_session_model_crud.list_by_session(db, session_id=session.session_id))
         names = [m.model_name for m in after]
@@ -211,6 +199,7 @@ def _validate_my_few_shot_example_ids(
     me: AppUser,
     example_ids: list[int],
 ) -> None:
+    # 중복 체크(입력 순서 유지/정규화는 schema에서 하고, 여기서는 안전장치)
     if len(example_ids) != len(set(example_ids)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -231,30 +220,6 @@ def _validate_my_few_shot_example_ids(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="invalid_few_shot_example_ids",
         )
-
-
-def _validate_my_few_shot_example_id(
-    db: Session,
-    *,
-    me: AppUser,
-    example_id: Any,
-) -> Optional[int]:
-    if example_id is None:
-        return None
-    try:
-        eid = int(example_id)
-    except (TypeError, ValueError):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="few_shot_example_id_must_be_int",
-        )
-    if eid <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="few_shot_example_id_must_be_positive",
-        )
-    _validate_my_few_shot_example_ids(db, me=me, example_ids=[eid])
-    return eid
 
 
 def _ensure_my_few_shot_example(db: Session, *, example_id: int, me: AppUser) -> UserFewShotExample:
@@ -303,10 +268,7 @@ def create_practice_session(
 ):
     class_id = getattr(data, "class_id", None)
     if not class_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="class_id_required",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="class_id_required")
 
     session = practice_session_crud.create(
         db=db,
@@ -334,16 +296,14 @@ def get_practice_session(
 ):
     session = ensure_my_session(db, session_id, me)
 
-    # 구 세션 정리 목적(필요 없으면 제거 가능)
     if session.class_id is not None:
         _sync_session_models_with_class(db, me=me, session_id=session.session_id)
 
-    setting = _get_settings_with_links(db, session_id=session.session_id)
+    setting = _get_settings(db, session_id=session.session_id)
 
     resp_rows = practice_response_crud.list_by_session(db, session_id=session.session_id)
     resp_items = [PracticeResponseResponse.model_validate(r) for r in resp_rows]
 
-    # knowledge_ids (세션 컬럼이 list로 바뀐 전제. 구형이면 service에서 흡수)
     knowledge_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
 
     db.commit()
@@ -417,7 +377,7 @@ def get_practice_session_settings(
     _ = ensure_my_session(db, session_id, me)
 
     _sync_session_models_with_class(db, me=me, session_id=session_id)
-    setting = _get_settings_with_links(db, session_id=session_id)
+    setting = _get_settings(db, session_id=session_id)
 
     db.commit()
     return PracticeSessionSettingResponse.model_validate(setting)
@@ -441,17 +401,11 @@ def update_practice_session_settings(
     payload = data.model_dump(exclude_unset=True)
     if not payload:
         _sync_session_models_with_class(db, me=me, session_id=session_id)
-        setting = _get_settings_with_links(db, session_id=session_id)
+        setting = _get_settings(db, session_id=session_id)
         db.commit()
         return PracticeSessionSettingResponse.model_validate(setting)
 
-    if "few_shot_example_id" in payload:
-        payload["few_shot_example_id"] = _validate_my_few_shot_example_id(
-            db,
-            me=me,
-            example_id=payload.get("few_shot_example_id"),
-        )
-
+    # A안(JSONB array): few_shot_example_ids만 유지
     if "few_shot_example_ids" in payload:
         ids = payload.get("few_shot_example_ids") or []
         if not isinstance(ids, list):
@@ -459,6 +413,7 @@ def update_practice_session_settings(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="few_shot_example_ids_must_be_list",
             )
+        # int 캐스팅 + 검증
         _validate_my_few_shot_example_ids(db, me=me, example_ids=[int(x) for x in ids])
 
     gen_patch = _extract_generation_patch(payload)
@@ -482,7 +437,7 @@ def update_practice_session_settings(
         )
 
     db.commit()
-    setting = _get_settings_with_links(db, session_id=session_id)
+    setting = _get_settings(db, session_id=session_id)
     return PracticeSessionSettingResponse.model_validate(setting)
 
 
@@ -624,7 +579,6 @@ def create_practice_session_model(
 
     _ensure_session_settings_row(db, session_id=session_id)
 
-    # class 기준으로 모델 목록을 먼저 정리/보장
     _sync_session_models_with_class(db, me=me, session_id=session_id)
 
     models = list(practice_session_model_crud.list_by_session(db, session_id=session_id))
@@ -632,7 +586,6 @@ def create_practice_session_model(
     if target is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="model_not_allowed_for_class")
 
-    # generation_params: merge
     incoming_gp = normalize_generation_params_dict(_coerce_dict(getattr(data, "generation_params", None)))
     if incoming_gp:
         current_gp = normalize_generation_params_dict(getattr(target, "generation_params", None) or {})
@@ -644,7 +597,6 @@ def create_practice_session_model(
             data={"generation_params": merged},
         )
 
-    # primary 변경
     if getattr(data, "is_primary", None) is True:
         target = set_primary_model_for_session(
             db,
@@ -685,7 +637,6 @@ def update_practice_session_model(
     update_data = data.model_dump(exclude_unset=True)
     update_data.pop("is_primary", None)
 
-    # generation_params는 merge로 처리(덮어쓰기 방지)
     if "generation_params" in update_data:
         patch = normalize_generation_params_dict(_coerce_dict(update_data.get("generation_params")))
         current = normalize_generation_params_dict(getattr(model, "generation_params", None) or {})
@@ -723,8 +674,12 @@ def delete_practice_session_model(
 # =========================================================
 # Chat / Turns
 # =========================================================
-@router.post("/sessions/run", response_model=PracticeTurnResponse,
-             status_code=status.HTTP_201_CREATED, summary="Quick 입력 세션")
+@router.post(
+    "/sessions/run",
+    response_model=PracticeTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Quick 입력 세션",
+)
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
     class_id: int = Query(..., ge=1),
@@ -733,6 +688,13 @@ def run_practice_turn_new_session_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    if body.few_shot_example_ids:
+        _validate_my_few_shot_example_ids(
+            db,
+            me=me,
+            example_ids=[int(x) for x in body.few_shot_example_ids],
+        )
+
     if stream:
         session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
             db=db,
@@ -847,6 +809,7 @@ def run_practice_turn_endpoint(
 
     return turn_result
 
+
 # =========================================================
 # Practice Responses
 # =========================================================
@@ -927,6 +890,7 @@ def update_practice_response(
         _, session_for_run = ensure_my_comparison_run(db, data.comparison_run_id, me)
         if session_for_run.session_id != _session.session_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="comparison_run_session_mismatch")
+
     updated = practice_response_crud.update(db, response_id=response_id, data=data)
     db.commit()
     if not updated:
@@ -948,4 +912,3 @@ def delete_practice_response(
     practice_response_crud.delete(db, response_id=response_id)
     db.commit()
     return None
-

@@ -44,6 +44,24 @@ def _normalize_int_id_list(v: Optional[List[int]]) -> Optional[List[int]]:
     return out
 
 
+def _normalize_int_id_list_required(v: Any) -> List[int]:
+    """
+    Response/ORM용:
+    - None이면 []
+    - list이면 정규화
+    - 단일 int/str이면 [int] 방어
+    """
+    if v is None:
+        return []
+    if isinstance(v, list):
+        return _normalize_int_id_list(v) or []
+    try:
+        ix = int(v)
+    except (TypeError, ValueError):
+        return []
+    return [ix] if ix > 0 else []
+
+
 # =========================================
 # generation 옵션 (JSONB로 저장되는 옵션 묶음)
 # =========================================
@@ -107,26 +125,9 @@ class UserFewShotExampleResponse(ORMBase):
 
 
 # =========================================
-# user.practice_session_setting_few_shots (매핑)
-# =========================================
-class PracticeSessionSettingFewShotResponse(ORMBase):
-    """
-    settings.few_shot_links 로 내려오는 매핑 row
-    """
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    setting_id: int
-    example_id: int
-    sort_order: int
-    created_at: datetime
-
-    # relationship: PracticeSessionSettingFewShot.example
-    example: Optional[UserFewShotExampleResponse] = None
-
-
-# =========================================
 # user.practice_session_settings
+#   - 매핑 테이블 제거
+#   - few_shot_example_ids(JSONB array)로 단일화
 # =========================================
 class PracticeSessionSettingCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
@@ -135,9 +136,7 @@ class PracticeSessionSettingCreate(ORMBase):
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
 
-    few_shot_example_id: Optional[int] = None
-
-    # JSON 배열 대신 "선택한 예시 ID들"만 받음
+    # ✅ JSONB array로 저장될 "선택한 예시 ID들"
     few_shot_example_ids: Optional[List[int]] = None
 
     @model_validator(mode="after")
@@ -152,7 +151,8 @@ class PracticeSessionSettingUpdate(ORMBase):
     style_preset: Optional[StylePreset] = None
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
-    few_shot_example_id: Optional[int] = None
+
+    # ✅ JSONB array로 저장될 "선택한 예시 ID들"
     few_shot_example_ids: Optional[List[int]] = None
 
     @model_validator(mode="after")
@@ -173,16 +173,19 @@ class PracticeSessionSettingResponse(ORMBase):
     # DB(JSONB) 그대로 내려줌
     generation_params: Dict[str, Any] = Field(default_factory=dict)
 
-    few_shot_example_id: Optional[int] = None
+    # ✅ JSONB array
+    few_shot_example_ids: List[int] = Field(default_factory=list)
 
     # prompt 템플릿 스냅샷(세션 생성 시점 재현성)
     prompt_snapshot: Dict[str, Any] = Field(default_factory=dict)
 
-    # 매핑 테이블 기반
-    few_shot_links: List[PracticeSessionSettingFewShotResponse] = Field(default_factory=list)
-
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("few_shot_example_ids", mode="before")
+    @classmethod
+    def _normalize_few_shot_example_ids(cls, v: Any) -> List[int]:
+        return _normalize_int_id_list_required(v)
 
 
 # =========================================
@@ -245,17 +248,7 @@ class PracticeSessionResponse(ORMBase):
     @field_validator("knowledge_ids", mode="before")
     @classmethod
     def _normalize_knowledge_ids(cls, v: Any) -> List[int]:
-        if v is None:
-            return []
-        if isinstance(v, list):
-            normalized = _normalize_int_id_list(v) or []
-            return normalized
-        # 혹시 단일 int로 들어오는 경우 방어
-        try:
-            ix = int(v)
-        except (TypeError, ValueError):
-            return []
-        return [ix] if ix > 0 else []
+        return _normalize_int_id_list_required(v)
 
 
 # =========================================
@@ -358,6 +351,7 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
     - 새 세션 생성 + 첫 턴
     - prompt_id / project_id / knowledge_ids + (settings 튜닝 값들)까지 받는다.
     """
+
     prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
     project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
 
@@ -399,6 +393,7 @@ class PracticeTurnRequestExistingSession(_PracticeTurnBase):
     - 기존 세션 턴
     - prompt_text / model_names만 받는다. (컨텍스트는 세션 저장값 사용)
     """
+
     pass
 
 

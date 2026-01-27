@@ -11,7 +11,6 @@ from core import config
 from models.user.practice import (
     PracticeSession,
     PracticeSessionSetting,
-    PracticeSessionSettingFewShot,
     UserFewShotExample,
     PracticeSessionModel,
     PracticeResponse,
@@ -49,6 +48,8 @@ def _coerce_int_list(value: Any) -> list[int]:
     JSONB(list[int]) 방어용
     - None/비정상 타입이면 []
     - int 캐스팅 실패는 스킵
+    - 0/음수 제거
+    - (주의) 중복 제거는 여기서 하지 않음: 호출부(스키마 normalize)에서 제거하는 전제
     """
     if value is None:
         return []
@@ -148,6 +149,7 @@ class PracticeSessionCRUD:
     def update(
         self,
         db: Session,
+        *,
         session_id: int,
         data: PracticeSessionUpdate,
     ) -> Optional[PracticeSession]:
@@ -167,7 +169,7 @@ class PracticeSessionCRUD:
         db.flush()
         return self.get(db, session_id)
 
-    def delete(self, db: Session, session_id: int) -> None:
+    def delete(self, db: Session, *, session_id: int) -> None:
         stmt = delete(PracticeSession).where(PracticeSession.session_id == session_id)
         db.execute(stmt)
         db.flush()
@@ -178,6 +180,8 @@ practice_session_crud = PracticeSessionCRUD()
 
 # =========================================================
 # PracticeSessionSetting CRUD
+#   - 매핑 테이블 제거
+#   - few_shot_example_ids(JSONB array)로 단일화
 # =========================================================
 class PracticeSessionSettingCRUD:
     def get_by_session(self, db: Session, *, session_id: int) -> Optional[PracticeSessionSetting]:
@@ -207,6 +211,8 @@ class PracticeSessionSettingCRUD:
         style = default_style_params if isinstance(default_style_params, dict) else {}
         prompt_snapshot = dict(default_prompt_snapshot) if isinstance(default_prompt_snapshot, dict) else {}
 
+        few_ids = _coerce_int_list(default_few_shot_example_ids)
+
         try:
             with db.begin_nested():
                 obj = PracticeSessionSetting(
@@ -214,21 +220,11 @@ class PracticeSessionSettingCRUD:
                     style_preset=style_preset,
                     style_params=dict(style),
                     generation_params=gen,
+                    few_shot_example_ids=few_ids,  # ✅ JSONB array
                     prompt_snapshot=prompt_snapshot,
                 )
                 db.add(obj)
                 db.flush()
-
-                if default_few_shot_example_ids:
-                    for i, eid in enumerate(default_few_shot_example_ids):
-                        db.add(
-                            PracticeSessionSettingFewShot(
-                                setting_id=obj.setting_id,
-                                example_id=eid,
-                                sort_order=i,
-                            )
-                        )
-                    db.flush()
 
             db.refresh(obj)
             return obj
@@ -240,28 +236,6 @@ class PracticeSessionSettingCRUD:
 
     def ensure_default(self, db: Session, *, session_id: int) -> PracticeSessionSetting:
         return self.get_or_create_default(db, session_id=session_id)
-
-    def _replace_few_shot_links(
-        self,
-        db: Session,
-        *,
-        setting_id: int,
-        example_ids: list[int],
-    ) -> None:
-        db.execute(
-            delete(PracticeSessionSettingFewShot).where(
-                PracticeSessionSettingFewShot.setting_id == setting_id
-            )
-        )
-        for i, eid in enumerate(example_ids):
-            db.add(
-                PracticeSessionSettingFewShot(
-                    setting_id=setting_id,
-                    example_id=eid,
-                    sort_order=i,
-                )
-            )
-        db.flush()
 
     def update_by_session_id(
         self,
@@ -293,20 +267,15 @@ class PracticeSessionSettingCRUD:
             base_gen.update(incoming_gen)
             row.generation_params = _normalize_generation_params_dict(base_gen)
 
-        if "few_shot_example_id" in values:
-            row.few_shot_example_id = values.get("few_shot_example_id")
+        if "few_shot_example_ids" in values:
+            # ✅ JSONB array로 그대로 저장
+            row.few_shot_example_ids = _coerce_int_list(values.get("few_shot_example_ids"))
 
         if "prompt_snapshot" in values:
             incoming_snap = _coerce_dict(values.get("prompt_snapshot"))
             base_snap = dict(getattr(row, "prompt_snapshot", None) or {})
             base_snap.update(incoming_snap)
             row.prompt_snapshot = base_snap
-
-        if "few_shot_example_ids" in values:
-            ids = values.get("few_shot_example_ids") or []
-            if not isinstance(ids, list):
-                ids = []
-            self._replace_few_shot_links(db, setting_id=row.setting_id, example_ids=list(ids))
 
         db.add(row)
         db.flush()
