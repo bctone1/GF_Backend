@@ -233,6 +233,30 @@ def _validate_my_few_shot_example_ids(
         )
 
 
+def _validate_my_few_shot_example_id(
+    db: Session,
+    *,
+    me: AppUser,
+    example_id: Any,
+) -> Optional[int]:
+    if example_id is None:
+        return None
+    try:
+        eid = int(example_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="few_shot_example_id_must_be_int",
+        )
+    if eid <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="few_shot_example_id_must_be_positive",
+        )
+    _validate_my_few_shot_example_ids(db, me=me, example_ids=[eid])
+    return eid
+
+
 def _ensure_my_few_shot_example(db: Session, *, example_id: int, me: AppUser) -> UserFewShotExample:
     obj = user_few_shot_example_crud.get(db, example_id)
     if not obj or obj.user_id != me.user_id:
@@ -421,6 +445,13 @@ def update_practice_session_settings(
         db.commit()
         return PracticeSessionSettingResponse.model_validate(setting)
 
+    if "few_shot_example_id" in payload:
+        payload["few_shot_example_id"] = _validate_my_few_shot_example_id(
+            db,
+            me=me,
+            example_id=payload.get("few_shot_example_id"),
+        )
+
     if "few_shot_example_ids" in payload:
         ids = payload.get("few_shot_example_ids") or []
         if not isinstance(ids, list):
@@ -435,7 +466,7 @@ def update_practice_session_settings(
     updated = practice_session_setting_crud.update_by_session_id(
         db,
         session_id=session_id,
-        data=data,
+        data=payload,
     )
     if not updated:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="settings not found")

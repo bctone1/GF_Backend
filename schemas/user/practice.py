@@ -135,6 +135,8 @@ class PracticeSessionSettingCreate(ORMBase):
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
 
+    few_shot_example_id: Optional[int] = None
+
     # JSON 배열 대신 "선택한 예시 ID들"만 받음
     few_shot_example_ids: Optional[List[int]] = None
 
@@ -150,6 +152,7 @@ class PracticeSessionSettingUpdate(ORMBase):
     style_preset: Optional[StylePreset] = None
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
+    few_shot_example_id: Optional[int] = None
     few_shot_example_ids: Optional[List[int]] = None
 
     @model_validator(mode="after")
@@ -169,6 +172,8 @@ class PracticeSessionSettingResponse(ORMBase):
 
     # DB(JSONB) 그대로 내려줌
     generation_params: Dict[str, Any] = Field(default_factory=dict)
+
+    few_shot_example_id: Optional[int] = None
 
     # prompt 템플릿 스냅샷(세션 생성 시점 재현성)
     prompt_snapshot: Dict[str, Any] = Field(default_factory=dict)

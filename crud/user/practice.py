@@ -293,6 +293,9 @@ class PracticeSessionSettingCRUD:
             base_gen.update(incoming_gen)
             row.generation_params = _normalize_generation_params_dict(base_gen)
 
+        if "few_shot_example_id" in values:
+            row.few_shot_example_id = values.get("few_shot_example_id")
+
         if "prompt_snapshot" in values:
             incoming_snap = _coerce_dict(values.get("prompt_snapshot"))
             base_snap = dict(getattr(row, "prompt_snapshot", None) or {})

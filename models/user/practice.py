@@ -132,6 +132,12 @@ class PracticeSessionSetting(Base):
         server_default=text("'{}'::jsonb"),
     )
 
+    few_shot_example_id = Column(
+        BigInteger,
+        ForeignKey("user.few_shot_examples.example_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Prompt 스냅샷(세션 시작 시점의 prompt 상태를 고정해서 재현성 확보)
     prompt_snapshot = Column(
         "agent_snapshot",
@@ -158,6 +164,7 @@ class PracticeSessionSetting(Base):
 
     __table_args__ = (
         Index("idx_practice_session_settings_session", "session_id"),
+        Index("idx_practice_session_settings_few_shot_example", "few_shot_example_id"),
         {"schema": "user"},
     )
 

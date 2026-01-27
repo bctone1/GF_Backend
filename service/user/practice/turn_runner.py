@@ -139,9 +139,30 @@ def _load_prompt_system_prompt_for_practice(
 def _load_selected_few_shots_for_setting(
     db: Session,
     *,
-    setting_id: int,
+    setting: PracticeSessionSetting,
     me: AppUser,
 ) -> List[Dict[str, Any]]:
+    example_id = getattr(setting, "few_shot_example_id", None)
+    if example_id:
+        stmt = (
+            select(
+                UserFewShotExample.input_text,
+                UserFewShotExample.output_text,
+                UserFewShotExample.meta,
+            )
+            .where(UserFewShotExample.example_id == example_id)
+            .where(UserFewShotExample.user_id == me.user_id)
+            .where(UserFewShotExample.is_active.is_(True))
+        )
+        row = db.execute(stmt).one_or_none()
+        if row:
+            input_text, output_text, meta = row
+            it = (input_text or "").strip()
+            ot = (output_text or "").strip()
+            if it and ot:
+                return [{"input": it, "output": ot, "meta": meta or {}}]
+        return []
+
     stmt = (
         select(
             UserFewShotExample.input_text,
@@ -152,7 +173,7 @@ def _load_selected_few_shots_for_setting(
             PracticeSessionSettingFewShot,
             PracticeSessionSettingFewShot.example_id == UserFewShotExample.example_id,
         )
-        .where(PracticeSessionSettingFewShot.setting_id == setting_id)
+        .where(PracticeSessionSettingFewShot.setting_id == setting.setting_id)
         .where(UserFewShotExample.user_id == me.user_id)
         .where(UserFewShotExample.is_active.is_(True))
         .order_by(PracticeSessionSettingFewShot.sort_order.asc())
@@ -228,7 +249,7 @@ def _build_turn_context(
 
     selected_few_shots = _load_selected_few_shots_for_setting(
         db,
-        setting_id=settings.setting_id,
+        setting=settings,
         me=user,
     )
 
