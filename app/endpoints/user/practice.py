@@ -948,3 +948,4 @@ def delete_practice_response(
     practice_response_crud.delete(db, response_id=response_id)
     db.commit()
     return None
+
