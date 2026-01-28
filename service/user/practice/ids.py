@@ -60,20 +60,12 @@ def get_session_knowledge_ids(session: PracticeSession) -> list[int]:
 
 def get_session_prompt_ids(session: PracticeSession) -> list[int]:
     """
-    ORM이 prompt_id(단일)일 수도, prompt_ids(리스트)일 수도 있어서 안전하게 흡수.
+    ORM에서 prompt_ids(JSONB list)를 안전하게 흡수.
     """
     pids = getattr(session, "prompt_ids", None)
     if isinstance(pids, list):
         return coerce_int_list(pids)
-
-    pid = getattr(session, "prompt_id", None)
-    if pid is None:
-        return []
-    try:
-        ip = int(pid)
-    except (TypeError, ValueError):
-        return []
-    return [ip] if ip > 0 else []
+    return []
 
 
 def has_any_response(db: Session, *, session_id: int) -> bool:

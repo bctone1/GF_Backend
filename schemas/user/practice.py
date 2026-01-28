@@ -199,15 +199,12 @@ class PracticeSessionCreate(ORMBase):
     knowledge_ids: Optional[List[int]] = None
 
     prompt_ids: Optional[List[int]] = None
-    prompt_id: Optional[int] = None  # backwards compatibility
     title: Optional[str] = None
     notes: Optional[str] = None
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeSessionCreate":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
-        if not self.prompt_ids and self.prompt_id:
-            self.prompt_ids = [self.prompt_id]
         self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         return self
 
@@ -220,15 +217,12 @@ class PracticeSessionUpdate(ORMBase):
     knowledge_ids: Optional[List[int]] = None
 
     prompt_ids: Optional[List[int]] = None
-    prompt_id: Optional[int] = None  # backwards compatibility
     title: Optional[str] = None
     notes: Optional[str] = None
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeSessionUpdate":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
-        if not self.prompt_ids and self.prompt_id:
-            self.prompt_ids = [self.prompt_id]
         self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         return self
 
@@ -370,7 +364,6 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
         json_schema_extra={"example": None},
         description="프롬프트 템플릿 ID 목록",
     )
-    # prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
     project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
 
     knowledge_ids: Optional[List[int]] = Field(
@@ -401,8 +394,6 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeTurnRequestNewSession":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
-        if not self.prompt_ids and self.prompt_id:
-            self.prompt_ids = [self.prompt_id]
         self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
         return self
