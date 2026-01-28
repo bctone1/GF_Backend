@@ -58,6 +58,24 @@ def get_session_knowledge_ids(session: PracticeSession) -> list[int]:
     return [ik] if ik > 0 else []
 
 
+def get_session_prompt_ids(session: PracticeSession) -> list[int]:
+    """
+    ORM이 prompt_id(단일)일 수도, prompt_ids(리스트)일 수도 있어서 안전하게 흡수.
+    """
+    pids = getattr(session, "prompt_ids", None)
+    if isinstance(pids, list):
+        return coerce_int_list(pids)
+
+    pid = getattr(session, "prompt_id", None)
+    if pid is None:
+        return []
+    try:
+        ip = int(pid)
+    except (TypeError, ValueError):
+        return []
+    return [ip] if ip > 0 else []
+
+
 def has_any_response(db: Session, *, session_id: int) -> bool:
     stmt = select(func.count(PracticeResponse.response_id)).where(PracticeResponse.session_id == session_id)
     return (db.scalar(stmt) or 0) > 0

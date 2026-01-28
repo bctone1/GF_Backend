@@ -108,13 +108,18 @@ class PracticeSessionCRUD:
         user_id: int,
     ) -> PracticeSession:
         knowledge_ids = _coerce_int_list(getattr(data, "knowledge_ids", None))
+        prompt_ids = _coerce_int_list(getattr(data, "prompt_ids", None))
+        if not prompt_ids:
+            prompt_id = getattr(data, "prompt_id", None)
+            if prompt_id is not None:
+                prompt_ids = _coerce_int_list([prompt_id])
 
         obj = PracticeSession(
             user_id=user_id,
             class_id=data.class_id,
             project_id=data.project_id,
             knowledge_ids=knowledge_ids,
-            prompt_id=getattr(data, "prompt_id", None),
+            prompt_ids=prompt_ids,
             title=data.title,
             notes=data.notes,
         )
@@ -159,6 +164,12 @@ class PracticeSessionCRUD:
 
         if "knowledge_ids" in values:
             values["knowledge_ids"] = _coerce_int_list(values.get("knowledge_ids"))
+        if "prompt_id" in values and "prompt_ids" not in values:
+            prompt_id = values.get("prompt_id")
+            values["prompt_ids"] = _coerce_int_list([prompt_id] if prompt_id is not None else [])
+        values.pop("prompt_id", None)
+        if "prompt_ids" in values:
+            values["prompt_ids"] = _coerce_int_list(values.get("prompt_ids"))
 
         stmt = (
             update(PracticeSession)

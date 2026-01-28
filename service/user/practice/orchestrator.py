@@ -114,7 +114,7 @@ def prepare_practice_turn_for_session(
                 class_id=class_id,
                 project_id=requested_project_id,
                 knowledge_ids=requested_knowledge_ids,
-                prompt_id=getattr(body, "prompt_id", None),
+                prompt_ids=coerce_int_list(getattr(body, "prompt_ids", None)),
                 title=None,
                 notes=None,
             ),
@@ -216,7 +216,7 @@ def run_practice_turn_for_session(
     # ---------------------------------
     # per-turn overrides (body에 있으면 전달)
     # ---------------------------------
-    requested_prompt_id: Optional[int] = getattr(body, "prompt_id", None)
+    requested_prompt_ids: Optional[List[int]] = getattr(body, "prompt_ids", None)
     requested_style_preset: Optional[str] = getattr(body, "style_preset", None)
     requested_style_params: Optional[Dict[str, Any]] = getattr(body, "style_params", None)
 
@@ -252,7 +252,7 @@ def run_practice_turn_for_session(
         user=me,
         knowledge_ids=ctx_knowledge_ids,
         generate_title=generate_title,
-        requested_prompt_id=requested_prompt_id,
+        requested_prompt_ids=requested_prompt_ids,
         requested_generation_params=requested_generation_params,
         requested_style_preset=requested_style_preset,
         requested_style_params=requested_style_params,

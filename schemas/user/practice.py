@@ -198,13 +198,17 @@ class PracticeSessionCreate(ORMBase):
     project_id: Optional[int] = None
     knowledge_ids: Optional[List[int]] = None
 
-    prompt_id: Optional[int] = None
+    prompt_ids: Optional[List[int]] = None
+    prompt_id: Optional[int] = None  # backwards compatibility
     title: Optional[str] = None
     notes: Optional[str] = None
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeSessionCreate":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        if not self.prompt_ids and self.prompt_id:
+            self.prompt_ids = [self.prompt_id]
+        self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         return self
 
 
@@ -215,13 +219,17 @@ class PracticeSessionUpdate(ORMBase):
     project_id: Optional[int] = None
     knowledge_ids: Optional[List[int]] = None
 
-    prompt_id: Optional[int] = None
+    prompt_ids: Optional[List[int]] = None
+    prompt_id: Optional[int] = None  # backwards compatibility
     title: Optional[str] = None
     notes: Optional[str] = None
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeSessionUpdate":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        if not self.prompt_ids and self.prompt_id:
+            self.prompt_ids = [self.prompt_id]
+        self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         return self
 
 
@@ -236,7 +244,7 @@ class PracticeSessionResponse(ORMBase):
     # 항상 list로 내려주기(ORM에서 None 들어와도 안전)
     knowledge_ids: List[int] = Field(default_factory=list)
 
-    prompt_id: Optional[int] = None
+    prompt_ids: List[int] = Field(default_factory=list)
     title: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -248,6 +256,11 @@ class PracticeSessionResponse(ORMBase):
     @field_validator("knowledge_ids", mode="before")
     @classmethod
     def _normalize_knowledge_ids(cls, v: Any) -> List[int]:
+        return _normalize_int_id_list_required(v)
+
+    @field_validator("prompt_ids", mode="before")
+    @classmethod
+    def _normalize_prompt_ids(cls, v: Any) -> List[int]:
         return _normalize_int_id_list_required(v)
 
 
@@ -349,9 +362,14 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
     """
     POST /sessions/run
     - 새 세션 생성 + 첫 턴
-    - prompt_id / project_id / knowledge_ids + (settings 튜닝 값들)까지 받는다.
+    - prompt_ids / project_id / knowledge_ids + (settings 튜닝 값들)까지 받는다.
     """
 
+    prompt_ids: Optional[List[int]] = Field(
+        default=None,
+        json_schema_extra={"example": None},
+        description="프롬프트 템플릿 ID 목록",
+    )
     prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
     project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
 
@@ -383,6 +401,9 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeTurnRequestNewSession":
         self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        if not self.prompt_ids and self.prompt_id:
+            self.prompt_ids = [self.prompt_id]
+        self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
         return self
 

@@ -36,7 +36,7 @@ from schemas.user.practice import (
     PracticeTurnResponse,
 )
 
-from service.user.practice.ids import coerce_int_list
+from service.user.practice.ids import coerce_int_list, get_session_prompt_ids
 from service.user.practice.models_sync import resolve_runtime_model
 from service.user.practice.params import (
     normalize_generation_params_dict,
@@ -151,6 +151,28 @@ def _load_prompt_system_prompt_for_practice(
     if strict:
         raise HTTPException(status_code=404, detail="prompt not found or not accessible")
     return None
+
+
+def _load_prompt_system_prompts_for_practice(
+    db: Session,
+    *,
+    prompt_ids: list[int],
+    me: AppUser,
+    class_id: Optional[int],
+    strict: bool,
+) -> list[str]:
+    out: list[str] = []
+    for prompt_id in coerce_int_list(prompt_ids):
+        sp = _load_prompt_system_prompt_for_practice(
+            db,
+            prompt_id=int(prompt_id),
+            me=me,
+            class_id=class_id,
+            strict=strict,
+        )
+        if sp:
+            out.append(sp)
+    return out
 
 
 # =========================================
@@ -269,7 +291,7 @@ def _build_turn_context(
     settings: PracticeSessionSetting,
     user: AppUser,
     knowledge_ids: Optional[List[int]],
-    requested_prompt_id: Optional[int],
+    requested_prompt_ids: Optional[List[int]],
     requested_style_preset: Optional[str],
     requested_style_params: Optional[Dict[str, Any]],
 ) -> PracticeTurnContext:
@@ -285,17 +307,22 @@ def _build_turn_context(
     style_key = requested_style_preset if requested_style_preset is not None else getattr(settings, "style_preset", None)
     style_is_none = _is_none_style(style_key)
 
-    effective_prompt_id = requested_prompt_id if requested_prompt_id is not None else getattr(session, "prompt_id", None)
+    effective_prompt_ids = (
+        coerce_int_list(requested_prompt_ids)
+        if requested_prompt_ids is not None
+        else get_session_prompt_ids(session)
+    )
     prompt_system_prompt: Optional[str] = None
-    if effective_prompt_id:
-        strict = requested_prompt_id is not None
-        prompt_system_prompt = _load_prompt_system_prompt_for_practice(
+    if effective_prompt_ids:
+        strict = requested_prompt_ids is not None
+        prompt_parts = _load_prompt_system_prompts_for_practice(
             db,
-            prompt_id=int(effective_prompt_id),
+            prompt_ids=effective_prompt_ids,
             me=user,
             class_id=getattr(session, "class_id", None),
             strict=strict,
         )
+        prompt_system_prompt = _compose_system_prompt(*prompt_parts)
 
     base_style_params = dict(getattr(settings, "style_params", None) or {})
     if isinstance(requested_style_params, dict) and requested_style_params:
@@ -447,7 +474,7 @@ def stream_practice_turn(
     user: AppUser,
     knowledge_ids: Optional[List[int]] = None,
     generate_title: bool = True,
-    requested_prompt_id: Optional[int] = None,
+    requested_prompt_ids: Optional[List[int]] = None,
     requested_generation_params: Optional[Dict[str, Any]] = None,
     requested_retrieval_params: Optional[Dict[str, Any]] = None,
     requested_style_preset: Optional[str] = None,
@@ -464,7 +491,7 @@ def stream_practice_turn(
         settings=settings,
         user=user,
         knowledge_ids=knowledge_ids,
-        requested_prompt_id=requested_prompt_id,
+        requested_prompt_ids=requested_prompt_ids,
         requested_style_preset=requested_style_preset,
         requested_style_params=requested_style_params,
     )
@@ -599,7 +626,7 @@ def run_practice_turn(
     knowledge_ids: Optional[List[int]] = None,
     generate_title: bool = True,
     # --- per-turn overrides (orchestrator에서 넘겨주도록) ---
-    requested_prompt_id: Optional[int] = None,
+    requested_prompt_ids: Optional[List[int]] = None,
     requested_generation_params: Optional[Dict[str, Any]] = None,
     requested_retrieval_params: Optional[Dict[str, Any]] = None,
     requested_style_preset: Optional[str] = None,
@@ -614,7 +641,7 @@ def run_practice_turn(
         settings=settings,
         user=user,
         knowledge_ids=knowledge_ids,
-        requested_prompt_id=requested_prompt_id,
+        requested_prompt_ids=requested_prompt_ids,
         requested_style_preset=requested_style_preset,
         requested_style_params=requested_style_params,
     )

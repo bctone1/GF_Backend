@@ -313,7 +313,7 @@ def get_practice_session(
         class_id=session.class_id,
         project_id=session.project_id,
         knowledge_ids=knowledge_ids,
-        prompt_id=getattr(session, "prompt_id", None),
+        prompt_ids=coerce_int_list(getattr(session, "prompt_ids", None)),
         title=session.title,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -713,7 +713,7 @@ def run_practice_turn_new_session_endpoint(
             user=me,
             knowledge_ids=ctx_knowledge_ids,
             generate_title=True,
-            requested_prompt_id=body.prompt_id,
+            requested_prompt_ids=body.prompt_ids,
             requested_generation_params=body.generation_params.model_dump()
             if body.generation_params is not None
             else None,

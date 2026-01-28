@@ -49,12 +49,11 @@ class PracticeSession(Base):
         server_default=text("'[]'::jsonb"),
     )
 
-    # Prompt 템플릿 연결
-    prompt_id = Column(
-        "agent_id",
-        BigInteger,
-        ForeignKey("user.ai_agents.agent_id", ondelete="SET NULL"),
-        nullable=True,
+    # Prompt 템플릿 연결(JSON 배열) [1, 2, 3]
+    prompt_ids = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
     )
 
     title = Column(Text, nullable=True)
@@ -104,7 +103,11 @@ class PracticeSession(Base):
             "knowledge_ids",
             postgresql_using="gin",
         ),
-        Index("idx_practice_sessions_agent", "agent_id"),
+        Index(
+            "idx_practice_sessions_prompt_ids",
+            "prompt_ids",
+            postgresql_using="gin",
+        ),
         {"schema": "user"},
     )
 
