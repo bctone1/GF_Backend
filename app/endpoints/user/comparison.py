@@ -63,17 +63,9 @@ def _run_single_panel_turn(
     models: List[Any],
     body: PracticeComparisonTurnRequest,
     run_obj: Any,
+    knowledge_ids: List[int],
+    retrieval_params: Optional[Dict[str, Any]],
 ) -> PracticeTurnResponse:
-    # mode: llm/doc/rag
-    if body.mode == "llm":
-        knowledge_ids: List[int] = []
-        retrieval_params = None
-    else:
-        if not body.knowledge_ids:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="knowledge_ids_required")
-        knowledge_ids = body.knowledge_ids
-        retrieval_params = _build_retrieval_params_from_body(body)
-
     turn = run_practice_turn(
         db=db,
         session=session,
@@ -193,6 +185,15 @@ def run_practice_comparison_turn(
         )
 
     # 2) comparison run row 생성 (패널 1개)
+    if body.mode == "llm":
+        effective_knowledge_ids: List[int] = []
+        retrieval_params = None
+    else:
+        effective_knowledge_ids = body.knowledge_ids or _ctx_knowledge_ids
+        if not effective_knowledge_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="knowledge_ids_required")
+        retrieval_params = _build_retrieval_params_from_body(body)
+
     run_obj = practice_comparison_run_crud.create(
         db,
         session_id=session.session_id,  # PracticeSession PK가 session_id인 구조 가정
@@ -201,7 +202,7 @@ def run_practice_comparison_turn(
             prompt_text=body.prompt_text,
             model_names=body.model_names,
             mode=body.mode,
-            knowledge_ids=body.knowledge_ids,
+            knowledge_ids=effective_knowledge_ids,
             top_k=body.top_k,
             chunk_size=body.chunk_size,
             threshold=body.threshold,
@@ -217,6 +218,8 @@ def run_practice_comparison_turn(
         models=models,
         body=body,
         run_obj=run_obj,
+        knowledge_ids=effective_knowledge_ids,
+        retrieval_params=retrieval_params,
     )
 
     db.commit()
