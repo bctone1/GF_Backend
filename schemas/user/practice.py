@@ -370,7 +370,7 @@ class PracticeTurnRequestNewSession(_PracticeTurnBase):
         json_schema_extra={"example": None},
         description="프롬프트 템플릿 ID 목록",
     )
-    prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
+    # prompt_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
     project_id: Optional[int] = Field(default=None, ge=1, json_schema_extra={"example": None})
 
     knowledge_ids: Optional[List[int]] = Field(
