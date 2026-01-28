@@ -29,7 +29,7 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
     servers=[
-        {"url": "https://growfit.onecloud.kr:3004/", "description": "Production"},
+        {"url": "https://growfit.onecloud.kr:5004/", "description": "Production"},
         {"url": "http://127.0.0.1:9000", "description": "Local"},
     ],
 )

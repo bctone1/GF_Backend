@@ -6,7 +6,7 @@ from urllib.parse import quote_plus
 from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session, sessionmaker
 
-from fastapi import Depends, HTTPException, Request, Security, status, Path
+from fastapi import Depends, HTTPException, Request, Security, status, Path, WebSocket, WebSocketException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core.config import DB, DB_USER, DB_PASSWORD, DB_SERVER, DB_PORT, DB_NAME
@@ -71,6 +71,33 @@ def get_current_user(
     user = db.get(AppUser, int(uid_str))
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="unauthorized")
+    return user
+
+
+def get_current_user_ws(
+    websocket: WebSocket,
+    db: Session = Depends(get_db),
+) -> AppUser:
+    auth_header = websocket.headers.get("Authorization")
+    token = None
+    if auth_header:
+        lower = auth_header.lower()
+        if lower.startswith("bearer "):
+            token = auth_header[7:].strip()
+    if not token:
+        token = websocket.query_params.get("token")
+
+    prefix = "dev-access-"
+    if not token or not token.startswith(prefix):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="unauthorized")
+
+    uid_str = token[len(prefix):]
+    if not uid_str.isdigit():
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="unauthorized")
+
+    user = db.get(AppUser, int(uid_str))
+    if not user:
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION, reason="unauthorized")
     return user
 
 

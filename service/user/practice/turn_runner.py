@@ -613,6 +613,157 @@ def stream_practice_turn(
 
 
 # =========================================
+# 멀티 모델 WS 스트리밍용 이벤트 생성
+# =========================================
+def iter_practice_model_stream_events(
+    *,
+    session: PracticeSession,
+    settings: PracticeSessionSetting,
+    model: PracticeSessionModel,
+    prompt_text: str,
+    user: AppUser,
+    knowledge_ids: Optional[List[int]] = None,
+    generate_title: bool = True,
+    requested_prompt_ids: Optional[List[int]] = None,
+    requested_generation_params: Optional[Dict[str, Any]] = None,
+    requested_retrieval_params: Optional[Dict[str, Any]] = None,
+    requested_style_preset: Optional[str] = None,
+    requested_style_params: Optional[Dict[str, Any]] = None,
+) -> Iterable[Dict[str, Any]]:
+    if session.user_id != user.user_id:
+        raise HTTPException(status_code=403, detail="session not owned by user")
+    if model.session_id != session.session_id:
+        raise HTTPException(status_code=400, detail="session_model does not belong to given session")
+
+    db_task = SessionLocal()
+    try:
+        ctx = _build_turn_context(
+            db=db_task,
+            session=session,
+            settings=settings,
+            user=user,
+            knowledge_ids=knowledge_ids,
+            requested_prompt_ids=requested_prompt_ids,
+            requested_style_preset=requested_style_preset,
+            requested_style_params=requested_style_params,
+        )
+        prepared = _prepare_model_payload(
+            db_task=db_task,
+            ctx=ctx,
+            model=model,
+            prompt_text=prompt_text,
+            session=session,
+            user=user,
+            requested_generation_params=requested_generation_params,
+            requested_retrieval_params=requested_retrieval_params,
+        )
+
+        chain_in = prepared["chain_in"]
+        stage0 = normalize_input(chain_in)
+        stage1 = retrieve_context({**stage0, "retrieve_fn": prepared["retrieve_fn"]})
+        stage2 = build_messages(stage1)
+        messages = stage2.get("messages")
+        if not isinstance(messages, list) or not messages:
+            raise HTTPException(status_code=500, detail="empty_messages_for_streaming")
+
+        msg_dicts = lc_messages_to_role_dicts(messages)
+        gen_params = prepared["gen_params"]
+
+        temperature = gen_params.get("temperature")
+        if temperature is None:
+            temperature = getattr(core_config, "LLM_TEMPERATURE", 0.7)
+        top_p = gen_params.get("top_p")
+        if top_p is None:
+            top_p = getattr(core_config, "LLM_TOP_P", None)
+        max_tokens = gen_params.get("max_completion_tokens")
+        stream_kwargs = dict(gen_params)
+        stream_kwargs.pop("max_completion_tokens", None)
+        stream_kwargs.pop("max_tokens", None)
+        stream_kwargs.pop("temperature", None)
+        stream_kwargs.pop("top_p", None)
+
+        started = time.perf_counter()
+        parts: List[str] = []
+        for chunk in iter_llm_chat_stream(
+            messages=msg_dicts,
+            provider=prepared["provider"],
+            model=prepared["real_model"],
+            temperature=temperature if temperature is not None else 0.7,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            **stream_kwargs,
+        ):
+            parts.append(chunk)
+            yield {
+                "event": "chunk",
+                "session_id": session.session_id,
+                "model_name": model.model_name,
+                "text": chunk,
+            }
+
+        response_text = "".join(parts)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+
+        resp = practice_response_crud.create(
+            db_task,
+            PracticeResponseCreate(
+                session_model_id=model.session_model_id,
+                session_id=session.session_id,
+                model_name=model.model_name,
+                prompt_text=prompt_text,
+                response_text=response_text,
+                token_usage=None,
+                latency_ms=latency_ms,
+            ),
+        )
+        db_task.commit()
+
+        session_title = session.title
+        if generate_title and not session_title and model.is_primary:
+            session_title = generate_session_title_llm(
+                question=prompt_text,
+                answer=response_text,
+                max_chars=30,
+            )
+            practice_session_crud.update(
+                db_task,
+                session_id=session.session_id,
+                data=PracticeSessionUpdate(title=session_title),
+            )
+            db_task.commit()
+
+        result = PracticeTurnModelResult(
+            session_model_id=resp.session_model_id,
+            model_name=resp.model_name,
+            response_id=resp.response_id,
+            prompt_text=resp.prompt_text,
+            response_text=resp.response_text,
+            token_usage=resp.token_usage,
+            latency_ms=resp.latency_ms,
+            created_at=resp.created_at,
+            is_primary=model.is_primary,
+            generation_params=prepared["effective_gp_full"],
+        )
+        yield {
+            "event": "done",
+            "session_id": session.session_id,
+            "session_title": session_title,
+            "model_name": model.model_name,
+            "result": result.model_dump(),
+        }
+    except Exception as exc:
+        db_task.rollback()
+        yield {
+            "event": "error",
+            "session_id": session.session_id,
+            "model_name": model.model_name,
+            "detail": str(exc),
+        }
+    finally:
+        db_task.close()
+
+
+# =========================================
 # 멀티 모델 Practice 턴 실행
 # =========================================
 def run_practice_turn(

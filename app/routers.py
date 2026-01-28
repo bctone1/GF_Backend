@@ -27,6 +27,7 @@ from app.endpoints.partner.usage import router as partner_usage
 from app.endpoints.user.account import router as account
 from app.endpoints.user.document import router as user_document
 from app.endpoints.user.practice import router as practice
+from app.endpoints.user.practice_ws import router as practice_ws
 from app.endpoints.user.prompt import router as prompt
 from app.endpoints.user.project import router as project
 from app.endpoints.user.comparison import router as comparison
@@ -63,9 +64,9 @@ def register_routers(app: FastAPI) -> None:
     # User
     # ==============================
     app.include_router(practice,          prefix="/user/practice",        tags=["user/practice : AI실습"])
+    app.include_router(practice_ws,       prefix="/user/practice",        tags=["user/practice : 웹소켓 AI실습"])
     app.include_router(project,           prefix="",                      tags=["user/project : 프로젝트"])
     app.include_router(user_document,     prefix="/user",                 tags=["user/document : 지식베이스"])
     app.include_router(prompt,            prefix="",                      tags=["user/prompt : 템플릿"])
     app.include_router(account,           prefix="/user",                 tags=["user/account"])
     app.include_router(comparison,        prefix="/user/practice",        tags=["user/comparison"])
-
