@@ -2,6 +2,8 @@
 import os
 
 from fastapi import FastAPI
+from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from core import config
@@ -24,7 +26,14 @@ app = FastAPI(
     title="GrowFit API",
     version="0.1.0",
     description="GrowFit LLM practice platform API",
+    docs_url=None,
+    redoc_url=None,
+    servers=[
+        {"url": "https://growfit.onecloud.kr:3004/", "description": "Production"},
+        {"url": "http://127.0.0.1:9000", "description": "Local"},
+    ],
 )
+
 
 app.add_middleware(ProcessTimeMiddleware)
 
@@ -37,6 +46,54 @@ app.add_middleware(
 )
 
 register_routers(app)
+
+
+@app.get("/docs", include_in_schema=False)
+def custom_swagger_ui_html() -> HTMLResponse:
+    method_order = ["get", "post", "patch", "put", "delete", "head", "options", "trace"]
+    return HTMLResponse(
+        f"""
+<!DOCTYPE html>
+<html>
+  <head>
+    <link
+      rel="stylesheet"
+      type="text/css"
+      href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css"
+    />
+    <title>{app.title} - Swagger UI</title>
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      const methodOrder = {method_order};
+      window.ui = SwaggerUIBundle({{
+        url: "{app.openapi_url}",
+        dom_id: "#swagger-ui",
+        operationsSorter: (a, b) => {{
+          const aIndex = methodOrder.indexOf(a.get("method"));
+          const bIndex = methodOrder.indexOf(b.get("method"));
+          const normalizedA = aIndex === -1 ? methodOrder.length : aIndex;
+          const normalizedB = bIndex === -1 ? methodOrder.length : bIndex;
+          return normalizedA - normalizedB;
+        }},
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset,
+        ],
+        layout: "BaseLayout",
+      }});
+    </script>
+  </body>
+</html>
+"""
+    )
+
+
+@app.get("/docs/oauth2-redirect", include_in_schema=False)
+def swagger_ui_redirect() -> HTMLResponse:
+    return get_swagger_ui_oauth2_redirect_html()
 
 if __name__ == "__main__":
     import uvicorn
