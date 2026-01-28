@@ -131,12 +131,9 @@ class UserFewShotExampleResponse(ORMBase):
 # =========================================
 class PracticeSessionSettingCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-
     style_preset: Optional[StylePreset] = None
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
-
-    # ✅ JSONB array로 저장될 "선택한 예시 ID들"
     few_shot_example_ids: Optional[List[int]] = None
 
     @model_validator(mode="after")
@@ -147,12 +144,9 @@ class PracticeSessionSettingCreate(ORMBase):
 
 class PracticeSessionSettingUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
-
     style_preset: Optional[StylePreset] = None
     style_params: Optional[Dict[str, Any]] = None
     generation_params: Optional[GenerationParams] = None
-
-    # ✅ JSONB array로 저장될 "선택한 예시 ID들"
     few_shot_example_ids: Optional[List[int]] = None
 
     @model_validator(mode="after")
@@ -172,8 +166,6 @@ class PracticeSessionSettingResponse(ORMBase):
 
     # DB(JSONB) 그대로 내려줌
     generation_params: Dict[str, Any] = Field(default_factory=dict)
-
-    # ✅ JSONB array
     few_shot_example_ids: List[int] = Field(default_factory=list)
 
     # prompt 템플릿 스냅샷(세션 생성 시점 재현성)
@@ -298,8 +290,6 @@ class PracticeResponseCreate(ORMBase):
     session_id: int
     prompt_text: str
     response_text: str
-
-    # 비교 모드 매핑용(유지)
     comparison_run_id: Optional[int] = Field(default=None, ge=1)
     panel_key: Optional[str] = None
 
@@ -312,8 +302,6 @@ class PracticeResponseUpdate(ORMBase):
 
     prompt_text: Optional[str] = None
     response_text: Optional[str] = None
-
-    # 비교 모드 매핑용(유지)
     comparison_run_id: Optional[int] = Field(default=None, ge=1)
     panel_key: Optional[str] = None
 
