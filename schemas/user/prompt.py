@@ -11,8 +11,8 @@ from schemas.base import ORMBase
 
 
 # =========================================================
-# user.ai_agents (legacy table name for prompts)
-#   - system_prompt는 ai_agents에 직접 저장
+# user.ai_prompts
+#   - system_prompt는 ai_prompts에 직접 저장
 #   - is_active는 Boolean (default true)
 # =========================================================
 class AIPromptCreate(ORMBase):
@@ -55,7 +55,7 @@ class AIPromptResponse(ORMBase):
 
 
 # =========================================================
-# user.agent_examples (legacy table name for prompt examples)
+# user.prompt_examples
 # =========================================================
 class PromptExampleCreate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
@@ -89,7 +89,7 @@ class PromptExampleResponse(ORMBase):
 
 
 # =========================================================
-# user.agent_usage_stats  (집계/통계: READ-ONLY, legacy table name)
+# user.prompt_usage_stats (집계/통계: READ-ONLY)
 # =========================================================
 class PromptUsageStatResponse(ORMBase):
     """
@@ -107,7 +107,7 @@ class PromptUsageStatResponse(ORMBase):
 
 
 # =========================================================
-# user.agent_shares (legacy table name for prompt shares)
+# user.prompt_shares
 # =========================================================
 class PromptShareCreate(ORMBase):
     """

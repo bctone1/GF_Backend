@@ -3,6 +3,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 
 from crud.base import CRUDBase
 from models.user.prompt import AIPrompt, PromptShare
@@ -15,7 +16,7 @@ from schemas.user.prompt import (
 
 
 # =========================================================
-# user.ai_agents 전용 CRUD (prompt)
+# user.ai_prompts CRUD (prompt)
 # =========================================================
 class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
     """
@@ -35,14 +36,11 @@ class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
         """
         data = obj_in.model_dump(exclude_unset=True)
 
-        # is_active는 Optional이라 None이 들어오면 DB(not null)에서 터질 수 있어서 무시
+        # is_active는 Optional이라 None이 들어오면 DB(not null)에서 터질 수 있어서 무시 (server_default 사용)
         if data.get("is_active", "__missing__") is None:
             data.pop("is_active", None)
 
-        db_obj = AIPrompt(
-            owner_id=owner_id,
-            **data,
-        )
+        db_obj = AIPrompt(owner_id=owner_id, **data)
         db.add(db_obj)
         db.commit()
         db.refresh(db_obj)
@@ -72,7 +70,6 @@ class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
                 )
             )
 
-        # total count (정렬 제거하고 count)
         total = query.order_by(None).count()
 
         items = (
@@ -81,7 +78,6 @@ class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
             .limit(limit)
             .all()
         )
-
         return total, items
 
     def get_for_owner(
@@ -140,11 +136,11 @@ ai_prompt_crud = CRUDAIPrompt(AIPrompt)
 
 
 # =========================================================
-# user.agent_shares 전용 CRUD (prompt)
+# user.prompt_shares CRUD (prompt)
 # =========================================================
 class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate]):
     """
-    user.agent_shares 전용 CRUD (prompt).
+    user.prompt_shares 전용 CRUD (prompt).
     - 기본 CRUDBase 기능 + 공유 시나리오용 헬퍼 메서드들.
     """
 
@@ -158,11 +154,15 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
         """
         실제 공유를 수행한 유저(shared_by_user_id)는 서비스 레이어에서 me.user_id로 넣어줌.
         """
+        data = obj_in.model_dump(exclude_unset=True)
+
+        # is_active Optional None이면 server_default 사용(혹은 True로 강제해도 됨)
+        if data.get("is_active", "__missing__") is None:
+            data.pop("is_active", None)
+
         db_obj = PromptShare(
-            prompt_id=obj_in.prompt_id,
-            class_id=obj_in.class_id,
             shared_by_user_id=shared_by_user_id,
-            is_active=obj_in.is_active if obj_in.is_active is not None else True,
+            **data,
         )
         db.add(db_obj)
         db.commit()
@@ -232,6 +232,8 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
         """
         같은 prompt_id + class_id 조합이 이미 있으면 재사용하고,
         없으면 새로 생성.
+
+        (주의) 동시성에서 레이스로 유니크 충돌이 날 수 있으니 IntegrityError 방어.
         """
         existing = self.get_by_prompt_and_class(
             db,
@@ -246,7 +248,24 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
                 db.refresh(existing)
             return existing
 
-        return self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+        try:
+            return self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+        except IntegrityError:
+            db.rollback()
+            # 누군가가 방금 만들었을 가능성 → 다시 조회해서 리턴
+            again = self.get_by_prompt_and_class(
+                db,
+                prompt_id=obj_in.prompt_id,
+                class_id=obj_in.class_id,
+            )
+            if again is None:
+                raise
+            if not again.is_active:
+                again.is_active = True
+                db.add(again)
+                db.commit()
+                db.refresh(again)
+            return again
 
 
 prompt_share_crud = CRUDPromptShare(PromptShare)

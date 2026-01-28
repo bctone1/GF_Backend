@@ -75,11 +75,10 @@ def list_shared_prompts_for_class(
     """
     특정 class 에 공유된 프롬프트 목록 조회.
     - 현재는 '해당 강의에 수강 중인 학생'만 허용.
-      (강사 허용 로직은 prompt_share 서비스에서 확장 가능)
     """
     # 0) 강의 존재 여부 체크
-    cls = db.query(Class).filter(Class.id == class_id).first()
-    if cls is None:
+    exists = db.query(Class.id).filter(Class.id == class_id).first()
+    if exists is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="강의를 찾을 수 없음.",
@@ -105,6 +104,9 @@ def list_shared_prompts_for_class(
             AIPrompt.is_active.is_(True),
         )
 
+    # 레거시 중복 데이터 대비(원칙상 uq(prompt_id,class_id)면 중복 없어야 함)
+    q = q.distinct(AIPrompt.prompt_id)
+
     return q.all()
 
 
@@ -120,7 +122,7 @@ def create_prompt(
     """
     새 프롬프트 생성.
     - owner_id는 항상 me.user_id 로 강제.
-    - system_prompt는 ai_agents.system_prompt에 저장(버전 없음).
+    - system_prompt는 user.ai_prompts.system_prompt에 저장(버전 없음).
     """
     prompt = ai_prompt_crud.create(
         db,
@@ -236,6 +238,13 @@ def fork_shared_prompt_to_my_prompt(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="원본 프롬프트를 찾을 수 없어.",
+        )
+
+    # 3-1) 원본 프롬프트가 비활성이면 포크 불가(목록 정책과 동일하게)
+    if not bool(src_prompt.is_active):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="원본 프롬프트가 비활성 상태라서 복제할 수 없어.",
         )
 
     # 4) 원본 프롬프트 존재 확인(모델상 not-null이지만, 레거시 데이터 방어)

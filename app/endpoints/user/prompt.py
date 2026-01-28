@@ -87,7 +87,11 @@ def list_shared_prompts_for_class_endpoint(
     operation_id="fork_shared_prompt_to_my_prompt",
 )
 def fork_shared_prompt_to_my_prompt_endpoint(
-    prompt_id: int = Path(..., ge=1),
+    prompt_id: int = Path(
+        ...,
+        ge=1,
+        description="원본 프롬프트 ID (user.ai_prompts.prompt_id)",
+    ),
     payload: PromptForkRequest = Body(...),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -178,7 +182,7 @@ def get_my_prompt_endpoint(
     prompt_id: int = Path(
         ...,
         ge=1,
-        description="조회할 내 프롬프트 ID (user.ai_agents.agent_id)",
+        description="조회할 내 프롬프트 ID (user.ai_prompts.prompt_id)",
     ),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
@@ -201,7 +205,7 @@ def update_my_prompt_endpoint(
     prompt_id: int = Path(
         ...,
         ge=1,
-        description="수정할 내 프롬프트 ID (user.ai_agents.agent_id)",
+        description="수정할 내 프롬프트 ID (user.ai_prompts.prompt_id)",
     ),
     body: AIPromptUpdate = ...,
     db: Session = Depends(get_db),
@@ -229,7 +233,7 @@ def share_prompt_to_class_endpoint(
     prompt_id: int = Path(
         ...,
         ge=1,
-        description="공유할 내 프롬프트 ID (user.ai_agents.agent_id)",
+        description="공유할 내 프롬프트 ID (user.ai_prompts.prompt_id)",
     ),
     class_id: int = Query(
         ...,
@@ -266,7 +270,7 @@ def deactivate_prompt_share_endpoint(
     prompt_id: int = Path(
         ...,
         ge=1,
-        description="공유 해제할 내 프롬프트 ID (user.ai_agents.agent_id)",
+        description="공유 해제할 내 프롬프트 ID (user.ai_prompts.prompt_id)",
     ),
     class_id: int = Query(
         ...,
