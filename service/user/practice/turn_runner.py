@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-import json
+import queue
+import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -11,12 +12,10 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from core import config as core_config
 from database.session import SessionLocal
-from langchain_service.chain.qa_chain import lc_messages_to_role_dicts, make_qa_chain
-from langchain_service.chain.stages import build_messages, normalize_input, retrieve_context
+from langchain_service.chain.qa_chain import make_qa_chain
 from langchain_service.chain.style import build_system_prompt as build_style_system_prompt
-from langchain_service.llm.setup import call_llm_chat, iter_llm_chat_stream
+from langchain_service.llm.setup import LLMCallResult, call_llm_chat, iter_llm_chat_stream
 from langchain_service.llm.runner import generate_session_title_llm
 
 from crud.user.practice import practice_response_crud, practice_session_crud
@@ -53,6 +52,24 @@ DEFAULT_MAX_CTX_CHARS = 12000
 # =========================================
 # prompt helpers
 # =========================================
+def _make_practice_chain(
+    *,
+    ctx: Any,
+    retrieve_fn: Any,
+    call_llm_chat_func: Any,
+    streaming: bool,
+) -> Any:
+    return make_qa_chain(
+        call_llm_chat=call_llm_chat_func,
+        retrieve_fn=retrieve_fn,
+        context_text="",
+        policy_flags=None,
+        style=ctx.style_key_for_chain,
+        max_ctx_chars=DEFAULT_MAX_CTX_CHARS,
+        streaming=streaming,
+        chain_version=CHAIN_VERSION,
+    )
+
 def _merge_prompt(prev: Any, extra: Any) -> Optional[str]:
     p = (prev or "").strip() if isinstance(prev, str) else ""
     e = (extra or "").strip() if isinstance(extra, str) else ""
@@ -464,154 +481,6 @@ def _prepare_model_payload(
     }
 
 
-def stream_practice_turn(
-    *,
-    db: Session,
-    session: PracticeSession,
-    settings: PracticeSessionSetting,
-    models: List[PracticeSessionModel],
-    prompt_text: str,
-    user: AppUser,
-    knowledge_ids: Optional[List[int]] = None,
-    generate_title: bool = True,
-    requested_prompt_ids: Optional[List[int]] = None,
-    requested_generation_params: Optional[Dict[str, Any]] = None,
-    requested_retrieval_params: Optional[Dict[str, Any]] = None,
-    requested_style_preset: Optional[str] = None,
-    requested_style_params: Optional[Dict[str, Any]] = None,
-) -> Iterable[str]:
-    if session.user_id != user.user_id:
-        raise HTTPException(status_code=403, detail="session not owned by user")
-    if len(models) != 1:
-        raise HTTPException(status_code=400, detail="streaming supports single model only")
-
-    ctx = _build_turn_context(
-        db=db,
-        session=session,
-        settings=settings,
-        user=user,
-        knowledge_ids=knowledge_ids,
-        requested_prompt_ids=requested_prompt_ids,
-        requested_style_preset=requested_style_preset,
-        requested_style_params=requested_style_params,
-    )
-
-    model = models[0]
-
-    def _event(event: str, payload: Dict[str, Any]) -> str:
-        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-    def _generator() -> Iterable[str]:
-        db_task = SessionLocal()
-        try:
-            prepared = _prepare_model_payload(
-                db_task=db_task,
-                ctx=ctx,
-                model=model,
-                prompt_text=prompt_text,
-                session=session,
-                user=user,
-                requested_generation_params=requested_generation_params,
-                requested_retrieval_params=requested_retrieval_params,
-            )
-
-            chain_in = prepared["chain_in"]
-            stage0 = normalize_input(chain_in)
-            stage1 = retrieve_context({**stage0, "retrieve_fn": prepared["retrieve_fn"]})
-            stage2 = build_messages(stage1)
-            messages = stage2.get("messages")
-            if not isinstance(messages, list) or not messages:
-                raise HTTPException(status_code=500, detail="empty_messages_for_streaming")
-
-            msg_dicts = lc_messages_to_role_dicts(messages)
-            gen_params = prepared["gen_params"]
-
-            temperature = gen_params.get("temperature")
-            if temperature is None:
-                temperature = getattr(core_config, "LLM_TEMPERATURE", 0.7)
-            top_p = gen_params.get("top_p")
-            if top_p is None:
-                top_p = getattr(core_config, "LLM_TOP_P", None)
-            max_tokens = gen_params.get("max_completion_tokens")
-            stream_kwargs = dict(gen_params)
-            stream_kwargs.pop("max_completion_tokens", None)
-            stream_kwargs.pop("max_tokens", None)
-            stream_kwargs.pop("temperature", None)
-            stream_kwargs.pop("top_p", None)
-
-            started = time.perf_counter()
-            parts: List[str] = []
-            for chunk in iter_llm_chat_stream(
-                messages=msg_dicts,
-                provider=prepared["provider"],
-                model=prepared["real_model"],
-                temperature=temperature if temperature is not None else 0.7,
-                max_tokens=max_tokens,
-                top_p=top_p,
-                **stream_kwargs,
-            ):
-                parts.append(chunk)
-                yield _event("chunk", {"text": chunk})
-
-            response_text = "".join(parts)
-            latency_ms = int((time.perf_counter() - started) * 1000)
-
-            resp = practice_response_crud.create(
-                db_task,
-                PracticeResponseCreate(
-                    session_model_id=model.session_model_id,
-                    session_id=session.session_id,
-                    model_name=model.model_name,
-                    prompt_text=prompt_text,
-                    response_text=response_text,
-                    token_usage=None,
-                    latency_ms=latency_ms,
-                ),
-            )
-            db_task.commit()
-
-            session_title = session.title
-            if generate_title and not session_title:
-                session_title = generate_session_title_llm(
-                    question=prompt_text,
-                    answer=response_text,
-                    max_chars=30,
-                )
-                practice_session_crud.update(
-                    db_task,
-                    session_id=session.session_id,
-                    data=PracticeSessionUpdate(title=session_title),
-                )
-                db_task.commit()
-
-            result = PracticeTurnModelResult(
-                session_model_id=resp.session_model_id,
-                model_name=resp.model_name,
-                response_id=resp.response_id,
-                prompt_text=resp.prompt_text,
-                response_text=resp.response_text,
-                token_usage=resp.token_usage,
-                latency_ms=resp.latency_ms,
-                created_at=resp.created_at,
-                is_primary=model.is_primary,
-                generation_params=prepared["effective_gp_full"],
-            )
-            final_payload = PracticeTurnResponse(
-                session_id=session.session_id,
-                session_title=session_title,
-                prompt_text=prompt_text,
-                results=[result],
-            )
-            yield _event("done", final_payload.model_dump())
-        except Exception as exc:
-            db_task.rollback()
-            yield _event("error", {"detail": str(exc)})
-        finally:
-            db_task.close()
-
-    return _generator()
-
-
 # =========================================
 # 멀티 모델 WS 스트리밍용 이벤트 생성
 # =========================================
@@ -658,51 +527,91 @@ def iter_practice_model_stream_events(
             requested_retrieval_params=requested_retrieval_params,
         )
 
-        chain_in = prepared["chain_in"]
-        stage0 = normalize_input(chain_in)
-        stage1 = retrieve_context({**stage0, "retrieve_fn": prepared["retrieve_fn"]})
-        stage2 = build_messages(stage1)
-        messages = stage2.get("messages")
-        if not isinstance(messages, list) or not messages:
-            raise HTTPException(status_code=500, detail="empty_messages_for_streaming")
+        chunk_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
 
-        msg_dicts = lc_messages_to_role_dicts(messages)
-        gen_params = prepared["gen_params"]
+        def _call_llm_chat_streaming(
+            *,
+            messages: List[Dict[str, str]],
+            provider: str | None = None,
+            model: str | None = None,
+            temperature: float = 0.7,
+            max_tokens: Optional[int] = None,
+            top_p: Optional[float] = None,
+            **kwargs: Any,
+        ) -> LLMCallResult:
+            started = time.perf_counter()
+            parts: List[str] = []
+            for chunk in iter_llm_chat_stream(
+                messages=messages,
+                provider=provider,
+                model=model,
+                temperature=temperature if temperature is not None else 0.7,
+                max_tokens=max_tokens,
+                top_p=top_p,
+                **kwargs,
+            ):
+                parts.append(chunk)
+                chunk_queue.put(("chunk", chunk))
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return LLMCallResult(
+                text="".join(parts),
+                token_usage=None,
+                latency_ms=latency_ms,
+                raw=None,
+            )
 
-        temperature = gen_params.get("temperature")
-        if temperature is None:
-            temperature = getattr(core_config, "LLM_TEMPERATURE", 0.7)
-        top_p = gen_params.get("top_p")
-        if top_p is None:
-            top_p = getattr(core_config, "LLM_TOP_P", None)
-        max_tokens = gen_params.get("max_completion_tokens")
-        stream_kwargs = dict(gen_params)
-        stream_kwargs.pop("max_completion_tokens", None)
-        stream_kwargs.pop("max_tokens", None)
-        stream_kwargs.pop("temperature", None)
-        stream_kwargs.pop("top_p", None)
+        chain_task = _make_practice_chain(
+            ctx=ctx,
+            retrieve_fn=prepared["retrieve_fn"],
+            call_llm_chat_func=_call_llm_chat_streaming,
+            streaming=True,
+        )
 
-        started = time.perf_counter()
-        parts: List[str] = []
-        for chunk in iter_llm_chat_stream(
-            messages=msg_dicts,
-            provider=prepared["provider"],
-            model=prepared["real_model"],
-            temperature=temperature if temperature is not None else 0.7,
-            max_tokens=max_tokens,
-            top_p=top_p,
-            **stream_kwargs,
-        ):
-            parts.append(chunk)
-            yield {
-                "event": "chunk",
-                "session_id": session.session_id,
-                "model_name": model.model_name,
-                "text": chunk,
-            }
+        chain_out: Dict[str, Any] | None = None
 
-        response_text = "".join(parts)
-        latency_ms = int((time.perf_counter() - started) * 1000)
+        def _run_chain() -> None:
+            try:
+                out = chain_task.invoke(prepared["chain_in"])
+                chunk_queue.put(("done", out))
+            except Exception as exc:
+                chunk_queue.put(("error", exc))
+
+        worker = threading.Thread(target=_run_chain, daemon=True)
+        worker.start()
+
+        while True:
+            kind, payload = chunk_queue.get()
+            if kind == "chunk":
+                yield {
+                    "event": "chunk",
+                    "session_id": session.session_id,
+                    "model_name": model.model_name,
+                    "text": payload,
+                }
+                continue
+            if kind == "done":
+                chain_out = payload
+                break
+            if kind == "error":
+                raise payload
+
+        worker.join()
+        if chain_out is None:
+            raise HTTPException(status_code=500, detail="streaming_chain_failed")
+
+        response_text = chain_out.get("text") or ""
+        latency_ms = chain_out.get("latency_ms")
+        raw_usage = chain_out.get("token_usage")
+        if isinstance(raw_usage, dict):
+            token_usage: Dict[str, Any] = dict(raw_usage)
+        else:
+            token_usage = {"raw": raw_usage}
+        token_usage["_gf"] = {
+            "retrieval": chain_out.get("retrieval"),
+            "sources": chain_out.get("sources"),
+            "runtime_model": chain_out.get("model_name"),
+            "chain_version": CHAIN_VERSION,
+        }
 
         resp = practice_response_crud.create(
             db_task,
@@ -712,7 +621,7 @@ def iter_practice_model_stream_events(
                 model_name=model.model_name,
                 prompt_text=prompt_text,
                 response_text=response_text,
-                token_usage=None,
+                token_usage=token_usage,
                 latency_ms=latency_ms,
             ),
         )
@@ -813,15 +722,11 @@ def run_practice_turn(
                 requested_generation_params=requested_generation_params,
                 requested_retrieval_params=requested_retrieval_params,
             )
-            chain_task = make_qa_chain(
-                call_llm_chat=call_llm_chat,
+            chain_task = _make_practice_chain(
+                ctx=ctx,
                 retrieve_fn=prepared["retrieve_fn"],
-                context_text="",
-                policy_flags=None,
-                style=ctx.style_key_for_chain,
-                max_ctx_chars=DEFAULT_MAX_CTX_CHARS,
+                call_llm_chat_func=call_llm_chat,
                 streaming=False,
-                chain_version=CHAIN_VERSION,
             )
             out = chain_task.invoke(prepared["chain_in"])
 
@@ -838,6 +743,7 @@ def run_practice_turn(
                 "retrieval": out.get("retrieval"),
                 "sources": out.get("sources"),
                 "runtime_model": out.get("model_name"),
+                "chain_version": CHAIN_VERSION,
             }
 
             return {

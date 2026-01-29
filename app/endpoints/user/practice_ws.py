@@ -21,6 +21,9 @@ from app.endpoints.user.practice import _validate_my_few_shot_example_ids
 
 router = APIRouter()
 
+WS_SEND_MAX_RETRIES = 2
+WS_SEND_RETRY_BACKOFF_S = 0.2
+
 
 @router.websocket("/ws/sessions/run")
 async def ws_run_practice_turn_new_session(
@@ -81,9 +84,19 @@ async def ws_run_practice_turn_new_session(
     queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     executor = ThreadPoolExecutor(max_workers=len(models))
 
-    # datetime 등 비-JSON 타입 포함 시에도 send_json이 실패하지 않도록 보강
     async def _send_json(payload: Dict[str, Any]) -> None:
-        await websocket.send_json(jsonable_encoder(payload))
+        for attempt in range(WS_SEND_MAX_RETRIES + 1):
+            try:
+                await websocket.send_json(jsonable_encoder(payload))
+                return
+            except WebSocketDisconnect:
+                if attempt >= WS_SEND_MAX_RETRIES:
+                    raise
+                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
+            except RuntimeError:
+                if attempt >= WS_SEND_MAX_RETRIES:
+                    raise
+                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
 
     def _run_model_stream(model) -> None:
         try:
