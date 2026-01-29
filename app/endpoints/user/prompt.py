@@ -32,6 +32,7 @@ from service.user.prompt import (
     list_my_prompts,
     get_my_prompt,
     update_my_prompt,
+    delete_my_prompt,
     fork_shared_prompt_to_my_prompt,
     list_shared_prompts_for_class,
 )
@@ -217,6 +218,29 @@ def update_my_prompt_endpoint(
     """
     prompt = update_my_prompt(db=db, me=me, prompt_id=prompt_id, data=body)
     return prompt
+
+
+@router.delete(
+    "/prompts/{prompt_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="프롬프트삭제",
+    operation_id="delete_my_prompt",
+)
+def delete_my_prompt_endpoint(
+    prompt_id: int = Path(
+        ...,
+        ge=1,
+        description="삭제할 내 프롬프트 ID (user.ai_prompts.prompt_id)",
+    ),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """
+    내 프롬프트 삭제.
+    - owner_id != me.user_id 이면 404 처리 (서비스 레이어에서 검증)
+    """
+    delete_my_prompt(db=db, me=me, prompt_id=prompt_id)
+    return None
 
 
 # =========================================

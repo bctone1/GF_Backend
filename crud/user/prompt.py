@@ -131,6 +131,14 @@ class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
         db.refresh(db_obj)
         return db_obj
 
+    def remove(self, db: Session, *, db_obj: AIPrompt) -> None:
+        """
+        AIPrompt 삭제.
+        - commit은 서비스 레이어에서 수행.
+        """
+        db.delete(db_obj)
+        db.flush()
+
 
 ai_prompt_crud = CRUDAIPrompt(AIPrompt)
 

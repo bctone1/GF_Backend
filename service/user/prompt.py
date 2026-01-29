@@ -1,7 +1,7 @@
 # service/user/prompt.py
 from __future__ import annotations
 
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Iterable
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -20,6 +20,35 @@ from models.partner.course import Class
 # =========================================
 # helpers
 # =========================================
+def _attach_shared_class_ids(
+    db: Session,
+    *,
+    prompts: Iterable[AIPrompt],
+    active_only: bool = True,
+    class_id: Optional[int] = None,
+) -> None:
+    prompt_list = list(prompts)
+    if not prompt_list:
+        return
+
+    prompt_ids = [prompt.prompt_id for prompt in prompt_list]
+    query = (
+        db.query(PromptShare.prompt_id, PromptShare.class_id)
+        .filter(PromptShare.prompt_id.in_(prompt_ids))
+    )
+    if active_only:
+        query = query.filter(PromptShare.is_active.is_(True))
+    if class_id is not None:
+        query = query.filter(PromptShare.class_id == class_id)
+
+    class_map: dict[int, list[int]] = {pid: [] for pid in prompt_ids}
+    for prompt_id, class_id_row in query.all():
+        class_map.setdefault(prompt_id, []).append(class_id_row)
+
+    for prompt in prompt_list:
+        setattr(prompt, "class_ids", class_map.get(prompt.prompt_id, []))
+
+
 def ensure_my_prompt(db: Session, prompt_id: int, me: AppUser) -> AIPrompt:
     """
     현재 로그인 유저(me)가 소유한 프롬프트인지 검증 후 반환.
@@ -107,7 +136,14 @@ def list_shared_prompts_for_class(
     # 레거시 중복 데이터 대비(원칙상 uq(prompt_id,class_id)면 중복 없어야 함)
     q = q.distinct(AIPrompt.prompt_id)
 
-    return q.all()
+    prompts = q.all()
+    _attach_shared_class_ids(
+        db,
+        prompts=prompts,
+        active_only=active_only,
+        class_id=class_id,
+    )
+    return prompts
 
 
 # =========================================
@@ -150,6 +186,7 @@ def list_my_prompts(
         offset=offset,
         q=q,
     )
+    _attach_shared_class_ids(db, prompts=items, active_only=True)
     return total, items
 
 
@@ -162,7 +199,9 @@ def get_my_prompt(
     """
     단일 프롬프트 조회 (소유자 검증 포함).
     """
-    return ensure_my_prompt(db, prompt_id, me)
+    prompt = ensure_my_prompt(db, prompt_id, me)
+    _attach_shared_class_ids(db, prompts=[prompt], active_only=True)
+    return prompt
 
 
 def update_my_prompt(
@@ -188,6 +227,17 @@ def update_my_prompt(
             detail="해당 프롬프트를 찾을 수 없거나 권한이 없어.",
         )
     return prompt
+
+
+def delete_my_prompt(
+    db: Session,
+    *,
+    me: AppUser,
+    prompt_id: int,
+) -> None:
+    prompt = ensure_my_prompt(db, prompt_id, me)
+    ai_prompt_crud.remove(db, db_obj=prompt)
+    db.commit()
 
 
 # =========================================

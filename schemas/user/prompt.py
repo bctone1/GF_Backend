@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 
 from pydantic import ConfigDict
 
@@ -45,6 +45,7 @@ class AIPromptResponse(ORMBase):
 
     prompt_id: int
     owner_id: int
+    class_ids: List[int] = []
     name: str
     role_description: Optional[str] = None
     system_prompt: str
