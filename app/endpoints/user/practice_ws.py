@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
@@ -80,6 +81,10 @@ async def ws_run_practice_turn_new_session(
     queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     executor = ThreadPoolExecutor(max_workers=len(models))
 
+    # datetime 등 비-JSON 타입 포함 시에도 send_json이 실패하지 않도록 보강
+    async def _send_json(payload: Dict[str, Any]) -> None:
+        await websocket.send_json(jsonable_encoder(payload))
+
     def _run_model_stream(model) -> None:
         try:
             for event in iter_practice_model_stream_events(
@@ -117,7 +122,7 @@ async def ws_run_practice_turn_new_session(
     try:
         while done_count < len(models):
             msg = await queue.get()
-            await websocket.send_json(msg)
+            await _send_json(msg)
             if msg.get("event") in {"done", "error"}:
                 done_count += 1
     except WebSocketDisconnect:
@@ -127,4 +132,4 @@ async def ws_run_practice_turn_new_session(
     finally:
         executor.shutdown(wait=False)
 
-    await websocket.send_json({"event": "all_done", "session_id": session.session_id})
+    await _send_json({"event": "all_done", "session_id": session.session_id})
