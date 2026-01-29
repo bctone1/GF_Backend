@@ -224,7 +224,7 @@ def update_my_prompt(
     if prompt is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="해당 프롬프트를 찾을 수 없거나 권한이 없어.",
+            detail="해당 프롬프트를 찾을 수 없거나 권한 없음",
         )
     return prompt
 
@@ -287,21 +287,21 @@ def fork_shared_prompt_to_my_prompt(
     if src_prompt is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="원본 프롬프트를 찾을 수 없어.",
+            detail="원본 프롬프트를 찾을 수 없음.",
         )
 
     # 3-1) 원본 프롬프트가 비활성이면 포크 불가(목록 정책과 동일하게)
     if not bool(src_prompt.is_active):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="원본 프롬프트가 비활성 상태라서 복제할 수 없어.",
+            detail="원본 프롬프트가 비활성 상태라서 복제할 수 없음.",
         )
 
     # 4) 원본 프롬프트 존재 확인(모델상 not-null이지만, 레거시 데이터 방어)
     if not (src_prompt.system_prompt or "").strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="원본 프롬프트에 system_prompt가 비어있어.",
+            detail="원본 프롬프트에 system_prompt가 비어있음",
         )
 
     # 5) 새 프롬프트 생성 (owner_id = me.user_id)

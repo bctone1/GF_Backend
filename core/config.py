@@ -71,14 +71,14 @@ OPENAI_MODELS = os.getenv("OPENAI_MODELS", "gpt-4o-mini,gpt-5-mini,gpt-3.5-turbo
 CLAUDE_MODELS = os.getenv("CLAUDE_MODELS", "")
 ANTHROPIC_MODELS = os.getenv("ANTHROPIC_MODELS", "")
 GOOGLE_MODELS = os.getenv("GOOGLE_MODELS", "")
-FRIENDLI_MODELS = os.getenv("FRIENDLI_MODELS", "")
+FRIENDLI_MODELS = os.getenv("FRIENDLI_MODELS", "LGAI-EXAONE/K-EXAONE-236B-A23B")
 DEFAULT_CHAT_MODEL = os.getenv("DEFAULT_CHAT_MODEL", "gpt-4o-mini")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
 LLM_MODEL = os.getenv("LLM_MODEL", DEFAULT_CHAT_MODEL)
 
 # 9) 엔드포인트
 EXAONE_ENDPOINT = os.getenv("EXAONE_ENDPOINT")
-EXAONE_URL = os.getenv("EXAONE_URL", "https://api.friendli.ai/dedicated/v1")
+EXAONE_URL = os.getenv("EXAONE_URL", "https://api.friendli.ai/serverless/v1")
 
 # 10) 관리자·문자
 COOL_SMS_API = os.getenv("COOL_SMS_API")
@@ -193,6 +193,13 @@ PRACTICE_MODELS = {
         "enabled": True,
         "default": False,
     },
+    "LGAI-EXAONE/K-EXAONE-236B-A23B": {
+        "provider": "friendli",
+        "model_name": "LGAI-EXAONE/K-EXAONE-236B-A23B",
+        "display_name": "EXAONE 236B A23B (Friendli)",
+        "enabled": True,
+        "default": False,
+    },
 }
 
 # 16) LLM TUNING
@@ -200,7 +207,7 @@ PRACTICE_DEFAULT_GENERATION = {
     "temperature": 0.7,
     "top_p": 0.9,
     "response_length_preset": None,
-    "max_completion_tokens": 20480,
+    "max_completion_tokens": 10240,
 }
 
 RESPONSE_LENGTH_PRESETS = {
