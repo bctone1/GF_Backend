@@ -151,12 +151,34 @@ def _extract_text_from_openai_chat(resp: Any, model_name: str) -> str:
             return
 
         if isinstance(obj, dict):
-            for key in ("text", "content", "output_text", "value"):
+            before = len(buf)
+
+            # ✅ Friendli/EXAONE에서 자주 나오는 키들 추가
+            for key in (
+                    "text", "content", "output_text", "value",
+                    "final", "answer", "completion", "generated_text",
+                    "reasoning", "thinking",
+            ):
                 if key in obj:
                     _collect_text(obj[key], buf, depth + 1, max_depth)
+
+
+            if len(buf) == before:
+                for k, v in obj.items():
+                    if k in {"id", "object", "model", "role", "type", "index", "finish_reason", "logprobs"}:
+                        continue
+                    _collect_text(v, buf, depth + 1, max_depth)
             return
 
-        for attr in ("text", "content", "output_text", "value"):
+        # SDK 객체인 경우, model_dump()가 있으면 dict로 풀어서 한 번 더 훑기
+        if hasattr(obj, "model_dump"):
+            try:
+                _collect_text(obj.model_dump(exclude_none=True), buf, depth + 1, max_depth)
+                return
+            except Exception:
+                pass
+
+        for attr in ("text", "content", "output_text", "value", "reasoning", "thinking"):
             if hasattr(obj, attr):
                 try:
                     val = getattr(obj, attr)
@@ -170,7 +192,7 @@ def _extract_text_from_openai_chat(resp: Any, model_name: str) -> str:
     choice = resp.choices[0]
     message = getattr(choice, "message", None)
     if message is None:
-        return ""
+        message = getattr(choice, "delta", None)
 
     collected: List[str] = []
 
@@ -191,6 +213,16 @@ def _extract_text_from_openai_chat(resp: Any, model_name: str) -> str:
             _collect_text(msg_dict, collected)
 
     if not collected:
+        choice_dict = None
+        try:
+            choice_dict = choice.model_dump(exclude_none=True)
+        except Exception:
+            if isinstance(choice, dict):
+                choice_dict = choice
+        if isinstance(choice_dict, dict):
+            _collect_text(choice_dict, collected)
+
+    if not collected:
         resp_dict = None
         try:
             resp_dict = resp.model_dump(exclude_none=True)  # type: ignore[attr-defined]
@@ -198,7 +230,7 @@ def _extract_text_from_openai_chat(resp: Any, model_name: str) -> str:
             if isinstance(resp, dict):
                 resp_dict = resp
         if isinstance(resp_dict, dict):
-            _collect_text(resp_dict, collected)
+            _collect_text(resp_dict.get("choices") or resp_dict, collected)
 
     text = "\n".join(collected).strip()
     return text
