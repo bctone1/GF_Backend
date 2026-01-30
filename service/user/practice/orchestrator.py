@@ -153,6 +153,8 @@ def prepare_practice_turn_for_session(
             if not picked:
                 raise HTTPException(status_code=400, detail="requested model_names not configured for this class")
             models = picked
+            if not any(m.is_primary for m in models):
+                models[0].is_primary = True
 
         ctx_knowledge_ids = get_session_knowledge_ids(session)
 
