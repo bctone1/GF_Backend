@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from core.deps import get_current_user_ws, get_db
 from models.user.account import AppUser
-from schemas.user.practice import PracticeTurnRequestNewSession
+from schemas.user.practice import PracticeTurnRequestExistingSession, PracticeTurnRequestNewSession
 from service.user.practice.orchestrator import prepare_practice_turn_for_session
 from service.user.practice.turn_runner import iter_practice_model_stream_events
 
@@ -116,6 +116,109 @@ async def ws_run_practice_turn_new_session(
                 ),
                 requested_style_preset=body.style_preset,
                 requested_style_params=body.style_params,
+            ):
+                loop.call_soon_threadsafe(queue.put_nowait, event)
+        except Exception as exc:
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {
+                    "event": "error",
+                    "session_id": session.session_id,
+                    "model_name": getattr(model, "model_name", None),
+                    "detail": str(exc),
+                },
+            )
+
+    futures = [loop.run_in_executor(executor, _run_model_stream, model) for model in models]
+
+    done_count = 0
+    try:
+        while done_count < len(models):
+            msg = await queue.get()
+            await _send_json(msg)
+            if msg.get("event") in {"done", "error"}:
+                done_count += 1
+    except WebSocketDisconnect:
+        for future in futures:
+            future.cancel()
+        return
+    finally:
+        executor.shutdown(wait=False)
+
+    await _send_json({"event": "all_done", "session_id": session.session_id})
+
+
+@router.websocket("/ws/sessions/{session_id}/run")
+async def ws_run_practice_turn_existing_session(
+    websocket: WebSocket,
+    session_id: int,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user_ws),
+) -> None:
+    await websocket.accept()
+
+    if session_id < 1:
+        await websocket.send_json({"event": "error", "detail": "session_id_required"})
+        return
+
+    try:
+        payload = await websocket.receive_json()
+    except Exception as exc:
+        await websocket.send_json({"event": "error", "detail": f"invalid_payload: {exc}"})
+        return
+
+    try:
+        body = PracticeTurnRequestExistingSession.model_validate(payload)
+    except ValidationError as exc:
+        await websocket.send_json(
+            {"event": "error", "detail": "invalid_payload", "errors": exc.errors()}
+        )
+        return
+
+    session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+        db=db,
+        me=me,
+        session_id=session_id,
+        class_id=None,
+        body=body,
+    )
+
+    if not models:
+        await websocket.send_json({"event": "error", "detail": "no_models_available"})
+        return
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    executor = ThreadPoolExecutor(max_workers=len(models))
+
+    async def _send_json(payload: Dict[str, Any]) -> None:
+        for attempt in range(WS_SEND_MAX_RETRIES + 1):
+            try:
+                await websocket.send_json(jsonable_encoder(payload))
+                return
+            except WebSocketDisconnect:
+                if attempt >= WS_SEND_MAX_RETRIES:
+                    raise
+                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
+            except RuntimeError:
+                if attempt >= WS_SEND_MAX_RETRIES:
+                    raise
+                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
+
+    def _run_model_stream(model) -> None:
+        try:
+            for event in iter_practice_model_stream_events(
+                session=session,
+                settings=settings,
+                model=model,
+                prompt_text=body.prompt_text,
+                user=me,
+                knowledge_ids=ctx_knowledge_ids,
+                generate_title=False,
+                requested_prompt_ids=None,
+                requested_generation_params=None,
+                requested_style_preset=None,
+                requested_style_params=None,
             ):
                 loop.call_soon_threadsafe(queue.put_nowait, event)
         except Exception as exc:
