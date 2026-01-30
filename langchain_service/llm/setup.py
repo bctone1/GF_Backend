@@ -629,7 +629,7 @@ def call_llm_chat(
         **lc_kwargs,
     )
 
-    # ✅ messages를 문자열로 뭉개지 말고 chat 메시지로 호출(정확도/일관성 + 스트리밍 호환)
+    # messages를 문자열로 뭉개지 말고 chat 메시지로 호출(정확도/일관성 + 스트리밍 호환)
     lc_messages = _to_lc_messages(messages)
 
     try:
@@ -711,8 +711,16 @@ def get_llm(
         if not key:
             raise RuntimeError("OPENAI_API/OPENAI_API_KEY가 설정되지 않았습니다.")
 
-        filtered = _filter_kwargs_for(ChatOpenAI, dict(kwargs))
-        cache_key = ("openai", resolved_model, key, float(temperature), streaming, tuple(sorted(filtered.items())))
+        raw_kwargs = dict(kwargs)
+        filtered = _filter_kwargs_for(ChatOpenAI, dict(raw_kwargs))
+        if "max_tokens" in raw_kwargs and "max_tokens" not in filtered:
+            model_kwargs = dict(filtered.get("model_kwargs") or {})
+            model_kwargs.setdefault("max_tokens", raw_kwargs.get("max_tokens"))
+            filtered["model_kwargs"] = model_kwargs
+        cache_filtered = dict(filtered)
+        if isinstance(cache_filtered.get("model_kwargs"), dict):
+            cache_filtered["model_kwargs"] = tuple(sorted(cache_filtered["model_kwargs"].items()))
+        cache_key = ("openai", resolved_model, key, float(temperature), streaming, tuple(sorted(cache_filtered.items())))
 
         with _LLM_CACHE_LOCK:
             cached = _LLM_CACHE.get(cache_key)
@@ -746,10 +754,18 @@ def get_llm(
 
         base_url = getattr(config, "FRIENDLI_BASE_URL", None) or getattr(config, "EXAONE_URL", None)
 
-        filtered = _filter_kwargs_for(ChatOpenAI, _friendli_extra_body(resolved_model, dict(kwargs)))
+        raw_kwargs = _friendli_extra_body(resolved_model, dict(kwargs))
+        filtered = _filter_kwargs_for(ChatOpenAI, dict(raw_kwargs))
+        if "max_tokens" in raw_kwargs and "max_tokens" not in filtered:
+            model_kwargs = dict(filtered.get("model_kwargs") or {})
+            model_kwargs.setdefault("max_tokens", raw_kwargs.get("max_tokens"))
+            filtered["model_kwargs"] = model_kwargs
         for k in ("temperature", "top_p"):
             filtered.pop(k, None)
-        cache_key = ("friendli", resolved_model, key, base_url, "fixed_sampling", streaming, tuple(sorted(filtered.items())))
+        cache_filtered = dict(filtered)
+        if isinstance(cache_filtered.get("model_kwargs"), dict):
+            cache_filtered["model_kwargs"] = tuple(sorted(cache_filtered["model_kwargs"].items()))
+        cache_key = ("friendli", resolved_model, key, base_url, "fixed_sampling", streaming, tuple(sorted(cache_filtered.items())))
 
         with _LLM_CACHE_LOCK:
             cached = _LLM_CACHE.get(cache_key)
