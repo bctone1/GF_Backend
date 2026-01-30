@@ -25,78 +25,39 @@ WS_SEND_MAX_RETRIES = 2
 WS_SEND_RETRY_BACKOFF_S = 0.2
 
 
-@router.websocket("/ws/sessions/run")
-async def ws_run_practice_turn_new_session(
+async def _send_json(websocket: WebSocket, payload: Dict[str, Any]) -> None:
+    for attempt in range(WS_SEND_MAX_RETRIES + 1):
+        try:
+            await websocket.send_json(jsonable_encoder(payload))
+            return
+        except WebSocketDisconnect:
+            if attempt >= WS_SEND_MAX_RETRIES:
+                raise
+            await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
+        except RuntimeError:
+            if attempt >= WS_SEND_MAX_RETRIES:
+                raise
+            await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
+
+
+async def _run_practice_turn(
+    *,
     websocket: WebSocket,
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user_ws),
+    session,
+    settings,
+    models,
+    prompt_text: str,
+    user: AppUser,
+    knowledge_ids: list[int],
+    generate_title: bool,
+    requested_prompt_ids: list[int] | None,
+    requested_generation_params: Dict[str, Any] | None,
+    requested_style_preset: str | None,
+    requested_style_params: Dict[str, Any] | None,
 ) -> None:
-    await websocket.accept()
-
-    try:
-        payload = await websocket.receive_json()
-    except Exception as exc:
-        await websocket.send_json({"event": "error", "detail": f"invalid_payload: {exc}"})
-        return
-
-    class_id = payload.get("class_id")
-    if not isinstance(class_id, int) or class_id < 1:
-        await websocket.send_json({"event": "error", "detail": "class_id_required"})
-        return
-
-    payload_body = dict(payload)
-    payload_body.pop("class_id", None)
-    try:
-        body = PracticeTurnRequestNewSession.model_validate(payload_body)
-    except ValidationError as exc:
-        await websocket.send_json(
-            {"event": "error", "detail": "invalid_payload", "errors": exc.errors()}
-        )
-        return
-
-    if body.model_names and len(body.model_names) > 3:
-        await websocket.send_json({"event": "error", "detail": "max_3_models_per_session"})
-        return
-
-    if body.few_shot_example_ids:
-        _validate_my_few_shot_example_ids(
-            db,
-            me=me,
-            example_ids=[int(x) for x in body.few_shot_example_ids],
-        )
-
-    session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
-        db=db,
-        me=me,
-        session_id=0,
-        class_id=class_id,
-        body=body,
-    )
-
-    if not models:
-        await websocket.send_json({"event": "error", "detail": "no_models_available"})
-        return
-    if len(models) > 3:
-        await websocket.send_json({"event": "error", "detail": "max_3_models_per_session"})
-        return
-
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     executor = ThreadPoolExecutor(max_workers=len(models))
-
-    async def _send_json(payload: Dict[str, Any]) -> None:
-        for attempt in range(WS_SEND_MAX_RETRIES + 1):
-            try:
-                await websocket.send_json(jsonable_encoder(payload))
-                return
-            except WebSocketDisconnect:
-                if attempt >= WS_SEND_MAX_RETRIES:
-                    raise
-                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
-            except RuntimeError:
-                if attempt >= WS_SEND_MAX_RETRIES:
-                    raise
-                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
 
     def _run_model_stream(model) -> None:
         try:
@@ -104,18 +65,14 @@ async def ws_run_practice_turn_new_session(
                 session=session,
                 settings=settings,
                 model=model,
-                prompt_text=body.prompt_text,
-                user=me,
-                knowledge_ids=ctx_knowledge_ids,
-                generate_title=True,
-                requested_prompt_ids=body.prompt_ids,
-                requested_generation_params=(
-                    body.generation_params.model_dump(exclude_unset=True)
-                    if body.generation_params is not None
-                    else None
-                ),
-                requested_style_preset=body.style_preset,
-                requested_style_params=body.style_params,
+                prompt_text=prompt_text,
+                user=user,
+                knowledge_ids=knowledge_ids,
+                generate_title=generate_title,
+                requested_prompt_ids=requested_prompt_ids,
+                requested_generation_params=requested_generation_params,
+                requested_style_preset=requested_style_preset,
+                requested_style_params=requested_style_params,
             ):
                 loop.call_soon_threadsafe(queue.put_nowait, event)
         except Exception as exc:
@@ -135,17 +92,135 @@ async def ws_run_practice_turn_new_session(
     try:
         while done_count < len(models):
             msg = await queue.get()
-            await _send_json(msg)
+            await _send_json(websocket, msg)
             if msg.get("event") in {"done", "error"}:
                 done_count += 1
     except WebSocketDisconnect:
         for future in futures:
             future.cancel()
-        return
+        raise
     finally:
         executor.shutdown(wait=False)
 
-    await _send_json({"event": "all_done", "session_id": session.session_id})
+    await _send_json(websocket, {"event": "done", "session_id": session.session_id})
+
+
+@router.websocket("/ws/sessions/run")
+async def ws_run_practice_turn_new_session(
+    websocket: WebSocket,
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user_ws),
+) -> None:
+    await websocket.accept()
+
+    session_id: int | None = None
+    while True:
+        try:
+            payload = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            await _send_json(websocket, {"event": "error", "detail": f"invalid_payload: {exc}"})
+            continue
+
+        if session_id is None:
+            class_id = payload.get("class_id")
+            if not isinstance(class_id, int) or class_id < 1:
+                await _send_json(websocket, {"event": "error", "detail": "class_id_required"})
+                continue
+
+            payload_body = dict(payload)
+            payload_body.pop("class_id", None)
+            try:
+                body = PracticeTurnRequestNewSession.model_validate(payload_body)
+            except ValidationError as exc:
+                await _send_json(
+                    websocket,
+                    {"event": "error", "detail": "invalid_payload", "errors": exc.errors()},
+                )
+                continue
+
+            if body.model_names and len(body.model_names) > 3:
+                await _send_json(websocket, {"event": "error", "detail": "max_3_models_per_session"})
+                continue
+
+            if body.few_shot_example_ids:
+                _validate_my_few_shot_example_ids(
+                    db,
+                    me=me,
+                    example_ids=[int(x) for x in body.few_shot_example_ids],
+                )
+
+            session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+                db=db,
+                me=me,
+                session_id=0,
+                class_id=class_id,
+                body=body,
+            )
+            session_id = session.session_id
+            generate_title = True
+            requested_prompt_ids = body.prompt_ids
+            requested_generation_params = (
+                body.generation_params.model_dump(exclude_unset=True)
+                if body.generation_params is not None
+                else None
+            )
+            requested_style_preset = body.style_preset
+            requested_style_params = body.style_params
+            prompt_text = body.prompt_text
+        else:
+            payload_body = {
+                "prompt_text": payload.get("prompt_text"),
+                "model_names": payload.get("model_names"),
+            }
+            try:
+                body = PracticeTurnRequestExistingSession.model_validate(payload_body)
+            except ValidationError as exc:
+                await _send_json(
+                    websocket,
+                    {"event": "error", "detail": "invalid_payload", "errors": exc.errors()},
+                )
+                continue
+
+            session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+                db=db,
+                me=me,
+                session_id=session_id,
+                class_id=None,
+                body=body,
+            )
+            generate_title = False
+            requested_prompt_ids = None
+            requested_generation_params = None
+            requested_style_preset = None
+            requested_style_params = None
+            prompt_text = body.prompt_text
+
+        if not models:
+            await _send_json(websocket, {"event": "error", "detail": "no_models_available"})
+            continue
+        if len(models) > 3:
+            await _send_json(websocket, {"event": "error", "detail": "max_3_models_per_session"})
+            continue
+
+        try:
+            await _run_practice_turn(
+                websocket=websocket,
+                session=session,
+                settings=settings,
+                models=models,
+                prompt_text=prompt_text,
+                user=me,
+                knowledge_ids=ctx_knowledge_ids,
+                generate_title=generate_title,
+                requested_prompt_ids=requested_prompt_ids,
+                requested_generation_params=requested_generation_params,
+                requested_style_preset=requested_style_preset,
+                requested_style_params=requested_style_params,
+            )
+        except WebSocketDisconnect:
+            return
 
 
 @router.websocket("/ws/sessions/{session_id}/run")
@@ -158,59 +233,49 @@ async def ws_run_practice_turn_existing_session(
     await websocket.accept()
 
     if session_id < 1:
-        await websocket.send_json({"event": "error", "detail": "session_id_required"})
+        await _send_json(websocket, {"event": "error", "detail": "session_id_required"})
         return
 
-    try:
-        payload = await websocket.receive_json()
-    except Exception as exc:
-        await websocket.send_json({"event": "error", "detail": f"invalid_payload: {exc}"})
-        return
-
-    try:
-        body = PracticeTurnRequestExistingSession.model_validate(payload)
-    except ValidationError as exc:
-        await websocket.send_json(
-            {"event": "error", "detail": "invalid_payload", "errors": exc.errors()}
-        )
-        return
-
-    session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
-        db=db,
-        me=me,
-        session_id=session_id,
-        class_id=None,
-        body=body,
-    )
-
-    if not models:
-        await websocket.send_json({"event": "error", "detail": "no_models_available"})
-        return
-
-    loop = asyncio.get_running_loop()
-    queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
-    executor = ThreadPoolExecutor(max_workers=len(models))
-
-    async def _send_json(payload: Dict[str, Any]) -> None:
-        for attempt in range(WS_SEND_MAX_RETRIES + 1):
-            try:
-                await websocket.send_json(jsonable_encoder(payload))
-                return
-            except WebSocketDisconnect:
-                if attempt >= WS_SEND_MAX_RETRIES:
-                    raise
-                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
-            except RuntimeError:
-                if attempt >= WS_SEND_MAX_RETRIES:
-                    raise
-                await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
-
-    def _run_model_stream(model) -> None:
+    while True:
         try:
-            for event in iter_practice_model_stream_events(
+            payload = await websocket.receive_json()
+        except WebSocketDisconnect:
+            return
+        except Exception as exc:
+            await _send_json(websocket, {"event": "error", "detail": f"invalid_payload: {exc}"})
+            continue
+
+        payload_body = {
+            "prompt_text": payload.get("prompt_text"),
+            "model_names": payload.get("model_names"),
+        }
+        try:
+            body = PracticeTurnRequestExistingSession.model_validate(payload_body)
+        except ValidationError as exc:
+            await _send_json(
+                websocket,
+                {"event": "error", "detail": "invalid_payload", "errors": exc.errors()},
+            )
+            continue
+
+        session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+            db=db,
+            me=me,
+            session_id=session_id,
+            class_id=None,
+            body=body,
+        )
+
+        if not models:
+            await _send_json(websocket, {"event": "error", "detail": "no_models_available"})
+            continue
+
+        try:
+            await _run_practice_turn(
+                websocket=websocket,
                 session=session,
                 settings=settings,
-                model=model,
+                models=models,
                 prompt_text=body.prompt_text,
                 user=me,
                 knowledge_ids=ctx_knowledge_ids,
@@ -219,33 +284,6 @@ async def ws_run_practice_turn_existing_session(
                 requested_generation_params=None,
                 requested_style_preset=None,
                 requested_style_params=None,
-            ):
-                loop.call_soon_threadsafe(queue.put_nowait, event)
-        except Exception as exc:
-            loop.call_soon_threadsafe(
-                queue.put_nowait,
-                {
-                    "event": "error",
-                    "session_id": session.session_id,
-                    "model_name": getattr(model, "model_name", None),
-                    "detail": str(exc),
-                },
             )
-
-    futures = [loop.run_in_executor(executor, _run_model_stream, model) for model in models]
-
-    done_count = 0
-    try:
-        while done_count < len(models):
-            msg = await queue.get()
-            await _send_json(msg)
-            if msg.get("event") in {"done", "error"}:
-                done_count += 1
-    except WebSocketDisconnect:
-        for future in futures:
-            future.cancel()
-        return
-    finally:
-        executor.shutdown(wait=False)
-
-    await _send_json({"event": "all_done", "session_id": session.session_id})
+        except WebSocketDisconnect:
+            return
