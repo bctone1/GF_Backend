@@ -315,6 +315,30 @@ def _extract_text_from_response(resp: Any) -> str:
     return "\n\n".join(buf).strip()
 
 
+def _friendli_extra_body(model_name: str, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Friendli EXAONE 전용 extra_body 기본값 주입.
+    - 호출자가 extra_body를 이미 넣었다면 덮어쓰지 않음.
+    """
+    if "extra_body" in kwargs:
+        return kwargs
+
+    model_lower = model_name.lower()
+    if "exaone" not in model_lower:
+        return kwargs
+
+    extra_body = {
+        "parse_reasoning": True,
+        "chat_template_kwargs": {
+            "enable_thinking": True,
+        },
+    }
+
+    updated = dict(kwargs)
+    updated["extra_body"] = extra_body
+    return updated
+
+
 def _get_openai_client_cached(
     *,
     api_key: str,
@@ -521,9 +545,9 @@ def call_llm_chat(
             max_retries=max_retries,
         )
 
-        base_kwargs: Dict[str, Any] = dict(kwargs)
-        if "temperature" not in base_kwargs and temperature is not None:
-            base_kwargs["temperature"] = temperature
+        base_kwargs: Dict[str, Any] = _friendli_extra_body(resolved_model, dict(kwargs))
+        for k in ("temperature", "top_p"):
+            base_kwargs.pop(k, None)
         if max_tokens is not None:
             base_kwargs["max_tokens"] = max_tokens
 
@@ -690,21 +714,23 @@ def get_llm(
 
         base_url = getattr(config, "FRIENDLI_BASE_URL", None) or getattr(config, "EXAONE_URL", None)
 
-        filtered = _filter_kwargs_for(ChatOpenAI, dict(kwargs))
-        cache_key = ("friendli", resolved_model, key, base_url, float(temperature), streaming, tuple(sorted(filtered.items())))
+        filtered = _filter_kwargs_for(ChatOpenAI, _friendli_extra_body(resolved_model, dict(kwargs)))
+        for k in ("temperature", "top_p"):
+            filtered.pop(k, None)
+        cache_key = ("friendli", resolved_model, key, base_url, "fixed_sampling", streaming, tuple(sorted(filtered.items())))
 
         with _LLM_CACHE_LOCK:
             cached = _LLM_CACHE.get(cache_key)
             if cached is not None:
                 return cached
 
-        llm = ChatOpenAI(
+        llm_kwargs = dict(
             model=resolved_model,
             api_key=key,
             base_url=base_url,
-            temperature=temperature,
             **filtered,
         )
+        llm = ChatOpenAI(**llm_kwargs)
 
         with _LLM_CACHE_LOCK:
             _LLM_CACHE[cache_key] = llm
