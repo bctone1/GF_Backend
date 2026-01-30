@@ -166,7 +166,7 @@ def run_practice_comparison_turn(
                 prompt_text=body.prompt_text,
                 model_names=body.model_names,
                 # 비교 실행에서는 prompt_id/project_id를 안 쓰는 구조라면 None으로
-                prompt_id=None,
+                # prompt_id=None,
                 project_id=None,
                 knowledge_ids=body.knowledge_ids or [],
             ),
