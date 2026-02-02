@@ -6,8 +6,15 @@ from typing import Optional, Sequence, Tuple, Any, Mapping, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from models.user.fewshot import UserFewShotExample
-from schemas.user.fewshot import UserFewShotExampleCreate, UserFewShotExampleUpdate
+from sqlalchemy.exc import IntegrityError
+
+from models.user.fewshot import UserFewShotExample, FewShotShare
+from schemas.user.fewshot import (
+    UserFewShotExampleCreate,
+    UserFewShotExampleUpdate,
+    FewShotShareCreate,
+    FewShotShareUpdate,
+)
 
 
 def _coerce_dict(value: Any) -> dict[str, Any]:
@@ -23,6 +30,7 @@ class UserFewShotExampleCRUD:
             title=data.title,
             input_text=data.input_text,
             output_text=data.output_text,
+            template_source=data.template_source,
             meta=_coerce_dict(data.meta),
             is_active=data.is_active if data.is_active is not None else True,
         )
@@ -92,3 +100,116 @@ class UserFewShotExampleCRUD:
 
 
 user_few_shot_example_crud = UserFewShotExampleCRUD()
+
+
+class FewShotShareCRUD:
+    def create(
+        self,
+        db: Session,
+        *,
+        obj_in: FewShotShareCreate,
+        shared_by_user_id: int,
+    ) -> FewShotShare:
+        data = obj_in.model_dump(exclude_unset=True)
+        if data.get("is_active", "__missing__") is None:
+            data.pop("is_active", None)
+
+        db_obj = FewShotShare(shared_by_user_id=shared_by_user_id, **data)
+        db.add(db_obj)
+        db.commit()
+        db.refresh(db_obj)
+        return db_obj
+
+    def get_by_example_and_class(
+        self,
+        db: Session,
+        *,
+        example_id: int,
+        class_id: int,
+    ) -> Optional[FewShotShare]:
+        return (
+            db.query(FewShotShare)
+            .filter(
+                FewShotShare.example_id == example_id,
+                FewShotShare.class_id == class_id,
+            )
+            .first()
+        )
+
+    def list_by_example(
+        self,
+        db: Session,
+        *,
+        example_id: int,
+        active_only: bool = True,
+    ) -> Sequence[FewShotShare]:
+        query = db.query(FewShotShare).filter(FewShotShare.example_id == example_id)
+        if active_only:
+            query = query.filter(FewShotShare.is_active.is_(True))
+        return query.order_by(FewShotShare.created_at.desc()).all()
+
+    def list_by_class(
+        self,
+        db: Session,
+        *,
+        class_id: int,
+        active_only: bool = True,
+    ) -> Sequence[FewShotShare]:
+        query = db.query(FewShotShare).filter(FewShotShare.class_id == class_id)
+        if active_only:
+            query = query.filter(FewShotShare.is_active.is_(True))
+        return query.order_by(FewShotShare.created_at.desc()).all()
+
+    def set_active(
+        self,
+        db: Session,
+        *,
+        share: FewShotShare,
+        is_active: bool,
+    ) -> FewShotShare:
+        share.is_active = is_active
+        db.add(share)
+        db.commit()
+        db.refresh(share)
+        return share
+
+    def get_or_create(
+        self,
+        db: Session,
+        *,
+        obj_in: FewShotShareCreate,
+        shared_by_user_id: int,
+    ) -> FewShotShare:
+        existing = self.get_by_example_and_class(
+            db,
+            example_id=obj_in.example_id,
+            class_id=obj_in.class_id,
+        )
+        if existing:
+            if not existing.is_active:
+                existing.is_active = True
+                db.add(existing)
+                db.commit()
+                db.refresh(existing)
+            return existing
+
+        try:
+            return self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+        except IntegrityError:
+            db.rollback()
+            again = self.get_by_example_and_class(
+                db,
+                example_id=obj_in.example_id,
+                class_id=obj_in.class_id,
+            )
+            if again is None:
+                raise
+            if not again.is_active:
+                again.is_active = True
+                db.add(again)
+                db.commit()
+                db.refresh(again)
+            return again
+
+
+few_shot_share_crud = FewShotShareCRUD()
