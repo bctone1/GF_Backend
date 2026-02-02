@@ -30,7 +30,7 @@ class UserFewShotExampleCRUD:
             title=data.title,
             input_text=data.input_text,
             output_text=data.output_text,
-            template_source=data.template_source,
+            fewshot_source=data.fewshot_source,
             meta=_coerce_dict(data.meta),
             is_active=data.is_active if data.is_active is not None else True,
         )

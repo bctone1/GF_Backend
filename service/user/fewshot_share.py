@@ -189,7 +189,7 @@ def fork_shared_few_shot_example(
         title=src_example.title,
         input_text=src_example.input_text,
         output_text=src_example.output_text,
-        template_source="class_shared",
+        fewshot_source="class_shared",
         meta=src_example.meta or {},
         is_active=True,
     )

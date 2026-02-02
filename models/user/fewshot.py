@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     ForeignKey,
     Index,
+    CheckConstraint,
     UniqueConstraint,
     text,
 )
@@ -35,7 +36,7 @@ class UserFewShotExample(Base):
     input_text = Column(Text, nullable=False)
     output_text = Column(Text, nullable=False)
 
-    template_source = Column(Text, nullable=True)
+    fewshot_source = Column(Text, nullable=True)
 
     meta = Column(
         JSONB,
@@ -57,6 +58,10 @@ class UserFewShotExample(Base):
 
     __table_args__ = (
         Index("idx_few_shot_examples_user", "user_id"),
+        CheckConstraint(
+            "fewshot_source in ('user_fewshot', 'class_shared', 'partner_fewshot')",
+            name="ck_few_shot_examples_fewshot_source",
+        ),
         {"schema": "user"},
     )
 

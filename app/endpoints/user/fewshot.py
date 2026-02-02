@@ -46,6 +46,10 @@ def list_my_few_shot_examples(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    내 few-shot 목록 조회.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     rows, total = user_few_shot_example_crud.list_by_user(
         db,
         user_id=me.user_id,
@@ -70,6 +74,10 @@ def create_my_few_shot_example(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    내 few-shot 생성.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     obj = user_few_shot_example_crud.create(db, user_id=me.user_id, data=data)
     db.commit()
     attach_class_ids_to_examples(db, examples=[obj], active_only=True)
@@ -87,6 +95,10 @@ def get_my_few_shot_example(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    내 few-shot 단건 조회.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     obj = ensure_my_few_shot_example(db, example_id=example_id, me=me)
     attach_class_ids_to_examples(db, examples=[obj], active_only=True)
     return UserFewShotExampleResponse.model_validate(obj)
@@ -104,6 +116,10 @@ def update_my_few_shot_example(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    내 few-shot 수정.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     _ = ensure_my_few_shot_example(db, example_id=example_id, me=me)
     obj = user_few_shot_example_crud.update(db, example_id=example_id, data=data)
     db.commit()
@@ -152,6 +168,10 @@ def list_shared_few_shot_examples_for_class_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    강의실 기준 공유 few-shot 조회.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     examples = list_shared_few_shot_examples_for_class(
         db=db,
         class_id=class_id,
@@ -181,6 +201,10 @@ def fork_shared_few_shot_example_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    공유 few-shot을 내 few-shot으로 복제.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     new_example = fork_shared_few_shot_example(
         db=db,
         example_id=example_id,
@@ -215,6 +239,10 @@ def share_few_shot_example_to_class_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    강사용: 내 few-shot을 특정 class에 공유.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     share = share_few_shot_example_to_class(
         db=db,
         example_id=example_id,
@@ -244,6 +272,10 @@ def deactivate_few_shot_share_endpoint(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
+    """
+    공유 few-shot 해제.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
     share = deactivate_few_shot_share(
         db=db,
         example_id=example_id,
