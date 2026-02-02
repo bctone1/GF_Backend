@@ -49,6 +49,7 @@ import models.user.project
 import models.user.document
 import models.user.prompt
 import models.user.practice
+import models.user.fewshot
 import models.user.comparison
 import models.user.activity
 import models.user.account_delete

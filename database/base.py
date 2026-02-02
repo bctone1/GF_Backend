@@ -10,6 +10,7 @@ from models.base import Base, metadata  # 여기서 declarative_base() 절대 �
 import models.user.project  # noqa: F401
 import models.user.prompt    # noqa: F401
 import models.user.practice  # noqa: F401
+import models.user.fewshot  # noqa: F401
 import models.user.comparison  # noqa: F401
 # 필요하면 나중에 models.partner.* 등도 추가
 

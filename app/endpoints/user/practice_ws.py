@@ -16,7 +16,7 @@ from schemas.user.practice import PracticeTurnRequestExistingSession, PracticeTu
 from service.user.practice.orchestrator import prepare_practice_turn_for_session
 from service.user.practice.turn_runner import iter_practice_model_stream_events
 
-from app.endpoints.user.practice import _validate_my_few_shot_example_ids
+from service.user.fewshot import validate_my_few_shot_example_ids
 
 
 router = APIRouter()
@@ -156,7 +156,7 @@ async def ws_run_practice_turn_new_session(
                 continue
 
             if body.few_shot_example_ids:
-                _validate_my_few_shot_example_ids(
+                validate_my_few_shot_example_ids(
                     db,
                     me=me,
                     example_ids=[int(x) for x in body.few_shot_example_ids],

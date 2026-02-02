@@ -25,8 +25,8 @@ from models.user.practice import (
     PracticeSession,
     PracticeSessionModel,
     PracticeSessionSetting,
-    UserFewShotExample,
 )
+from models.user.fewshot import UserFewShotExample
 
 from schemas.user.practice import (
     PracticeResponseCreate,

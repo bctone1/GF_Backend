@@ -88,43 +88,6 @@ class GenerationParams(ORMBase):
 
 
 # =========================================
-# user.few_shot_examples (개인 라이브러리)
-# =========================================
-class UserFewShotExampleCreate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
-    title: Optional[str] = None
-    input_text: str
-    output_text: str
-    meta: Optional[Dict[str, Any]] = None
-    is_active: Optional[bool] = None
-
-
-class UserFewShotExampleUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
-    title: Optional[str] = None
-    input_text: Optional[str] = None
-    output_text: Optional[str] = None
-    meta: Optional[Dict[str, Any]] = None
-    is_active: Optional[bool] = None
-
-
-class UserFewShotExampleResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    example_id: int
-    user_id: int
-    title: Optional[str] = None
-    input_text: str
-    output_text: str
-    meta: Dict[str, Any] = Field(default_factory=dict)
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-# =========================================
 # user.practice_session_settings
 #   - 매핑 테이블 제거
 #   - few_shot_example_ids(JSONB array)로 단일화

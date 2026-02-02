@@ -1,7 +1,7 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
 
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Dict
 
 from fastapi import (
     APIRouter,
@@ -14,7 +14,7 @@ from fastapi import (
     BackgroundTasks,
 )
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from core.deps import get_db, get_current_user
 
@@ -22,7 +22,6 @@ from models.user.account import AppUser
 from models.user.practice import (
     PracticeSession,
     PracticeSessionSetting,
-    UserFewShotExample,
 )
 
 from crud.user.practice import (
@@ -30,7 +29,6 @@ from crud.user.practice import (
     practice_session_model_crud,
     practice_response_crud,
     practice_session_setting_crud,
-    user_few_shot_example_crud,
 )
 
 from schemas.base import Page
@@ -49,9 +47,6 @@ from schemas.user.practice import (
     PracticeTurnResponse,
     PracticeSessionSettingResponse,
     PracticeSessionSettingUpdate,
-    UserFewShotExampleCreate,
-    UserFewShotExampleUpdate,
-    UserFewShotExampleResponse,
 )
 
 from service.user.practice.ownership import (
@@ -69,6 +64,7 @@ from service.user.practice.orchestrator import (
     ensure_session_settings,
 )
 from service.user.practice_task import generate_session_title_task
+from service.user.fewshot import validate_my_few_shot_example_ids
 
 router = APIRouter()
 
@@ -189,42 +185,6 @@ def _extract_generation_patch(payload: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(gp, dict):
         return {}
     return normalize_generation_params_dict({k: v for k, v in gp.items() if v is not None})
-
-
-def _validate_my_few_shot_example_ids(
-    db: Session,
-    *,
-    me: AppUser,
-    example_ids: list[int],
-) -> None:
-    # 중복 체크(입력 순서 유지/정규화는 schema에서 하고, 여기서는 안전장치)
-    if len(example_ids) != len(set(example_ids)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="duplicate_few_shot_example_ids",
-        )
-    if not example_ids:
-        return
-
-    stmt = (
-        select(func.count(UserFewShotExample.example_id))
-        .where(UserFewShotExample.user_id == me.user_id)
-        .where(UserFewShotExample.is_active.is_(True))
-        .where(UserFewShotExample.example_id.in_(example_ids))
-    )
-    cnt = db.scalar(stmt) or 0
-    if cnt != len(example_ids):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="invalid_few_shot_example_ids",
-        )
-
-
-def _ensure_my_few_shot_example(db: Session, *, example_id: int, me: AppUser) -> UserFewShotExample:
-    obj = user_few_shot_example_crud.get(db, example_id)
-    if not obj or obj.user_id != me.user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="few_shot_example_not_found")
-    return obj
 
 
 # =========================================================
@@ -412,7 +372,7 @@ def update_practice_session_settings(
                 detail="few_shot_example_ids_must_be_list",
             )
         # int 캐스팅 + 검증
-        _validate_my_few_shot_example_ids(db, me=me, example_ids=[int(x) for x in ids])
+        validate_my_few_shot_example_ids(db, me=me, example_ids=[int(x) for x in ids])
 
     gen_patch = _extract_generation_patch(payload)
 
@@ -437,102 +397,6 @@ def update_practice_session_settings(
     db.commit()
     setting = _get_settings(db, session_id=session_id)
     return PracticeSessionSettingResponse.model_validate(setting)
-
-
-# =========================================================
-# Few-shot Example Library (개인)
-# =========================================================
-@router.get(
-    "/few-shot-examples",
-    response_model=Page[UserFewShotExampleResponse],
-    operation_id="list_my_few_shot_examples",
-    summary="few-shot목록",
-)
-def list_my_few_shot_examples(
-    page: int = Query(1, ge=1),
-    size: int = Query(50, ge=1, le=200),
-    is_active: Optional[bool] = Query(None),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    rows, total = user_few_shot_example_crud.list_by_user(
-        db,
-        user_id=me.user_id,
-        page=page,
-        size=size,
-        is_active=is_active,
-    )
-    items = [UserFewShotExampleResponse.model_validate(r) for r in rows]
-    return {"items": items, "total": total, "page": page, "size": size}
-
-
-@router.post(
-    "/few-shot-examples",
-    response_model=UserFewShotExampleResponse,
-    status_code=status.HTTP_201_CREATED,
-    operation_id="create_my_few_shot_example",
-    summary="few-shot생성",
-)
-def create_my_few_shot_example(
-    data: UserFewShotExampleCreate,
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    obj = user_few_shot_example_crud.create(db, user_id=me.user_id, data=data)
-    db.commit()
-    return UserFewShotExampleResponse.model_validate(obj)
-
-
-@router.get(
-    "/few-shot-examples/{example_id}",
-    response_model=UserFewShotExampleResponse,
-    operation_id="get_my_few_shot_example",
-    summary="few-shot조회",
-)
-def get_my_few_shot_example(
-    example_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    obj = _ensure_my_few_shot_example(db, example_id=example_id, me=me)
-    return UserFewShotExampleResponse.model_validate(obj)
-
-
-@router.patch(
-    "/few-shot-examples/{example_id}",
-    response_model=UserFewShotExampleResponse,
-    operation_id="update_my_few_shot_example",
-    summary="few-shot수정",
-)
-def update_my_few_shot_example(
-    example_id: int = Path(..., ge=1),
-    data: UserFewShotExampleUpdate = ...,
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ = _ensure_my_few_shot_example(db, example_id=example_id, me=me)
-    obj = user_few_shot_example_crud.update(db, example_id=example_id, data=data)
-    db.commit()
-    if not obj:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="few_shot_example_not_found")
-    return UserFewShotExampleResponse.model_validate(obj)
-
-
-@router.delete(
-    "/few-shot-examples/{example_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    operation_id="delete_my_few_shot_example",
-    summary="few-shot삭제",
-)
-def delete_my_few_shot_example(
-    example_id: int = Path(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    _ = _ensure_my_few_shot_example(db, example_id=example_id, me=me)
-    user_few_shot_example_crud.delete(db, example_id=example_id)
-    db.commit()
-    return None
 
 
 # =========================================================
@@ -687,7 +551,7 @@ def run_practice_turn_new_session_endpoint(
     me: AppUser = Depends(get_current_user),
 ):
     if body.few_shot_example_ids:
-        _validate_my_few_shot_example_ids(
+        validate_my_few_shot_example_ids(
             db,
             me=me,
             example_ids=[int(x) for x in body.few_shot_example_ids],
