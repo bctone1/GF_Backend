@@ -362,7 +362,7 @@ def _friendli_extra_body(model_name: str, kwargs: Dict[str, Any]) -> Dict[str, A
     extra_body = {
         "parse_reasoning": True,
         "chat_template_kwargs": {
-            "enable_thinking": True,
+            "enable_thinking": False,
         },
     }
 
