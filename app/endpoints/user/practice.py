@@ -65,17 +65,9 @@ from service.user.practice.orchestrator import (
 )
 from service.user.practice_task import generate_session_title_task
 from service.user.fewshot import validate_my_few_shot_example_ids
+from crud.base import coerce_dict
 
 router = APIRouter()
-
-
-# =========================================================
-# helpers
-# =========================================================
-def _coerce_dict(value: Any) -> dict[str, Any]:
-    if hasattr(value, "model_dump"):
-        value = value.model_dump(exclude_unset=True)
-    return dict(value) if isinstance(value, dict) else {}
 
 
 def _ensure_session_settings_row(db: Session, *, session_id: int) -> PracticeSessionSetting:
@@ -448,7 +440,7 @@ def create_practice_session_model(
     if target is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="model_not_allowed_for_class")
 
-    incoming_gp = normalize_generation_params_dict(_coerce_dict(getattr(data, "generation_params", None)))
+    incoming_gp = normalize_generation_params_dict(coerce_dict(getattr(data, "generation_params", None)))
     if incoming_gp:
         current_gp = normalize_generation_params_dict(getattr(target, "generation_params", None) or {})
         merged = dict(current_gp)
@@ -500,7 +492,7 @@ def update_practice_session_model(
     update_data.pop("is_primary", None)
 
     if "generation_params" in update_data:
-        patch = normalize_generation_params_dict(_coerce_dict(update_data.get("generation_params")))
+        patch = normalize_generation_params_dict(coerce_dict(update_data.get("generation_params")))
         current = normalize_generation_params_dict(getattr(model, "generation_params", None) or {})
         merged = dict(current)
         merged.update(patch)

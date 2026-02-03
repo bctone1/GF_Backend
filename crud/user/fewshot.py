@@ -8,19 +8,13 @@ from sqlalchemy import select, func
 
 from sqlalchemy.exc import IntegrityError
 
+from crud.base import coerce_dict
 from models.user.fewshot import UserFewShotExample, FewShotShare
 from schemas.user.fewshot import (
     UserFewShotExampleCreate,
     UserFewShotExampleUpdate,
     FewShotShareCreate,
-    FewShotShareUpdate,
 )
-
-
-def _coerce_dict(value: Any) -> dict[str, Any]:
-    if hasattr(value, "model_dump"):
-        value = value.model_dump(exclude_unset=True)
-    return dict(value) if isinstance(value, dict) else {}
 
 
 class UserFewShotExampleCRUD:
@@ -31,7 +25,7 @@ class UserFewShotExampleCRUD:
             input_text=data.input_text,
             output_text=data.output_text,
             fewshot_source=data.fewshot_source,
-            meta=_coerce_dict(data.meta),
+            meta=coerce_dict(data.meta),
             is_active=data.is_active if data.is_active is not None else True,
         )
         db.add(obj)
@@ -82,7 +76,7 @@ class UserFewShotExampleCRUD:
             return obj
 
         if "meta" in values:
-            values["meta"] = _coerce_dict(values.get("meta"))
+            values["meta"] = coerce_dict(values.get("meta"))
 
         for k, v in values.items():
             setattr(obj, k, v)
@@ -116,7 +110,7 @@ class FewShotShareCRUD:
 
         db_obj = FewShotShare(shared_by_user_id=shared_by_user_id, **data)
         db.add(db_obj)
-        db.commit()
+        db.flush()
         db.refresh(db_obj)
         return db_obj
 
@@ -169,7 +163,7 @@ class FewShotShareCRUD:
     ) -> FewShotShare:
         share.is_active = is_active
         db.add(share)
-        db.commit()
+        db.flush()
         db.refresh(share)
         return share
 
@@ -189,14 +183,15 @@ class FewShotShareCRUD:
             if not existing.is_active:
                 existing.is_active = True
                 db.add(existing)
-                db.commit()
+                db.flush()
                 db.refresh(existing)
             return existing
 
         try:
-            return self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+            with db.begin_nested():
+                obj = self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+            return obj
         except IntegrityError:
-            db.rollback()
             again = self.get_by_example_and_class(
                 db,
                 example_id=obj_in.example_id,
@@ -207,7 +202,7 @@ class FewShotShareCRUD:
             if not again.is_active:
                 again.is_active = True
                 db.add(again)
-                db.commit()
+                db.flush()
                 db.refresh(again)
             return again
 

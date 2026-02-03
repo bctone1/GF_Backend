@@ -19,7 +19,7 @@ class UserFewShotExampleCreate(ORMBase):
     output_text: str
     fewshot_source: Optional[FewShotSource] = Field(
         default=None,
-        alias="template_source",
+        # alias="template_source",
         description="퓨샷 출처: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)",
     )
     meta: Optional[Dict[str, Any]] = None
@@ -34,7 +34,7 @@ class UserFewShotExampleUpdate(ORMBase):
     output_text: Optional[str] = None
     fewshot_source: Optional[FewShotSource] = Field(
         default=None,
-        alias="template_source",
+        # alias="template_source",
         description="퓨샷 출처: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)",
     )
     meta: Optional[Dict[str, Any]] = None
@@ -65,12 +65,6 @@ class FewShotShareCreate(ORMBase):
 
     example_id: int
     class_id: int
-    is_active: Optional[bool] = None
-
-
-class FewShotShareUpdate(ORMBase):
-    model_config = ConfigDict(from_attributes=False)
-
     is_active: Optional[bool] = None
 
 

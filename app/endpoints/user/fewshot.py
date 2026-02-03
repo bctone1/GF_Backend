@@ -84,6 +84,42 @@ def create_my_few_shot_example(
     return UserFewShotExampleResponse.model_validate(obj)
 
 
+# =========================================================
+# (학생용) class 기준 공유 few-shot 목록
+# — /{example_id} 보다 위에 위치해야 "shared"가 path param으로 먹히지 않음
+# =========================================================
+@router.get(
+    "/few-shot-examples/shared",
+    response_model=List[UserFewShotExampleResponse],
+    summary="공유퓨샷",
+    operation_id="list_shared_few_shot_examples_for_class",
+)
+def list_shared_few_shot_examples_for_class_endpoint(
+    class_id: int = Query(
+        ...,
+        ge=1,
+        description="공유 few-shot을 조회할 강의실 ID (partner.classes.id)",
+    ),
+    active_only: bool = Query(
+        True,
+        description="true 이면 활성 공유(is_active=true)만 조회",
+    ),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """
+    강의실 기준 공유 few-shot 조회.
+    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
+    """
+    examples = list_shared_few_shot_examples_for_class(
+        db=db,
+        class_id=class_id,
+        me=me,
+        active_only=active_only,
+    )
+    return [UserFewShotExampleResponse.model_validate(example) for example in examples]
+
+
 @router.get(
     "/few-shot-examples/{example_id}",
     response_model=UserFewShotExampleResponse,
@@ -147,41 +183,6 @@ def delete_my_few_shot_example(
 
 
 # =========================================================
-# (학생용) class 기준 공유 few-shot 목록
-# =========================================================
-@router.get(
-    "/few-shot-examples/shared",
-    response_model=List[UserFewShotExampleResponse],
-    summary="공유퓨샷",
-    operation_id="list_shared_few_shot_examples_for_class",
-)
-def list_shared_few_shot_examples_for_class_endpoint(
-    class_id: int = Query(
-        ...,
-        ge=1,
-        description="공유 few-shot을 조회할 강의실 ID (partner.classes.id)",
-    ),
-    active_only: bool = Query(
-        True,
-        description="true 이면 활성 공유(is_active=true)만 조회",
-    ),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    """
-    강의실 기준 공유 few-shot 조회.
-    - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
-    """
-    examples = list_shared_few_shot_examples_for_class(
-        db=db,
-        class_id=class_id,
-        me=me,
-        active_only=active_only,
-    )
-    return [UserFewShotExampleResponse.model_validate(example) for example in examples]
-
-
-# =========================================================
 # 공유 few-shot → 내 few-shot으로 복제
 # =========================================================
 @router.post(
@@ -211,6 +212,7 @@ def fork_shared_few_shot_example_endpoint(
         class_id=payload.class_id,
         me=me,
     )
+    db.commit()
     attach_class_ids_to_examples(db, examples=[new_example], active_only=True)
     return UserFewShotExampleResponse.model_validate(new_example)
 
@@ -249,6 +251,7 @@ def share_few_shot_example_to_class_endpoint(
         class_id=class_id,
         me=me,
     )
+    db.commit()
     return FewShotShareResponse.model_validate(share)
 
 
@@ -282,4 +285,5 @@ def deactivate_few_shot_share_endpoint(
         class_id=class_id,
         me=me,
     )
+    db.commit()
     return FewShotShareResponse.model_validate(share)

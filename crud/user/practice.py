@@ -8,6 +8,7 @@ from sqlalchemy import select, update, delete, func
 from sqlalchemy.exc import IntegrityError
 
 from core import config
+from crud.base import coerce_dict
 from models.user.practice import (
     PracticeSession,
     PracticeSessionSetting,
@@ -29,17 +30,6 @@ from schemas.user.practice import (
 # =========================================================
 # internal helpers
 # =========================================================
-def _dump_pydantic(value: Any) -> Any:
-    if hasattr(value, "model_dump"):
-        return value.model_dump(exclude_unset=True)
-    return value
-
-
-def _coerce_dict(value: Any) -> dict[str, Any]:
-    v = _dump_pydantic(value)
-    return dict(v) if isinstance(v, dict) else {}
-
-
 def _coerce_int_list(value: Any) -> list[int]:
     """
     JSONB(list[int]) 방어용
@@ -256,13 +246,13 @@ class PracticeSessionSettingCRUD:
             row.style_preset = values.get("style_preset")
 
         if "style_params" in values:
-            incoming_style = _coerce_dict(values.get("style_params"))
+            incoming_style = coerce_dict(values.get("style_params"))
             base_style = dict(getattr(row, "style_params", None) or {})
             base_style.update(incoming_style)
             row.style_params = base_style
 
         if "generation_params" in values:
-            incoming_gen = _normalize_generation_params_dict(_coerce_dict(values.get("generation_params")))
+            incoming_gen = _normalize_generation_params_dict(coerce_dict(values.get("generation_params")))
             base_gen = _normalize_generation_params_dict(dict(getattr(row, "generation_params", None) or {}))
             base_gen.update(incoming_gen)
             row.generation_params = _normalize_generation_params_dict(base_gen)
@@ -272,7 +262,7 @@ class PracticeSessionSettingCRUD:
             row.few_shot_example_ids = _coerce_int_list(values.get("few_shot_example_ids"))
 
         if "prompt_snapshot" in values:
-            incoming_snap = _coerce_dict(values.get("prompt_snapshot"))
+            incoming_snap = coerce_dict(values.get("prompt_snapshot"))
             base_snap = dict(getattr(row, "prompt_snapshot", None) or {})
             base_snap.update(incoming_snap)
             row.prompt_snapshot = base_snap
@@ -292,7 +282,7 @@ practice_session_setting_crud = PracticeSessionSettingCRUD()
 class PracticeSessionModelCRUD:
     def create(self, db: Session, data: PracticeSessionModelCreate) -> PracticeSessionModel:
         raw_gp = getattr(data, "generation_params", None)
-        gp = _normalize_generation_params_dict(_coerce_dict(raw_gp)) if raw_gp is not None else {}
+        gp = _normalize_generation_params_dict(coerce_dict(raw_gp)) if raw_gp is not None else {}
 
         obj = PracticeSessionModel(
             session_id=data.session_id,
@@ -337,7 +327,7 @@ class PracticeSessionModelCRUD:
 
         if "generation_params" in update_data:
             update_data["generation_params"] = _normalize_generation_params_dict(
-                _coerce_dict(update_data.get("generation_params"))
+                coerce_dict(update_data.get("generation_params"))
             )
 
         for k, v in update_data.items():
@@ -363,7 +353,7 @@ class PracticeSessionModelCRUD:
         merge: bool = True,
         overwrite_keys: Optional[list[str]] = None,
     ) -> list[PracticeSessionModel]:
-        gp = _normalize_generation_params_dict(_coerce_dict(generation_params))
+        gp = _normalize_generation_params_dict(coerce_dict(generation_params))
         if not gp:
             return list(self.list_by_session(db, session_id=session_id))
 

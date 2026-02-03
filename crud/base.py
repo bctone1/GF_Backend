@@ -15,6 +15,13 @@ CreateT = TypeVar("CreateT", bound=BaseModel)
 UpdateT = TypeVar("UpdateT", bound=BaseModel)
 
 
+def coerce_dict(value: Any) -> dict[str, Any]:
+    """Pydantic 모델 또는 dict를 ``dict[str, Any]`` 로 안전하게 변환."""
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(exclude_unset=True)
+    return dict(value) if isinstance(value, dict) else {}
+
+
 class CRUDBase(Generic[ModelT, CreateT, UpdateT]):
     """
     공통 CRUD 베이스.

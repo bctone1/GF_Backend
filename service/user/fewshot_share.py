@@ -23,6 +23,14 @@ def _attach_shared_class_ids(
     active_only: bool = True,
     class_id: Optional[int] = None,
 ) -> None:
+    """예제 목록에 공유된 class_id 리스트를 ``class_ids`` 속성으로 부착한다.
+
+    Args:
+        db: SQLAlchemy 세션.
+        examples: class_ids를 부착할 few-shot 예제 이터러블.
+        active_only: ``True``이면 활성 공유만 조회.
+        class_id: 특정 class로 필터링할 경우 지정.
+    """
     example_list = list(examples)
     if not example_list:
         return
@@ -52,6 +60,20 @@ def share_few_shot_example_to_class(
     class_id: int,
     me: AppUser,
 ) -> FewShotShare:
+    """내 few-shot 예제를 특정 class에 공유한다.
+
+    Args:
+        db: SQLAlchemy 세션.
+        example_id: 공유할 few-shot 예제 PK.
+        class_id: 공유 대상 강의실 PK.
+        me: 현재 인증된 사용자 (강사).
+
+    Returns:
+        생성 또는 재활성화된 ``FewShotShare`` 인스턴스.
+
+    Raises:
+        HTTPException: 소유권·강사 권한 실패(404/403) 또는 비활성 예제(400).
+    """
     example = ensure_my_few_shot_example(db, example_id=example_id, me=me)
     ensure_my_class_as_teacher(db, class_id=class_id, me=me)
 
@@ -80,6 +102,20 @@ def deactivate_few_shot_share(
     class_id: int,
     me: AppUser,
 ) -> FewShotShare:
+    """특정 class에 공유된 few-shot 공유를 비활성화한다.
+
+    Args:
+        db: SQLAlchemy 세션.
+        example_id: 공유 해제할 few-shot 예제 PK.
+        class_id: 공유 해제 대상 강의실 PK.
+        me: 현재 인증된 사용자 (강사).
+
+    Returns:
+        비활성화된 ``FewShotShare`` 인스턴스.
+
+    Raises:
+        HTTPException: 소유권·강사 권한 실패 또는 공유 미존재(404).
+    """
     ensure_my_few_shot_example(db, example_id=example_id, me=me)
     ensure_my_class_as_teacher(db, class_id=class_id, me=me)
 
@@ -107,6 +143,20 @@ def list_shared_few_shot_examples_for_class(
     me: AppUser,
     active_only: bool = True,
 ) -> List[UserFewShotExample]:
+    """특정 class에 공유된 few-shot 예제 목록을 조회한다.
+
+    Args:
+        db: SQLAlchemy 세션.
+        class_id: 조회 대상 강의실 PK.
+        me: 현재 인증된 사용자 (수강생).
+        active_only: ``True``이면 활성 공유·활성 예제만 반환.
+
+    Returns:
+        ``class_ids`` 속성이 부착된 ``UserFewShotExample`` 리스트.
+
+    Raises:
+        HTTPException: 강의 미존재(404) 또는 수강 미등록.
+    """
     exists = db.query(Class.id).filter(Class.id == class_id).first()
     if exists is None:
         raise HTTPException(
@@ -150,6 +200,20 @@ def fork_shared_few_shot_example(
     class_id: int,
     me: AppUser,
 ) -> UserFewShotExample:
+    """공유된 few-shot 예제를 내 라이브러리로 복제(fork)한다.
+
+    Args:
+        db: SQLAlchemy 세션.
+        example_id: 원본 few-shot 예제 PK.
+        class_id: 공유가 존재하는 강의실 PK.
+        me: 현재 인증된 사용자 (수강생).
+
+    Returns:
+        ``fewshot_source="class_shared"`` 로 생성된 새 ``UserFewShotExample``.
+
+    Raises:
+        HTTPException: 공유 미존재(404), 수강 미등록, 원본 비활성(400).
+    """
     share: Optional[FewShotShare] = (
         db.query(FewShotShare)
         .filter(
@@ -194,7 +258,7 @@ def fork_shared_few_shot_example(
         is_active=True,
     )
     db.add(new_example)
-    db.commit()
+    db.flush()
     db.refresh(new_example)
     return new_example
 
@@ -205,6 +269,13 @@ def attach_class_ids_to_examples(
     examples: Iterable[UserFewShotExample],
     active_only: bool = True,
 ) -> None:
+    """예제 목록에 공유된 class_id 리스트를 부착하는 퍼블릭 래퍼.
+
+    Args:
+        db: SQLAlchemy 세션.
+        examples: class_ids를 부착할 few-shot 예제 이터러블.
+        active_only: ``True``이면 활성 공유만 조회.
+    """
     _attach_shared_class_ids(
         db,
         examples=examples,
