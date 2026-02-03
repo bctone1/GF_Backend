@@ -61,6 +61,9 @@ class Document(Base):
     # 실패 시 에러 메시지 (성공 시 NULL)
     error_message = Column(Text, nullable=True)
 
+    # RAG UI 모드: simple(간단 업로드), advanced(고급 설정), compare(비교 분석)
+    rag_ui_mode = Column(Text, nullable=True)
+
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -98,6 +101,10 @@ class Document(Base):
         CheckConstraint(
             "progress >= 0 AND progress <= 100",
             name="chk_documents_progress_range",
+        ),
+        CheckConstraint(
+            "rag_ui_mode IS NULL OR rag_ui_mode IN ('simple', 'advanced', 'compare')",
+            name="chk_documents_rag_ui_mode_enum",
         ),
         Index("idx_documents_owner_time", "owner_id", "uploaded_at"),
         Index("idx_documents_status_time", "status", "uploaded_at"),
