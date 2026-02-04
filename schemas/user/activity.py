@@ -87,3 +87,16 @@ class UserAchievementResponse(ORMBase):
     achievement_key: str
     earned_at: datetime
     metadata: Optional[Dict[str, Any]] = None
+
+
+# =========================================
+# user.practice_feature_stats 〈집계 전용: 읽기 전용〉
+# =========================================
+class PracticeFeatureStatResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=True)
+    stat_id: int
+    user_id: int
+    class_id: Optional[int] = None
+    feature_type: str
+    usage_count: int
+    last_used_at: Optional[datetime] = None

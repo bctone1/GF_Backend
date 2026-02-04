@@ -32,6 +32,7 @@ from app.endpoints.user.practice_ws import router as practice_ws
 from app.endpoints.user.prompt import router as prompt
 from app.endpoints.user.project import router as project
 from app.endpoints.user.comparison import router as comparison
+from app.endpoints.user.activity import router as activity
 
 
 def register_routers(app: FastAPI) -> None:
@@ -71,4 +72,5 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(user_document,     prefix="/user",                 tags=["user/document : 지식베이스"])
     app.include_router(prompt,            prefix="",                      tags=["user/prompt : 템플릿"])
     app.include_router(account,           prefix="/user",                 tags=["user/account : 계정"])
-    app.include_router(comparison,        prefix="/user/practice",        tags=["user/comparison : 비교런"])
+    app.include_router(comparison,        prefix="/user/practice",        tags=["user/comparison : 비교학습"])
+    app.include_router(activity,          prefix="/user/activity",        tags=["user/activity : 활동통계"])
