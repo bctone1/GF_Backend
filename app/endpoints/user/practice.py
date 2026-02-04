@@ -1,7 +1,7 @@
 # app/endpoints/user/practice.py
 from __future__ import annotations
 
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 
 from fastapi import (
     APIRouter,
@@ -69,6 +69,52 @@ from service.user.activity import track_event, track_feature
 from crud.base import coerce_dict
 
 router = APIRouter()
+
+
+def _build_session_meta(
+    *,
+    session_title: Optional[str] = None,
+    results: Optional[List[Any]] = None,
+    model_names: Optional[List[str]] = None,
+    is_compare: bool = False,
+    knowledge_ids: Optional[List[Any]] = None,
+) -> Dict[str, Any]:
+    """Build standardised metadata dict for activity tracking.
+
+    Args:
+        session_title: Current session title (may be None).
+        results: PracticeTurnModelResult list from turn execution.
+        model_names: Explicit model name list (overrides results extraction).
+        is_compare: Whether this is a comparison mode event.
+        knowledge_ids: Knowledge base IDs attached to the session.
+
+    Returns:
+        Metadata dict suitable for ``track_event(metadata=...)``.
+    """
+    meta: Dict[str, Any] = {"session_title": session_title}
+
+    # Extract model info from results if model_names not explicitly given
+    names: List[str] = []
+    primary_name: Optional[str] = None
+    if model_names:
+        names = list(model_names)
+    elif results:
+        for r in results:
+            names.append(r.model_name)
+            if getattr(r, "is_primary", False):
+                primary_name = r.model_name
+
+    if not primary_name and names:
+        primary_name = names[0]
+
+    meta["primary_model_name"] = primary_name
+    meta["model_names"] = names
+    meta["is_compare_mode"] = is_compare
+
+    k_ids = knowledge_ids or []
+    meta["has_knowledge_base"] = bool(k_ids)
+
+    return meta
 
 
 def _ensure_session_settings_row(db: Session, *, session_id: int) -> PracticeSessionSetting:
@@ -230,9 +276,18 @@ def create_practice_session(
     _ = _ensure_session_settings_row(db, session_id=session.session_id)
     _sync_session_models_with_class(db, me=me, session_id=session.session_id)
 
+    # Fetch model names after sync for metadata enrichment
+    _session_models = practice_session_model_crud.list_by_session(db, session_id=session.session_id)
+    _model_names = [m.model_name for m in _session_models]
+
     track_event(
         db, user_id=me.user_id, event_type="session_created",
         related_type="practice_session", related_id=session.session_id,
+        metadata=_build_session_meta(
+            session_title=session.title,
+            model_names=_model_names,
+            knowledge_ids=getattr(data, "knowledge_ids", None),
+        ),
     )
 
     db.commit()
@@ -582,6 +637,11 @@ def run_practice_turn_new_session_endpoint(
     track_event(
         db, user_id=me.user_id, event_type="message_sent",
         related_type="practice_session", related_id=turn_result.session_id,
+        metadata=_build_session_meta(
+            session_title=turn_result.session_title,
+            results=turn_result.results,
+            knowledge_ids=getattr(body, "knowledge_ids", None),
+        ),
     )
     if body.few_shot_example_ids:
         track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="fewshot_used")
@@ -632,11 +692,16 @@ def run_practice_turn_endpoint(
     )
 
     # --- activity tracking ---
+    _k_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
     track_event(
         db, user_id=me.user_id, event_type="message_sent",
         related_type="practice_session", related_id=session_id,
+        metadata=_build_session_meta(
+            session_title=session.title,
+            results=turn_result.results,
+            knowledge_ids=_k_ids,
+        ),
     )
-    _k_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
     if _k_ids:
         track_feature(db, user_id=me.user_id, class_id=session.class_id, feature_type="kb_connected")
 

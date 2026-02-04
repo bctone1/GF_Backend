@@ -100,3 +100,11 @@ class PracticeFeatureStatResponse(ORMBase):
     feature_type: str
     usage_count: int
     last_used_at: Optional[datetime] = None
+
+
+# =========================================
+# Backfill 응답
+# =========================================
+class BackfillResultResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    updated_count: int

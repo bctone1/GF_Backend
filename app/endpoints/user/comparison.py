@@ -227,6 +227,13 @@ def run_practice_comparison_turn(
     track_event(
         db, user_id=me.user_id, event_type="comparison_executed",
         related_type="practice_session", related_id=session.session_id,
+        metadata={
+            "session_title": session.title,
+            "primary_model_name": body.model_names[0] if body.model_names else None,
+            "model_names": list(body.model_names) if body.model_names else [],
+            "is_compare_mode": True,
+            "has_knowledge_base": bool(effective_knowledge_ids),
+        },
     )
     if body.mode == "rag":
         track_feature(

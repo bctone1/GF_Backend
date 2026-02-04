@@ -387,5 +387,26 @@ class PracticeTurnResponse(ORMBase):
     results: List[PracticeTurnModelResult]
 
 
+# =========================================
+# 대화기록 (Conversation History) 요약
+# =========================================
+class ConversationSummaryResponse(ORMBase):
+    """GET /user/practice/conversations 전용 경량 응답."""
+
+    model_config = ConfigDict(from_attributes=False)
+
+    session_id: int
+    class_id: Optional[int] = None
+    title: Optional[str] = None
+    preview_text: Optional[str] = None
+    primary_model_name: Optional[str] = None
+    turn_count: int = 0
+    is_compare_mode: bool = False
+    has_knowledge_base: bool = False
+    has_prompt: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 # ForwardRef
 PracticeSessionResponse.model_rebuild()

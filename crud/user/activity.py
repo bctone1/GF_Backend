@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional, Sequence, Tuple
+from typing import Any, Optional, Sequence, Tuple
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -65,6 +65,34 @@ class UserActivityEventCRUD:
         )
         rows = db.scalars(stmt).all()
         return rows, total
+
+    def bulk_update_meta(
+        self,
+        db: Session,
+        updates: list[tuple[int, dict[str, Any]]],
+    ) -> int:
+        """여러 이벤트의 meta를 병합 갱신. returns 갱신 건수.
+
+        Args:
+            db: Active DB session (caller manages commit).
+            updates: List of (event_id, new_meta) pairs.
+        """
+        if not updates:
+            return 0
+
+        count = 0
+        for event_id, new_meta in updates:
+            row = db.get(UserActivityEvent, event_id)
+            if row is None:
+                continue
+            existing = row.meta or {}
+            merged = {**existing, **new_meta}
+            row.meta = merged
+            count += 1
+
+        if count:
+            db.flush()
+        return count
 
 
 class PracticeFeatureStatCRUD:

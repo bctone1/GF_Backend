@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional, Sequence, Tuple, Any, Mapping, Union
 
 from sqlalchemy.orm import Session
-from sqlalchemy import select, update, delete, func
+from sqlalchemy import select, update, delete, func, exists, case
 from sqlalchemy.exc import IntegrityError
 
 from core import config
@@ -15,6 +15,7 @@ from models.user.practice import (
     PracticeSessionModel,
     PracticeResponse,
 )
+from models.user.comparison import PracticeComparisonRun
 
 from schemas.user.practice import (
     PracticeSessionCreate,
@@ -158,6 +159,112 @@ class PracticeSessionCRUD:
         db.execute(stmt)
         db.flush()
         return self.get(db, session_id)
+
+    def list_conversations(
+        self,
+        db: Session,
+        user_id: int,
+        *,
+        class_id: Optional[int] = None,
+        q: Optional[str] = None,
+        sort: str = "recent",
+        page: int = 1,
+        size: int = 20,
+    ) -> Tuple[Sequence[Any], int]:
+        """대화기록 목록용 경량 쿼리 (집계 필드 포함)."""
+
+        s = PracticeSession
+
+        # -- scalar subqueries -------------------------------------------------
+        turn_count_sq = (
+            select(func.count(PracticeResponse.response_id))
+            .where(PracticeResponse.session_id == s.session_id)
+            .correlate(s)
+            .scalar_subquery()
+            .label("turn_count")
+        )
+
+        preview_sq = (
+            select(func.left(PracticeResponse.response_text, 100))
+            .where(PracticeResponse.session_id == s.session_id)
+            .order_by(PracticeResponse.created_at.asc())
+            .limit(1)
+            .correlate(s)
+            .scalar_subquery()
+            .label("preview_text")
+        )
+
+        primary_model_sq = (
+            select(PracticeSessionModel.model_name)
+            .where(
+                PracticeSessionModel.session_id == s.session_id,
+                PracticeSessionModel.is_primary.is_(True),
+            )
+            .limit(1)
+            .correlate(s)
+            .scalar_subquery()
+            .label("primary_model_name")
+        )
+
+        is_compare_sq = (
+            exists(
+                select(PracticeComparisonRun.id).where(
+                    PracticeComparisonRun.session_id == s.session_id
+                )
+            )
+            .correlate(s)
+            .label("is_compare_mode")
+        )
+
+        # -- main select -------------------------------------------------------
+        stmt = select(
+            s.session_id,
+            s.class_id,
+            s.title,
+            s.knowledge_ids,
+            s.prompt_ids,
+            s.created_at,
+            s.updated_at,
+            turn_count_sq,
+            preview_sq,
+            primary_model_sq,
+            is_compare_sq,
+        ).where(s.user_id == user_id)
+
+        # -- filters ------------------------------------------------------------
+        if class_id is not None:
+            stmt = stmt.where(s.class_id == class_id)
+
+        if q:
+            like_pat = f"%{q}%"
+            search_exists = exists(
+                select(PracticeResponse.response_id).where(
+                    PracticeResponse.session_id == s.session_id,
+                    PracticeResponse.response_text.ilike(like_pat),
+                )
+            )
+            stmt = stmt.where(
+                (s.title.ilike(like_pat)) | search_exists
+            )
+
+        # -- count (before ordering/paging) ------------------------------------
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        total = db.scalar(count_stmt) or 0
+
+        # -- ordering -----------------------------------------------------------
+        order_map = {
+            "recent": s.updated_at.desc(),
+            "oldest": s.created_at.asc(),
+            "name": s.title.asc().nulls_last(),
+            "turns": turn_count_sq.desc(),
+        }
+        stmt = stmt.order_by(order_map.get(sort, s.updated_at.desc()))
+
+        # -- pagination ---------------------------------------------------------
+        stmt = stmt.offset((page - 1) * size).limit(size)
+
+        rows = db.execute(stmt).all()
+        return rows, total
 
     def delete(self, db: Session, *, session_id: int) -> None:
         stmt = delete(PracticeSession).where(PracticeSession.session_id == session_id)
