@@ -58,15 +58,15 @@ def list_my_activity_events(
     event_type: Optional[str] = Query(
         None,
         description=(
-            "event_type 필터: session_created, message_sent, prompt_created, "
-            "project_created, comparison_executed, fewshot_created, document_uploaded"
+            "event_type 필터: `session_created`, `message_sent`, `prompt_created`, "
+            "`project_created`, `comparison_executed`, `fewshot_created`, `document_uploaded`"
         ),
     ),
     related_type: Optional[str] = Query(
         None,
         description=(
-            "related_type 필터: practice_session, ai_prompt, user_project, "
-            "document, fewshot_example"
+            "related_type 필터: `practice_session`, `ai_prompt`, `user_project`, "
+            "`document`, `fewshot_example`"
         ),
     ),
     page: int = Query(1, ge=1),
@@ -97,10 +97,10 @@ def list_my_activity_events(
         "- event_id: 이벤트 고유 ID\n"
         "- user_id: 이벤트 주체 사용자 ID(본인)\n"
         "- event_type: 이벤트 유형 문자열\n"
-        "  - session_created, message_sent, prompt_created, project_created,\n"
-        "    comparison_executed, fewshot_created, document_uploaded\n"
+        "  - `session_created`, `message_sent`, `prompt_created`, `project_created`,\n"
+        "    `comparison_executed`, `fewshot_created`, `document_uploaded`\n"
         "- related_type: 관련 리소스 유형\n"
-        "  - practice_session, ai_prompt, user_project, document, fewshot_example\n"
+        "  - `practice_session`, `ai_prompt`, `user_project`, `document`, `fewshot_example`\n"
         "- related_id: 관련 리소스 ID\n"
         "- metadata: 이벤트별 부가 정보(JSON)\n"
         "- occurred_at: 이벤트 발생 시각(UTC ISO-8601)\n\n"
@@ -134,10 +134,10 @@ def get_my_activity_event(
         "- user_id: 통계 대상 사용자 ID(본인)\n"
         "- class_id: 강의 ID(없으면 전체 집계)\n"
         "- feature_type: 기능 유형\n"
-        "  - fewshot_used: few-shot 예시 사용\n"
-        "  - parameter_tuned: 생성 파라미터 튜닝\n"
-        "  - kb_connected: 지식베이스 연결/사용\n"
-        "  - file_attached: 문서(파일) 첨부\n"
+        "  - `fewshot_used`: few-shot 예시 사용\n"
+        "  - `parameter_tuned`: 생성 파라미터 튜닝\n"
+        "  - `kb_connected`: 지식베이스 연결/사용\n"
+        "  - `file_attached`: 문서(파일) 첨부\n"
         "- usage_count: 누적 사용 횟수\n"
         "- last_used_at: 마지막 사용 시각(UTC ISO-8601, 없을 수 있음)\n\n"
         "운영 환경에서는 feature_type을 고정된 enum으로 관리하고, 수집 지표/집계 주기를\n"
