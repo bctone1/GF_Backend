@@ -198,6 +198,7 @@ def fork_shared_few_shot_example(
     *,
     example_id: int,
     class_id: int,
+    name: Optional[str] = None,
     me: AppUser,
 ) -> UserFewShotExample:
     """공유된 few-shot 예제를 내 라이브러리로 복제(fork)한다.
@@ -206,6 +207,7 @@ def fork_shared_few_shot_example(
         db: SQLAlchemy 세션.
         example_id: 원본 few-shot 예제 PK.
         class_id: 공유가 존재하는 강의실 PK.
+        name: 새 few-shot 제목 (미지정 시 원본 제목 유지).
         me: 현재 인증된 사용자 (수강생).
 
     Returns:
@@ -250,7 +252,7 @@ def fork_shared_few_shot_example(
 
     new_example = UserFewShotExample(
         user_id=me.user_id,
-        title=src_example.title,
+        title=name if name is not None else src_example.title,
         input_text=src_example.input_text,
         output_text=src_example.output_text,
         fewshot_source="class_shared",

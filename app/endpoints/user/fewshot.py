@@ -217,6 +217,7 @@ def fork_shared_few_shot_example_endpoint(
         db=db,
         example_id=example_id,
         class_id=payload.class_id,
+        name=payload.name,
         me=me,
     )
     db.commit()

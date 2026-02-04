@@ -83,3 +83,4 @@ class FewShotForkRequest(ORMBase):
     model_config = ConfigDict(from_attributes=False)
 
     class_id: int
+    name: Optional[str] = None
