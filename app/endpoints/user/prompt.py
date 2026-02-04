@@ -36,6 +36,7 @@ from service.user.prompt import (
     fork_shared_prompt_to_my_prompt,
     list_shared_prompts_for_class,
 )
+from service.user.activity import track_event
 
 router = APIRouter()
 
@@ -136,6 +137,13 @@ def create_my_prompt_endpoint(
     - system_prompt는 생성 시 함께 저장
     """
     prompt = create_prompt(db=db, me=me, data=body)
+
+    track_event(
+        db, user_id=me.user_id, event_type="prompt_created",
+        related_type="ai_prompt", related_id=prompt.prompt_id,
+    )
+    db.commit()
+
     return prompt
 
 

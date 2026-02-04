@@ -18,6 +18,7 @@ from schemas.user.fewshot import (
 )
 from crud.user.fewshot import user_few_shot_example_crud
 from service.user.fewshot import ensure_my_few_shot_example
+from service.user.activity import track_event
 from service.user.fewshot_share import (
     share_few_shot_example_to_class,
     deactivate_few_shot_share,
@@ -79,6 +80,12 @@ def create_my_few_shot_example(
     - fewshot_source: user_fewshot(내가 만든 것), class_shared(공유), partner_fewshot(강사 제공)
     """
     obj = user_few_shot_example_crud.create(db, user_id=me.user_id, data=data)
+
+    track_event(
+        db, user_id=me.user_id, event_type="fewshot_created",
+        related_type="fewshot_example", related_id=obj.example_id,
+    )
+
     db.commit()
     attach_class_ids_to_examples(db, examples=[obj], active_only=True)
     return UserFewShotExampleResponse.model_validate(obj)

@@ -65,6 +65,7 @@ from service.user.practice.orchestrator import (
 )
 from service.user.practice_task import generate_session_title_task
 from service.user.fewshot import validate_my_few_shot_example_ids
+from service.user.activity import track_event, track_feature
 from crud.base import coerce_dict
 
 router = APIRouter()
@@ -229,6 +230,11 @@ def create_practice_session(
     _ = _ensure_session_settings_row(db, session_id=session.session_id)
     _sync_session_models_with_class(db, me=me, session_id=session.session_id)
 
+    track_event(
+        db, user_id=me.user_id, event_type="session_created",
+        related_type="practice_session", related_id=session.session_id,
+    )
+
     db.commit()
     return PracticeSessionResponse.model_validate(session)
 
@@ -345,7 +351,7 @@ def update_practice_session_settings(
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
-    _ = ensure_my_session(db, session_id, me)
+    session = ensure_my_session(db, session_id, me)
     _ = _ensure_session_settings_row(db, session_id=session_id)
 
     payload = data.model_dump(exclude_unset=True)
@@ -385,6 +391,13 @@ def update_practice_session_settings(
             generation_params=gen_patch,
             merge=True,
         )
+
+    # --- activity tracking ---
+    _cls_id = getattr(session, "class_id", None)
+    if "few_shot_example_ids" in payload and payload["few_shot_example_ids"]:
+        track_feature(db, user_id=me.user_id, class_id=_cls_id, feature_type="fewshot_used")
+    if gen_patch:
+        track_feature(db, user_id=me.user_id, class_id=_cls_id, feature_type="parameter_tuned")
 
     db.commit()
     setting = _get_settings(db, session_id=session_id)
@@ -491,7 +504,8 @@ def update_practice_session_model(
     update_data = data.model_dump(exclude_unset=True)
     update_data.pop("is_primary", None)
 
-    if "generation_params" in update_data:
+    has_gen_params = "generation_params" in update_data
+    if has_gen_params:
         patch = normalize_generation_params_dict(coerce_dict(update_data.get("generation_params")))
         current = normalize_generation_params_dict(getattr(model, "generation_params", None) or {})
         merged = dict(current)
@@ -504,6 +518,12 @@ def update_practice_session_model(
             session_model_id=session_model_id,
             data=update_data,
         )
+        if has_gen_params:
+            track_feature(
+                db, user_id=me.user_id,
+                class_id=getattr(_session, "class_id", None),
+                feature_type="parameter_tuned",
+            )
         db.commit()
 
     return PracticeSessionModelResponse.model_validate(model)
@@ -557,6 +577,17 @@ def run_practice_turn_new_session_endpoint(
         body=body,
         generate_title=False,
     )
+
+    # --- activity tracking ---
+    track_event(
+        db, user_id=me.user_id, event_type="message_sent",
+        related_type="practice_session", related_id=turn_result.session_id,
+    )
+    if body.few_shot_example_ids:
+        track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="fewshot_used")
+    if body.knowledge_ids:
+        track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="kb_connected")
+
     db.commit()
 
     if not turn_result.session_title:
@@ -599,6 +630,16 @@ def run_practice_turn_endpoint(
         body=body,
         generate_title=False,
     )
+
+    # --- activity tracking ---
+    track_event(
+        db, user_id=me.user_id, event_type="message_sent",
+        related_type="practice_session", related_id=session_id,
+    )
+    _k_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
+    if _k_ids:
+        track_feature(db, user_id=me.user_id, class_id=session.class_id, feature_type="kb_connected")
+
     db.commit()
 
     if not turn_result.session_title:

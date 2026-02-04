@@ -56,6 +56,7 @@ from schemas.user.document import (
 )
 
 from service.user.upload_pipeline import UploadPipeline
+from service.user.activity import track_event, track_feature
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from service.user.document_chunking import (
@@ -291,6 +292,12 @@ def upload_document(
     pipeline = UploadPipeline(db, user_id=me.user_id)
     doc = pipeline.init_document(file)
 
+    track_event(
+        db, user_id=me.user_id, event_type="document_uploaded",
+        related_type="document", related_id=doc.knowledge_id,
+    )
+    track_feature(db, user_id=me.user_id, class_id=None, feature_type="file_attached")
+
     db.commit()
     db.refresh(doc)
 
@@ -338,6 +345,12 @@ def upload_document_advanced(
         ingestion_override=ingestion_override,
         search_override=search_override,
     )
+
+    track_event(
+        db, user_id=me.user_id, event_type="document_uploaded",
+        related_type="document", related_id=doc.knowledge_id,
+    )
+    track_feature(db, user_id=me.user_id, class_id=None, feature_type="file_attached")
 
     db.commit()
     db.refresh(doc)
@@ -674,7 +687,7 @@ def patch_document_search_settings(
     "/document/{knowledge_id}/reindex",
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="reindex_document",
-    summary="문서 재색인",
+    summary="문서재색인",
 )
 def reindex_document(
     background_tasks: BackgroundTasks,

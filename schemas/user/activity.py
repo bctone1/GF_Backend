@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, date
 from decimal import Decimal
 from typing import Optional, Dict, Any
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 from schemas.base import ORMBase
 
 
@@ -26,13 +26,13 @@ class UserActivityEventUpdate(ORMBase):
 
 
 class UserActivityEventResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     event_id: int
     user_id: int
     event_type: str
     related_type: Optional[str] = None
     related_id: Optional[int] = None
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = Field(default=None, validation_alias="meta")
     occurred_at: datetime
 
 
@@ -81,12 +81,12 @@ class UserAchievementUpdate(ORMBase):
 
 
 class UserAchievementResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
     achievement_id: int
     user_id: int
     achievement_key: str
     earned_at: datetime
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = Field(default=None, validation_alias="meta")
 
 
 # =========================================

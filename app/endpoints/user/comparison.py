@@ -33,6 +33,7 @@ from schemas.user.practice import (
 from service.user.practice.ownership import ensure_my_session, ensure_my_comparison_run
 from service.user.practice.orchestrator import prepare_practice_turn_for_session
 from service.user.practice.turn_runner import run_practice_turn
+from service.user.activity import track_event, track_feature
 
 router = APIRouter()
 
@@ -166,7 +167,7 @@ def run_practice_comparison_turn(
                 prompt_text=body.prompt_text,
                 model_names=body.model_names,
                 # 비교 실행에서는 prompt_id/project_id를 안 쓰는 구조라면 None으로
-                # prompt_id=None,
+                prompt_id=None,
                 project_id=None,
                 knowledge_ids=body.knowledge_ids or [],
             ),
@@ -221,6 +222,18 @@ def run_practice_comparison_turn(
         knowledge_ids=effective_knowledge_ids,
         retrieval_params=retrieval_params,
     )
+
+    # --- activity tracking ---
+    track_event(
+        db, user_id=me.user_id, event_type="comparison_executed",
+        related_type="practice_session", related_id=session.session_id,
+    )
+    if body.mode == "rag":
+        track_feature(
+            db, user_id=me.user_id,
+            class_id=getattr(session, "class_id", None),
+            feature_type="kb_connected",
+        )
 
     db.commit()
 

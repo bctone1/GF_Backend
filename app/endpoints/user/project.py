@@ -29,6 +29,7 @@ from service.user.project import (
     delete_my_project,
     list_project_session_summaries_for_me,
 )
+from service.user.activity import track_event
 
 router = APIRouter()
 
@@ -81,6 +82,13 @@ def create_project_endpoint(
     me: AppUser = Depends(get_current_user),
 ):
     project = create_project_for_me(db, me=me, obj_in=body)
+
+    track_event(
+        db, user_id=me.user_id, event_type="project_created",
+        related_type="user_project", related_id=project.project_id,
+    )
+    db.commit()
+
     return project
 
 
