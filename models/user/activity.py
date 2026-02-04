@@ -113,3 +113,39 @@ class UserAchievement(Base):
         Index("idx_user_achievements_user_time", "user_id", "earned_at"),
         {"schema": "user"},
     )
+
+
+# ========== user.practice_feature_stats ==========
+class PracticeFeatureStat(Base):
+    """
+    실습 기능 사용 통계 (파라미터 조절, Few-shot, 파일 첨부, 지식베이스 연결)
+    """
+    __tablename__ = "practice_feature_stats"
+
+    stat_id = Column(BigInteger, primary_key=True, autoincrement=True)
+
+    user_id = Column(
+        BigInteger,
+        ForeignKey("user.users.user_id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    class_id = Column(
+        BigInteger,
+        ForeignKey("partner.classes.id", ondelete="CASCADE"),
+        nullable=True,  # NULL이면 전체 통계
+    )
+    feature_type = Column(Text, nullable=False)  # 'parameter_tuned', 'fewshot_used', 'file_attached', 'kb_connected'
+    usage_count = Column(Integer, nullable=False, server_default=text("0"))
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "class_id", "feature_type", name="uq_practice_feature_stats_user_class_feature"),
+        CheckConstraint("usage_count >= 0", name="chk_practice_feature_stats_count_nonneg"),
+        CheckConstraint(
+            "feature_type IN ('parameter_tuned', 'fewshot_used', 'file_attached', 'kb_connected')",
+            name="chk_practice_feature_stats_feature_type_enum",
+        ),
+        Index("idx_practice_feature_stats_user_class", "user_id", "class_id"),
+        Index("idx_practice_feature_stats_feature_type", "feature_type"),
+        {"schema": "user"},
+    )
