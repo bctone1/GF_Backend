@@ -26,6 +26,7 @@ class AIPromptCreate(ORMBase):
     name: str
     role_description: Optional[str] = None
     system_prompt: str
+    color: Optional[str] = None
     template_source: Optional[str] = None
     is_active: Optional[bool] = None  # server default true
 
@@ -36,6 +37,7 @@ class AIPromptUpdate(ORMBase):
     name: Optional[str] = None
     role_description: Optional[str] = None
     system_prompt: Optional[str] = None
+    color: Optional[str] = None
     template_source: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -49,6 +51,7 @@ class AIPromptResponse(ORMBase):
     name: str
     role_description: Optional[str] = None
     system_prompt: str
+    color: Optional[str] = None
     template_source: Optional[str] = None
     is_active: bool
     created_at: datetime

@@ -39,6 +39,9 @@ class AIPrompt(Base):
 
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
 
+    # 프론트엔드 카드 색상
+    color = Column(Text, nullable=True)
+
     # 내가 만든건지 강사것인지 확인용
     template_source = Column(Text, nullable=True)
 
