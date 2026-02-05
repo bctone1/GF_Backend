@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", str(BASE_DIR / "file" / "upload"))
 
 # 2) 확장자 / 업로드 제한
-DOCUMENT_EXTENSION = os.getenv("DOCUMENT_EXTENSION", ".txt,.pdf,.docx,.doc,.csv,.md")
+DOCUMENT_EXTENSION = os.getenv("DOCUMENT_EXTENSION", ".txt,.pdf,.docx,.csv,.md")
 IMAGE_EXTENSION = os.getenv("IMAGE_EXTENSION", ".png,.jpg")
 DOCUMENT_MAX_SIZE_MB = int(os.getenv("DOCUMENT_MAX_SIZE_MB", "10"))
 DOCUMENT_MAX_SIZE_BYTES = DOCUMENT_MAX_SIZE_MB * 1024 * 1024

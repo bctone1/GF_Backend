@@ -154,8 +154,22 @@ class UploadPipeline:
         if ext in (".md", ".txt"):
             with open(file_path, "r", encoding="utf-8") as f:
                 text = f.read().strip()
-            # 텍스트 파일은 페이지 개념이 없으므로 1로 고정
             return text, 1
+
+        if ext == ".csv":
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+            return text, 1
+
+        if ext == ".docx":
+            import docx2txt
+            text = docx2txt.process(file_path).strip()
+            return text, 1
+
+        if ext == ".doc":
+            raise ValueError(
+                ".doc (legacy Word) 형식은 지원하지 않습니다. .docx로 변환 후 업로드해주세요."
+            )
 
         # PDF (default)
         docs = PyMuPDFLoader(file_path).load()
