@@ -176,6 +176,7 @@ def prepare_practice_turn_for_session(
             )
 
         session_update: dict[str, Any] = {}
+        did_persist = False
         if body.prompt_ids is not None:
             session_update["prompt_ids"] = body.prompt_ids
         if body.knowledge_ids is not None:
@@ -189,6 +190,7 @@ def prepare_practice_turn_for_session(
                 )
                 or session
             )
+            did_persist = True
 
         if body.few_shot_example_ids is not None:
             updated_settings = practice_session_setting_crud.update_by_session_id(
@@ -198,6 +200,10 @@ def prepare_practice_turn_for_session(
             )
             if updated_settings:
                 settings = updated_settings
+                did_persist = True
+
+        if did_persist:
+            db.commit()
 
         if session.class_id is None:
             raise HTTPException(status_code=400, detail="session has no class_id")

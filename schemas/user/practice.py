@@ -114,7 +114,8 @@ class PracticeSessionSettingUpdate(ORMBase):
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeSessionSettingUpdate":
-        self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
+        if "few_shot_example_ids" in self.model_fields_set:
+            self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
         return self
 
 
@@ -177,8 +178,10 @@ class PracticeSessionUpdate(ORMBase):
 
     @model_validator(mode="after")
     def _normalize(self) -> "PracticeSessionUpdate":
-        self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
-        self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
+        if "knowledge_ids" in self.model_fields_set:
+            self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        if "prompt_ids" in self.model_fields_set:
+            self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
         return self
 
 

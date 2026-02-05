@@ -5,7 +5,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -41,6 +41,18 @@ async def _send_json(websocket: WebSocket, payload: Dict[str, Any]) -> None:
             if attempt >= WS_SEND_MAX_RETRIES:
                 raise
             await asyncio.sleep(WS_SEND_RETRY_BACKOFF_S * (2**attempt))
+
+
+async def _send_http_exception(websocket: WebSocket, exc: HTTPException) -> None:
+    detail = exc.detail if exc.detail is not None else "error"
+    await _send_json(
+        websocket,
+        {
+            "event": "error",
+            "detail": detail,
+            "status_code": exc.status_code,
+        },
+    )
 
 
 async def _run_practice_turn(
@@ -159,19 +171,27 @@ async def ws_run_practice_turn_new_session(
                 continue
 
             if body.few_shot_example_ids:
-                validate_my_few_shot_example_ids(
-                    db,
-                    me=me,
-                    example_ids=[int(x) for x in body.few_shot_example_ids],
-                )
+                try:
+                    validate_my_few_shot_example_ids(
+                        db,
+                        me=me,
+                        example_ids=[int(x) for x in body.few_shot_example_ids],
+                    )
+                except HTTPException as exc:
+                    await _send_http_exception(websocket, exc)
+                    continue
 
-            session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
-                db=db,
-                me=me,
-                session_id=0,
-                class_id=class_id,
-                body=body,
-            )
+            try:
+                session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+                    db=db,
+                    me=me,
+                    session_id=0,
+                    class_id=class_id,
+                    body=body,
+                )
+            except HTTPException as exc:
+                await _send_http_exception(websocket, exc)
+                continue
             generate_title = True
             requested_prompt_ids = body.prompt_ids
             requested_generation_params = (
@@ -202,13 +222,17 @@ async def ws_run_practice_turn_new_session(
                 )
                 continue
 
-            session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
-                db=db,
-                me=me,
-                session_id=session_id,
-                class_id=None,
-                body=body,
-            )
+            try:
+                session, settings, models, ctx_knowledge_ids = prepare_practice_turn_for_session(
+                    db=db,
+                    me=me,
+                    session_id=session_id,
+                    class_id=None,
+                    body=body,
+                )
+            except HTTPException as exc:
+                await _send_http_exception(websocket, exc)
+                continue
             generate_title = False
             requested_prompt_ids = body.prompt_ids
             requested_generation_params = (
