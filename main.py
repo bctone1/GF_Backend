@@ -5,10 +5,12 @@ from fastapi import FastAPI
 from fastapi.openapi.docs import get_swagger_ui_oauth2_redirect_html
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-
+from fastapi.staticfiles import StaticFiles
 from core import config
+from core.config import UPLOAD_FOLDER
 from core.middleware import ProcessTimeMiddleware
 from app.routers import register_routers
+
 
 
 def _configure_langsmith_tracing() -> None:
@@ -36,6 +38,8 @@ app = FastAPI(
 
 
 app.add_middleware(ProcessTimeMiddleware)
+
+app.mount("/file", StaticFiles(directory=UPLOAD_FOLDER), name="file")
 
 app.add_middleware(
     CORSMiddleware,
