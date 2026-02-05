@@ -12,7 +12,10 @@ from sqlalchemy.orm import Session
 
 from core.deps import get_current_user_ws, get_db
 from models.user.account import AppUser
-from schemas.user.practice import PracticeTurnRequestExistingSession, PracticeTurnRequestNewSession
+from schemas.user.practice import (
+    PracticeTurnRequestExistingSession,
+    PracticeTurnRequestNewSession,
+)
 from service.user.practice.orchestrator import prepare_practice_turn_for_session
 from service.user.practice.turn_runner import iter_practice_model_stream_events
 
@@ -183,6 +186,12 @@ async def ws_run_practice_turn_new_session(
             payload_body = {
                 "prompt_text": payload.get("prompt_text"),
                 "model_names": payload.get("model_names"),
+                "prompt_ids": payload.get("prompt_ids"),
+                "knowledge_ids": payload.get("knowledge_ids"),
+                "style_preset": payload.get("style_preset"),
+                "style_params": payload.get("style_params"),
+                "generation_params": payload.get("generation_params"),
+                "few_shot_example_ids": payload.get("few_shot_example_ids"),
             }
             try:
                 body = PracticeTurnRequestExistingSession.model_validate(payload_body)
@@ -201,10 +210,14 @@ async def ws_run_practice_turn_new_session(
                 body=body,
             )
             generate_title = False
-            requested_prompt_ids = None
-            requested_generation_params = None
-            requested_style_preset = None
-            requested_style_params = None
+            requested_prompt_ids = body.prompt_ids
+            requested_generation_params = (
+                body.generation_params.model_dump(exclude_unset=True)
+                if body.generation_params is not None
+                else None
+            )
+            requested_style_preset = body.style_preset
+            requested_style_params = body.style_params
             prompt_text = body.prompt_text
         else:
             await _send_json(websocket, {"event": "error", "detail": "session_id_required"})

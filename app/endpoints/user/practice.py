@@ -842,7 +842,10 @@ def run_practice_turn_endpoint(
     )
 
     # --- activity tracking ---
-    _k_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
+    if getattr(body, "knowledge_ids", None) is not None:
+        _k_ids = coerce_int_list(body.knowledge_ids)
+    else:
+        _k_ids = coerce_int_list(getattr(session, "knowledge_ids", None))
     track_event(
         db, user_id=me.user_id, event_type="message_sent",
         related_type="practice_session", related_id=session_id,

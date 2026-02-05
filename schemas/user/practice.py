@@ -354,10 +354,42 @@ class PracticeTurnRequestExistingSession(_PracticeTurnBase):
     """
     POST /sessions/{session_id}/chat
     - 기존 세션 턴
-    - prompt_text / model_names만 받는다. (컨텍스트는 세션 저장값 사용)
+    - prompt_text / model_names 기반으로 실행하되 필요 시 세션 관련 값 갱신 가능
     """
 
-    pass
+    prompt_ids: Optional[List[int]] = Field(
+        default=None,
+        json_schema_extra={"example": None},
+        description="프롬프트 템플릿 ID 목록(세션 갱신용)",
+    )
+    knowledge_ids: Optional[List[int]] = Field(
+        default=None,
+        json_schema_extra={"example": None},
+        description="지식베이스 ID 목록(세션 갱신용)",
+    )
+    style_preset: Optional[StylePreset] = Field(
+        default=None,
+        description="스타일 프리셋(accurate/balanced/creative/custom 등)",
+    )
+    style_params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="스타일 상세 옵션(형식/persona/힌트모드/self-check 등)",
+    )
+    generation_params: Optional[GenerationParams] = Field(
+        default=None,
+        description="LLM 생성 파라미터(temperature/top_p/max_completion_tokens 등)",
+    )
+    few_shot_example_ids: Optional[List[int]] = Field(
+        default=None,
+        description="유저 few-shot 라이브러리(example_id)에서 선택한 ID 목록",
+    )
+
+    @model_validator(mode="after")
+    def _normalize(self) -> "PracticeTurnRequestExistingSession":
+        self.prompt_ids = _normalize_int_id_list(self.prompt_ids)
+        self.knowledge_ids = _normalize_int_id_list(self.knowledge_ids)
+        self.few_shot_example_ids = _normalize_int_id_list(self.few_shot_example_ids)
+        return self
 
 
 class PracticeTurnModelResult(ORMBase):

@@ -11,6 +11,8 @@ from models.user.practice import PracticeSession, PracticeSessionSetting, Practi
 
 from schemas.user.practice import (
     PracticeSessionCreate,
+    PracticeSessionSettingUpdate,
+    PracticeSessionUpdate,
     PracticeTurnRequestNewSession,
     PracticeTurnRequestExistingSession,
     PracticeTurnResponse,
@@ -27,6 +29,7 @@ from service.user.practice.params import get_default_generation_params, normaliz
 from service.user.practice.ids import coerce_int_list, get_session_knowledge_ids
 from service.user.practice.models_sync import init_models_for_session_from_class
 from service.user.practice.turn_runner import run_practice_turn
+from service.user.fewshot import validate_my_few_shot_example_ids
 
 
 # =========================================
@@ -164,6 +167,37 @@ def prepare_practice_turn_for_session(
 
         session = ensure_my_session(db, session_id, me)
         settings = ensure_session_settings(db, session_id=session.session_id)
+
+        if body.few_shot_example_ids:
+            validate_my_few_shot_example_ids(
+                db,
+                me=me,
+                example_ids=[int(x) for x in body.few_shot_example_ids],
+            )
+
+        session_update: dict[str, Any] = {}
+        if body.prompt_ids is not None:
+            session_update["prompt_ids"] = body.prompt_ids
+        if body.knowledge_ids is not None:
+            session_update["knowledge_ids"] = body.knowledge_ids
+        if session_update:
+            session = (
+                practice_session_crud.update(
+                    db,
+                    session_id=session.session_id,
+                    data=PracticeSessionUpdate(**session_update),
+                )
+                or session
+            )
+
+        if body.few_shot_example_ids is not None:
+            updated_settings = practice_session_setting_crud.update_by_session_id(
+                db,
+                session_id=session.session_id,
+                data=PracticeSessionSettingUpdate(few_shot_example_ids=body.few_shot_example_ids),
+            )
+            if updated_settings:
+                settings = updated_settings
 
         if session.class_id is None:
             raise HTTPException(status_code=400, detail="session has no class_id")
