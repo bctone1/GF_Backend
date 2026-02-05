@@ -11,6 +11,8 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from core.deps import get_current_user_ws, get_db
+from database.session import SessionLocal
+from crud.user.document import document_crud
 from models.user.account import AppUser
 from schemas.user.practice import (
     PracticeTurnRequestExistingSession,
@@ -26,6 +28,103 @@ router = APIRouter()
 
 WS_SEND_MAX_RETRIES = 2
 WS_SEND_RETRY_BACKOFF_S = 0.2
+
+DOC_POLL_INTERVAL_S = 1.5
+DOC_POLL_TIMEOUT_S = 120.0
+
+
+def _get_unready_knowledge_ids(db: Session, knowledge_ids: list[int]) -> list[int]:
+    """Return subset of *knowledge_ids* whose status is not 'ready'."""
+    if not knowledge_ids:
+        return []
+    unready: list[int] = []
+    for kid in knowledge_ids:
+        doc = document_crud.get(db, kid)
+        if doc is not None and doc.status != "ready":
+            unready.append(kid)
+    return unready
+
+
+async def _await_documents_ready(
+    websocket: WebSocket,
+    knowledge_ids: list[int],
+    session_id: int,
+    timeout_s: float = DOC_POLL_TIMEOUT_S,
+    poll_interval_s: float = DOC_POLL_INTERVAL_S,
+) -> None:
+    """Poll document status until all *knowledge_ids* are ready.
+
+    Sends ``doc_status`` events to the client on every poll.
+    Uses a separate DB session so background-task commits are visible.
+
+    Raises:
+        HTTPException: on not-found / failed / timeout.
+        WebSocketDisconnect: if the client disconnects while waiting.
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout_s
+    pending = set(knowledge_ids)
+
+    poll_db = SessionLocal()
+    try:
+        while pending:
+            if loop.time() >= deadline:
+                for kid in pending:
+                    await _send_json(websocket, {
+                        "event": "doc_status",
+                        "session_id": session_id,
+                        "knowledge_id": kid,
+                        "status": "timeout",
+                        "progress": 0,
+                        "error": "document processing timed out",
+                    })
+                raise HTTPException(status_code=408, detail="document_processing_timeout")
+
+            poll_db.expire_all()
+            done_this_round: list[int] = []
+
+            for kid in pending:
+                doc = document_crud.get(poll_db, kid)
+
+                if doc is None:
+                    await _send_json(websocket, {
+                        "event": "doc_status",
+                        "session_id": session_id,
+                        "knowledge_id": kid,
+                        "status": "not_found",
+                        "progress": 0,
+                        "error": "document not found",
+                    })
+                    raise HTTPException(status_code=404, detail="document_not_found")
+
+                await _send_json(websocket, {
+                    "event": "doc_status",
+                    "session_id": session_id,
+                    "knowledge_id": kid,
+                    "status": doc.status,
+                    "progress": doc.progress or 0,
+                })
+
+                if doc.status == "ready":
+                    done_this_round.append(kid)
+                elif doc.status == "failed":
+                    await _send_json(websocket, {
+                        "event": "doc_status",
+                        "session_id": session_id,
+                        "knowledge_id": kid,
+                        "status": "failed",
+                        "progress": doc.progress or 0,
+                        "error": doc.error_message or "document processing failed",
+                    })
+                    raise HTTPException(status_code=422, detail="document_processing_failed")
+
+            for kid in done_this_round:
+                pending.discard(kid)
+
+            if pending:
+                await asyncio.sleep(poll_interval_s)
+    finally:
+        poll_db.close()
 
 
 async def _send_json(websocket: WebSocket, payload: Dict[str, Any]) -> None:
@@ -253,6 +352,21 @@ async def ws_run_practice_turn_new_session(
         if len(models) > 3:
             await _send_json(websocket, {"event": "error", "detail": "max_3_models_per_session"})
             continue
+
+        # -- Document readiness gate --
+        unready_ids = _get_unready_knowledge_ids(db, ctx_knowledge_ids)
+        if unready_ids:
+            try:
+                await _await_documents_ready(
+                    websocket=websocket,
+                    knowledge_ids=unready_ids,
+                    session_id=session.session_id,
+                )
+            except HTTPException as exc:
+                await _send_http_exception(websocket, exc)
+                continue
+            except WebSocketDisconnect:
+                return
 
         try:
             await _run_practice_turn(
