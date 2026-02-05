@@ -149,6 +149,15 @@ class UploadPipeline:
         return fpath, fname
 
     def extract_text(self, file_path: str) -> Tuple[str, int]:
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext in (".md", ".txt"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+            # 텍스트 파일은 페이지 개념이 없으므로 1로 고정
+            return text, 1
+
+        # PDF (default)
         docs = PyMuPDFLoader(file_path).load()
         text = "\n".join(d.page_content for d in docs if getattr(d, "page_content", "")).strip()
         return text, len(docs)
@@ -181,6 +190,8 @@ class UploadPipeline:
         *,
         ingestion_override: Optional[Dict[str, Any]] = None,
         search_override: Optional[Dict[str, Any]] = None,
+        scope: str = "knowledge_base",
+        session_id: Optional[int] = None,
     ) -> Document:
         fpath, fname = self._save_file(file)
 
@@ -195,6 +206,8 @@ class UploadPipeline:
                 status="uploading",
                 chunk_count=0,
                 progress=0,
+                scope=scope,
+                session_id=session_id,
             ),
         )
         self.db.flush()
