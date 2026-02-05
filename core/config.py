@@ -13,7 +13,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", str(BASE_DIR / "file" / "upload"))
 
 # 2) 확장자 / 업로드 제한
-DOCUMENT_EXTENSION = os.getenv("DOCUMENT_EXTENSION", ".txt,.pdf,.docx,.doc,.csv")
+DOCUMENT_EXTENSION = os.getenv("DOCUMENT_EXTENSION", ".txt,.pdf,.docx,.doc,.csv,.md")
 IMAGE_EXTENSION = os.getenv("IMAGE_EXTENSION", ".png,.jpg")
 DOCUMENT_MAX_SIZE_MB = int(os.getenv("DOCUMENT_MAX_SIZE_MB", "10"))
 DOCUMENT_MAX_SIZE_BYTES = DOCUMENT_MAX_SIZE_MB * 1024 * 1024
@@ -229,7 +229,7 @@ DEFAULT_INGESTION = {
     "chunk_size": 600,
     "chunk_overlap": 200,
     "max_chunks": 100,
-    "chunk_strategy": "recursive",
+    "chunk_strategy": "recursive",      # MVP: "recursive"만
     # parent chunk (parent_child일 때만 의미)
     "parent_chunk_size": 1500,
     "parent_chunk_overlap": 400,

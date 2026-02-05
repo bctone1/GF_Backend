@@ -43,6 +43,8 @@ class DocumentCRUD:
             chunk_count=data.chunk_count or 0,
             progress=data.progress or 0,
             error_message=data.error_message,
+            scope=getattr(data, "scope", None) or "knowledge_base",
+            session_id=getattr(data, "session_id", None),
             # uploaded_at은 서버에서 채우는 구조면 굳이 안 넣어도 됨
             uploaded_at=data.uploaded_at if getattr(data, "uploaded_at", None) is not None else None,
         )
@@ -60,11 +62,14 @@ class DocumentCRUD:
         *,
         status: Optional[str] = None,
         q: Optional[str] = None,
+        scope: Optional[str] = "knowledge_base",
         page: int = 1,
         size: int = 50,
     ) -> Tuple[Sequence[Document], int]:
         stmt = select(Document).where(Document.owner_id == int(owner_id))
 
+        if scope is not None:
+            stmt = stmt.where(Document.scope == scope)
         if status:
             stmt = stmt.where(Document.status == status)
         if q:

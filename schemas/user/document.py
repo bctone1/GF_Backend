@@ -176,6 +176,9 @@ class DocumentCreate(ORMBase):
     error_message: Optional[str] = None
     uploaded_at: Optional[datetime] = None
 
+    scope: Optional[str] = None
+    session_id: Optional[int] = None
+
 
 class DocumentUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
@@ -202,6 +205,9 @@ class DocumentResponse(ORMBase):
     chunk_count: int
     progress: int
     error_message: Optional[str] = None
+
+    scope: str = "knowledge_base"
+    session_id: Optional[int] = None
 
     uploaded_at: datetime
     updated_at: datetime
