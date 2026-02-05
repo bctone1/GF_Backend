@@ -3,20 +3,28 @@ from __future__ import annotations
 
 from typing import List, Any, Dict, Optional
 
+import json
+import logging
+
 from fastapi import (
     APIRouter,
     Depends,
+    File,
+    Form,
     HTTPException,
     Query,
     Path,
     status,
     Body,
     BackgroundTasks,
+    UploadFile,
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from core import config
 from core.deps import get_db, get_current_user
+from database.session import SessionLocal
 
 from models.user.account import AppUser
 from models.user.practice import (
@@ -66,7 +74,10 @@ from service.user.practice.orchestrator import (
 from service.user.practice_task import generate_session_title_task
 from service.user.fewshot import validate_my_few_shot_example_ids
 from service.user.activity import track_event, track_feature
+from service.user.upload_pipeline import UploadPipeline
 from crud.base import coerce_dict
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -647,6 +658,145 @@ def run_practice_turn_new_session_endpoint(
         track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="fewshot_used")
     if body.knowledge_ids:
         track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="kb_connected")
+
+    db.commit()
+
+    if not turn_result.session_title:
+        answer = _pick_answer_text(turn_result)
+        if answer:
+            background_tasks.add_task(
+                generate_session_title_task,
+                session_id=turn_result.session_id,
+                question=turn_result.prompt_text,
+                answer=answer,
+            )
+
+    return turn_result
+
+
+@router.post(
+    "/sessions/run/upload",
+    response_model=PracticeTurnResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="파일첨부빠른실행",
+)
+def run_practice_turn_new_session_with_upload(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    body: str = Form(..., description="PracticeTurnRequestNewSession JSON 문자열"),
+    class_id: int = Query(..., ge=1),
+    db: Session = Depends(get_db),
+    me: AppUser = Depends(get_current_user),
+):
+    """파일 첨부 + 새 세션 생성 + 첫 턴 (multipart/form-data).
+
+    1. body JSON → PracticeTurnRequestNewSession 검증
+    2. 파일 크기 검증
+    3. 동기 임베딩 (session scope document)
+    4. knowledge_id를 body.knowledge_ids에 merge
+    5. run_practice_turn_for_session 호출
+    6. 세션 생성 후 doc.session_id back-patch
+    """
+    # 1) JSON body 파싱
+    try:
+        raw = json.loads(body)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="invalid json in 'body'",
+        )
+    try:
+        parsed_body = PracticeTurnRequestNewSession.model_validate(raw)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+
+    # 2) 파일 크기 검증
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file required")
+
+    max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
+    file.file.seek(0, 2)
+    size = file.file.tell()
+    file.file.seek(0)
+    if size > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
+        )
+
+    # 3) 문서 init (scope=session, session_id는 아직 없으므로 None)
+    pipeline = UploadPipeline(db, user_id=me.user_id)
+    doc = pipeline.init_document(file, scope="session", session_id=None)
+    db.commit()
+    db.refresh(doc)
+    knowledge_id = doc.knowledge_id
+
+    # 4) 동기 임베딩 (별도 DB 세션)
+    bg_db = SessionLocal()
+    try:
+        bg_pipeline = UploadPipeline(bg_db, user_id=me.user_id)
+        bg_pipeline.process_document(knowledge_id)
+    except Exception as exc:
+        log.exception("session upload document processing failed: knowledge_id=%s", knowledge_id)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"document processing failed: {exc}",
+        )
+    finally:
+        bg_db.close()
+
+    # refresh 후 status 확인
+    db.refresh(doc)
+    if doc.status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"document processing failed: {doc.error_message or 'unknown'}",
+        )
+
+    # 5) knowledge_ids에 merge
+    existing_ids = list(parsed_body.knowledge_ids or [])
+    if knowledge_id not in existing_ids:
+        existing_ids.append(knowledge_id)
+    parsed_body = parsed_body.model_copy(update={"knowledge_ids": existing_ids})
+
+    if parsed_body.few_shot_example_ids:
+        validate_my_few_shot_example_ids(
+            db,
+            me=me,
+            example_ids=[int(x) for x in parsed_body.few_shot_example_ids],
+        )
+
+    # 6) 실행
+    turn_result = run_practice_turn_for_session(
+        db=db,
+        me=me,
+        session_id=0,
+        class_id=class_id,
+        body=parsed_body,
+        generate_title=False,
+    )
+
+    # 7) session_id back-patch
+    doc.session_id = turn_result.session_id
+    db.flush()
+
+    # --- activity tracking ---
+    track_event(
+        db, user_id=me.user_id, event_type="message_sent",
+        related_type="practice_session", related_id=turn_result.session_id,
+        metadata=_build_session_meta(
+            session_title=turn_result.session_title,
+            results=turn_result.results,
+            knowledge_ids=existing_ids,
+        ),
+    )
+    track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="kb_connected")
+    track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="file_attached")
+    if parsed_body.few_shot_example_ids:
+        track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="fewshot_used")
 
     db.commit()
 

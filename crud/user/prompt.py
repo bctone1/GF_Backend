@@ -42,7 +42,7 @@ class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
 
         db_obj = AIPrompt(owner_id=owner_id, **data)
         db.add(db_obj)
-        db.commit()
+        db.flush()
         db.refresh(db_obj)
         return db_obj
 
@@ -127,7 +127,7 @@ class CRUDAIPrompt(CRUDBase[AIPrompt, AIPromptCreate, AIPromptUpdate]):
             setattr(db_obj, field, value)
 
         db.add(db_obj)
-        db.commit()
+        db.flush()
         db.refresh(db_obj)
         return db_obj
 
@@ -173,7 +173,7 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
             **data,
         )
         db.add(db_obj)
-        db.commit()
+        db.flush()
         db.refresh(db_obj)
         return db_obj
 
@@ -226,7 +226,7 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
     ) -> PromptShare:
         share.is_active = is_active
         db.add(share)
-        db.commit()
+        db.flush()
         db.refresh(share)
         return share
 
@@ -252,14 +252,15 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
             if not existing.is_active:
                 existing.is_active = True
                 db.add(existing)
-                db.commit()
+                db.flush()
                 db.refresh(existing)
             return existing
 
         try:
-            return self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+            with db.begin_nested():
+                obj = self.create(db=db, obj_in=obj_in, shared_by_user_id=shared_by_user_id)
+            return obj
         except IntegrityError:
-            db.rollback()
             # 누군가가 방금 만들었을 가능성 → 다시 조회해서 리턴
             again = self.get_by_prompt_and_class(
                 db,
@@ -271,7 +272,7 @@ class CRUDPromptShare(CRUDBase[PromptShare, PromptShareCreate, PromptShareUpdate
             if not again.is_active:
                 again.is_active = True
                 db.add(again)
-                db.commit()
+                db.flush()
                 db.refresh(again)
             return again
 

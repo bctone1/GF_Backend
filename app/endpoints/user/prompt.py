@@ -113,6 +113,7 @@ def fork_shared_prompt_to_my_prompt_endpoint(
         me=me,
         new_name=payload.name,
     )
+    db.commit()
     return new_prompt
 
 
@@ -225,6 +226,7 @@ def update_my_prompt_endpoint(
     - name / role_description / system_prompt / template_source / is_active
     """
     prompt = update_my_prompt(db=db, me=me, prompt_id=prompt_id, data=body)
+    db.commit()
     return prompt
 
 
@@ -248,6 +250,7 @@ def delete_my_prompt_endpoint(
     - owner_id != me.user_id 이면 404 처리 (서비스 레이어에서 검증)
     """
     delete_my_prompt(db=db, me=me, prompt_id=prompt_id)
+    db.commit()
     return None
 
 
@@ -289,6 +292,7 @@ def share_prompt_to_class_endpoint(
         class_id=class_id,
         me=me,
     )
+    db.commit()
     return share
 
 
@@ -321,4 +325,5 @@ def deactivate_prompt_share_endpoint(
         class_id=class_id,
         me=me,
     )
+    db.commit()
     return share
