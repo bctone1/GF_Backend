@@ -97,25 +97,23 @@ async def _await_documents_ready(
                     })
                     raise HTTPException(status_code=404, detail="document_not_found")
 
-                await _send_json(websocket, {
+                status_payload = {
                     "event": "doc_status",
                     "session_id": session_id,
                     "knowledge_id": kid,
                     "status": doc.status,
                     "progress": doc.progress or 0,
-                })
+                }
 
                 if doc.status == "ready":
+                    status_payload["chunks"] = doc.chunk_count or 0
                     done_this_round.append(kid)
                 elif doc.status == "failed":
-                    await _send_json(websocket, {
-                        "event": "doc_status",
-                        "session_id": session_id,
-                        "knowledge_id": kid,
-                        "status": "failed",
-                        "progress": doc.progress or 0,
-                        "error": doc.error_message or "document processing failed",
-                    })
+                    status_payload["error"] = doc.error_message or "document processing failed"
+
+                await _send_json(websocket, status_payload)
+
+                if doc.status == "failed":
                     raise HTTPException(status_code=422, detail="document_processing_failed")
 
             for kid in done_this_round:
@@ -291,6 +289,13 @@ async def ws_run_practice_turn_new_session(
             except HTTPException as exc:
                 await _send_http_exception(websocket, exc)
                 continue
+
+            # Notify client of new session creation
+            await _send_json(websocket, {
+                "event": "session_created",
+                "session_id": session.session_id,
+            })
+
             generate_title = True
             requested_prompt_ids = body.prompt_ids
             requested_generation_params = (
