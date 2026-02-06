@@ -204,6 +204,7 @@ class UploadPipeline:
         *,
         ingestion_override: Optional[Dict[str, Any]] = None,
         search_override: Optional[Dict[str, Any]] = None,
+        rag_ui_mode: str = "simple",
         scope: str = "knowledge_base",
     ) -> Document:
         fpath, fname = self._save_file(file)
@@ -219,6 +220,7 @@ class UploadPipeline:
                 status="uploading",
                 chunk_count=0,
                 progress=0,
+                rag_ui_mode=rag_ui_mode,
                 scope=scope,
             ),
         )

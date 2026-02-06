@@ -319,7 +319,7 @@ def upload_document(
     _validate_scope(scope)
 
     pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.init_document(file, scope=scope)
+    doc = pipeline.init_document(file, rag_ui_mode="simple", scope=scope)
 
     track_event(
         db, user_id=me.user_id, event_type="document_uploaded",
@@ -386,6 +386,7 @@ def upload_document_advanced(
         file,
         ingestion_override=ingestion_override,
         search_override=search_override,
+        rag_ui_mode="advanced",
         scope=scope,
     )
 

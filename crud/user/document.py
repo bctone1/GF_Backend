@@ -44,6 +44,7 @@ class DocumentCRUD:
             chunk_count=data.chunk_count or 0,
             progress=data.progress or 0,
             error_message=data.error_message,
+            rag_ui_mode=getattr(data, "rag_ui_mode", None),
             scope=getattr(data, "scope", None) or "knowledge_base",
             # uploaded_at은 서버에서 채우는 구조면 굳이 안 넣어도 됨
             uploaded_at=data.uploaded_at if getattr(data, "uploaded_at", None) is not None else None,

@@ -176,6 +176,7 @@ class DocumentCreate(ORMBase):
     error_message: Optional[str] = None
     uploaded_at: Optional[datetime] = None
 
+    rag_ui_mode: Optional[str] = None
     scope: Optional[str] = None
 
 
@@ -205,6 +206,7 @@ class DocumentResponse(ORMBase):
     progress: int
     error_message: Optional[str] = None
 
+    rag_ui_mode: Optional[str] = None
     scope: str = "knowledge_base"
 
     uploaded_at: datetime
