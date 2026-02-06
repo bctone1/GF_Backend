@@ -205,7 +205,6 @@ class UploadPipeline:
         ingestion_override: Optional[Dict[str, Any]] = None,
         search_override: Optional[Dict[str, Any]] = None,
         scope: str = "knowledge_base",
-        session_id: Optional[int] = None,
     ) -> Document:
         fpath, fname = self._save_file(file)
 
@@ -221,7 +220,6 @@ class UploadPipeline:
                 chunk_count=0,
                 progress=0,
                 scope=scope,
-                session_id=session_id,
             ),
         )
         self.db.flush()

@@ -177,7 +177,6 @@ class DocumentCreate(ORMBase):
     uploaded_at: Optional[datetime] = None
 
     scope: Optional[str] = None
-    session_id: Optional[int] = None
 
 
 class DocumentUpdate(ORMBase):
@@ -207,7 +206,6 @@ class DocumentResponse(ORMBase):
     error_message: Optional[str] = None
 
     scope: str = "knowledge_base"
-    session_id: Optional[int] = None
 
     uploaded_at: datetime
     updated_at: datetime

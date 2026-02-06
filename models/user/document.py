@@ -91,18 +91,11 @@ class Document(Base):
     # RAG UI 모드: simple(간단 업로드), advanced(고급 설정), compare(비교 분석)
     rag_ui_mode = Column(Text, nullable=True)
 
-    # scope: knowledge_base(기본, 지식베이스 문서) | session(세션 첨부 파일)
+    # scope: knowledge_base(기본, 지식베이스 문서) | session(세션에서 첨부한 파일)
     scope = Column(
         Text,
         nullable=False,
         server_default=text("'knowledge_base'"),
-    )
-
-    # 세션 첨부 파일인 경우 연결된 practice_session
-    session_id = Column(
-        BigInteger,
-        ForeignKey("user.practice_sessions.session_id", ondelete="SET NULL"),
-        nullable=True,
     )
 
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -151,11 +144,6 @@ class Document(Base):
             "scope IN ('knowledge_base', 'session')",
             name="chk_documents_scope_enum",
         ),
-        CheckConstraint(
-            "(scope = 'knowledge_base' AND session_id IS NULL) OR scope = 'session'",
-            name="chk_documents_scope_session_consistency",
-        ),
-        Index("idx_documents_session_id", "session_id"),
         Index("idx_documents_owner_time", "owner_id", "uploaded_at"),
         Index("idx_documents_status_time", "status", "uploaded_at"),
         Index(

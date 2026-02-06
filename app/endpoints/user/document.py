@@ -112,27 +112,12 @@ def _resolve_document_file_path(*, doc, user_id: int) -> str:
     return os.path.join(base_dir, folder_path, doc.name)
 
 
-def _validate_scope_params(
-    db: Session, me: AppUser, scope: str, session_id: Optional[int],
-) -> None:
+def _validate_scope(scope: str) -> None:
     if scope not in ("knowledge_base", "session"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="scope must be 'knowledge_base' or 'session'",
         )
-    if scope == "session" and session_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="session_id required for scope 'session'",
-        )
-    if scope == "knowledge_base" and session_id is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="session_id not allowed for scope 'knowledge_base'",
-        )
-    if scope == "session":
-        from service.user.practice.ownership import ensure_my_session
-        ensure_my_session(db, session_id, me)
 
 
 def _estimate_tokens(text: str, *, model: str) -> int:
@@ -278,9 +263,7 @@ def list_document_chunks(
     description=(
         "문서 메타데이터 직접 생성 (파일 업로드 없이).\n"
         "owner_id는 인증 토큰에서 자동 설정됨.\n\n"
-        "- 스키마: user.documents\n"
-        "- scope: 'knowledge_base' (기본) | 'session'\n"
-        "- session_id: scope='session'일 때 필수, scope='knowledge_base'일 때 null"
+        "- 스키마: user.documents"
     ),
 )
 def create_document(
@@ -309,16 +292,14 @@ def create_document(
         "파이프라인 완료 시 status='completed'로 변경됨.\n\n"
         "- 스키마: user.documents\n"
         "- 최대 파일 크기: DOCUMENT_MAX_SIZE_MB (설정값)\n"
-        "- scope: 'knowledge_base' (기본) | 'session'\n"
-        "- session_id: scope='session'일 때 필수 (본인 세션만 허용), scope='knowledge_base'일 때 null\n"
-        "- 제약: scope='session' + session_id 누락 → 400, scope='knowledge_base' + session_id 존재 → 400"
+        "- scope: 'knowledge_base' (기본) | 'session' (세션에서 첨부)\n"
+        "- 세션과의 연결은 session_documents junction table로 관리"
     ),
 )
 def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     scope: str = Form("knowledge_base"),
-    session_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
@@ -335,10 +316,10 @@ def upload_document(
             detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
         )
 
-    _validate_scope_params(db, me, scope, session_id)
+    _validate_scope(scope)
 
     pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.init_document(file, scope=scope, session_id=session_id)
+    doc = pipeline.init_document(file, scope=scope)
 
     track_event(
         db, user_id=me.user_id, event_type="document_uploaded",
@@ -367,18 +348,16 @@ def upload_document(
         "ingestion_settings/search_settings를 JSON 문자열로 전달하여 기본 설정을 오버라이드할 수 있음.\n\n"
         "- 스키마: user.documents + user.document_ingestion_settings + user.document_search_settings\n"
         "- 최대 파일 크기: DOCUMENT_MAX_SIZE_MB (설정값)\n"
-        "- scope: 'knowledge_base' (기본) | 'session'\n"
-        "- session_id: scope='session'일 때 필수 (본인 세션만 허용), scope='knowledge_base'일 때 null\n"
+        "- scope: 'knowledge_base' (기본) | 'session' (세션에서 첨부)\n"
         "- ingestion_settings: JSON 문자열 (예: {\"chunk_size\": 800, \"chunking_mode\": \"parent_child\"})\n"
         "- search_settings: JSON 문자열 (예: {\"top_k\": 10, \"min_score\": \"0.25\"})\n"
-        "- 제약: scope='session' + session_id 누락 → 400, scope='knowledge_base' + session_id 존재 → 400"
+        "- 세션과의 연결은 session_documents junction table로 관리"
     ),
 )
 def upload_document_advanced(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     scope: str = Form("knowledge_base"),
-    session_id: Optional[int] = Form(None),
     ingestion_settings: Optional[str] = Form(None),
     search_settings: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -397,7 +376,7 @@ def upload_document_advanced(
             detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
         )
 
-    _validate_scope_params(db, me, scope, session_id)
+    _validate_scope(scope)
 
     ingestion_override = _safe_parse_json_dict(ingestion_settings, field_name="ingestion_settings")
     search_override = _safe_parse_json_dict(search_settings, field_name="search_settings")
@@ -408,7 +387,6 @@ def upload_document_advanced(
         ingestion_override=ingestion_override,
         search_override=search_override,
         scope=scope,
-        session_id=session_id,
     )
 
     track_event(
