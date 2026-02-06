@@ -24,6 +24,33 @@ EMBEDDING_DIM_FIXED = 1536  # postgreSQL 현재 1536만 됨 small model고정
 KB_SCORE_TYPE_FIXED = "cosine_similarity"  # 유사도 기반으로 고정
 
 
+# ========== user.session_documents (junction) ==========
+class SessionDocument(Base):
+    """세션↔문서 다대다 중간 테이블 (knowledge_base 문서의 세션 연결 추적)"""
+    __tablename__ = "session_documents"
+
+    session_id = Column(
+        BigInteger,
+        ForeignKey("user.practice_sessions.session_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    knowledge_id = Column(
+        BigInteger,
+        ForeignKey("user.documents.knowledge_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    linked_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("idx_session_documents_knowledge", "knowledge_id"),
+        {"schema": "user"},
+    )
+
+
 # ========== user.documents ==========
 class Document(Base):
     __tablename__ = "documents"

@@ -4,27 +4,22 @@ from __future__ import annotations
 from typing import List, Any, Dict, Optional
 
 import json
-import logging
 
 from fastapi import (
     APIRouter,
     Depends,
-    File,
-    Form,
     HTTPException,
     Query,
     Path,
     status,
     Body,
     BackgroundTasks,
-    UploadFile,
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from core import config
 from core.deps import get_db, get_current_user
-from database.session import SessionLocal
 
 from models.user.account import AppUser
 from models.user.practice import (
@@ -74,10 +69,7 @@ from service.user.practice.orchestrator import (
 from service.user.practice_task import generate_session_title_task
 from service.user.fewshot import validate_my_few_shot_example_ids
 from service.user.activity import track_event, track_feature
-from service.user.upload_pipeline import UploadPipeline
 from crud.base import coerce_dict
-
-log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -245,6 +237,7 @@ def _extract_generation_patch(payload: Dict[str, Any]) -> Dict[str, Any]:
     response_model=Page[PracticeSessionResponse],
     operation_id="list_my_practice_sessions",
     summary="내세션목록",
+    description="로그인 사용자의 연습 세션 목록 조회. 페이지네이션 지원. 스키마: user.practice_sessions",
 )
 def list_my_practice_sessions(
     page: int = Query(1, ge=1),
@@ -268,6 +261,13 @@ def list_my_practice_sessions(
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session",
     summary="세션생성",
+    description=(
+        "새 연습 세션 생성. class_id 필수.\n"
+        "세션 생성 시 클래스에 설정된 모델 목록이 자동 동기화됨.\n\n"
+        "- 스키마: user.practice_sessions + user.practice_session_settings + user.practice_session_models\n"
+        "- class_id: 필수 (소속 클래스)\n"
+        "- knowledge_ids: 지식베이스 문서 연결 (선택)"
+    ),
 )
 def create_practice_session(
     data: PracticeSessionCreate,
@@ -310,6 +310,11 @@ def create_practice_session(
     response_model=PracticeSessionResponse,
     operation_id="get_practice_session",
     summary="세션조회",
+    description=(
+        "세션 상세 조회. 본인 소유 세션만 접근 가능.\n"
+        "조회 시 클래스 모델 목록이 자동 동기화되며, settings·responses 포함 반환.\n\n"
+        "- 스키마: user.practice_sessions"
+    ),
 )
 def get_practice_session(
     session_id: int = Path(..., ge=1),
@@ -350,6 +355,11 @@ def get_practice_session(
     response_model=PracticeSessionResponse,
     operation_id="update_practice_session",
     summary="세션수정",
+    description=(
+        "세션 메타데이터 부분 수정. 본인 소유 세션만 가능.\n"
+        "null이 아닌 필드만 업데이트됨 (partial update).\n\n"
+        "- 스키마: user.practice_sessions"
+    ),
 )
 def update_practice_session(
     session_id: int = Path(..., ge=1),
@@ -369,7 +379,11 @@ def update_practice_session(
     "/sessions/{session_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_session",
-    summary="세션 삭제",
+    summary="세션삭제",
+    description=(
+        "세션 및 관련 데이터(설정, 모델, 응답) 삭제. 본인 소유 세션만 가능. 복구 불가.\n\n"
+        "- 스키마: user.practice_sessions (cascade)"
+    ),
 )
 def delete_practice_session(
     session_id: int = Path(..., ge=1),
@@ -390,6 +404,11 @@ def delete_practice_session(
     response_model=PracticeSessionSettingResponse,
     operation_id="get_practice_session_settings",
     summary="설정조회",
+    description=(
+        "세션 설정 조회. 클래스 모델 자동 동기화 후 반환.\n"
+        "설정이 없으면 기본값으로 자동 생성.\n\n"
+        "- 스키마: user.practice_session_settings"
+    ),
 )
 def get_practice_session_settings(
     session_id: int = Path(..., ge=1),
@@ -410,6 +429,13 @@ def get_practice_session_settings(
     response_model=PracticeSessionSettingResponse,
     operation_id="update_practice_session_settings",
     summary="설정수정",
+    description=(
+        "세션 설정 부분 수정. null이 아닌 필드만 업데이트됨.\n"
+        "generation_params 변경 시 세션 내 모든 모델에 동기화됨.\n\n"
+        "- 스키마: user.practice_session_settings\n"
+        "- few_shot_example_ids: 본인 소유 예시만 허용\n"
+        "- generation_params: temperature, top_p, max_completion_tokens 등"
+    ),
 )
 def update_practice_session_settings(
     session_id: int = Path(..., ge=1),
@@ -478,6 +504,11 @@ def update_practice_session_settings(
     response_model=List[PracticeSessionModelResponse],
     operation_id="list_practice_session_models",
     summary="세션모델목록",
+    description=(
+        "세션에 연결된 LLM 모델 목록 조회.\n"
+        "클래스에 모델이 설정된 경우 자동 동기화 후 반환.\n\n"
+        "- 스키마: user.practice_session_models"
+    ),
 )
 def list_practice_session_models(
     session_id: int = Path(..., ge=1),
@@ -499,6 +530,13 @@ def list_practice_session_models(
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_session_model",
     summary="세션모델추가",
+    description=(
+        "세션에 LLM 모델 추가/활성화. 클래스에서 허용된 모델만 추가 가능.\n"
+        "이미 존재하는 모델이면 generation_params만 머지됨.\n\n"
+        "- 스키마: user.practice_session_models\n"
+        "- class_id 필수 (세션에 클래스가 연결되어 있어야 함)\n"
+        "- is_primary: true 시 해당 모델을 기본 모델로 설정"
+    ),
 )
 def create_practice_session_model(
     session_id: int = Path(..., ge=1),
@@ -548,6 +586,12 @@ def create_practice_session_model(
     response_model=PracticeSessionModelResponse,
     operation_id="user_update_practice_session_model",
     summary="모델설정수정",
+    description=(
+        "세션 모델 설정 부분 수정. 본인 소유 세션의 모델만 가능.\n"
+        "is_primary=true 시 해당 모델을 기본 모델로 전환 (다른 모델은 자동 해제).\n"
+        "generation_params는 기존 값에 머지됨 (덮어쓰기 아님).\n\n"
+        "- 스키마: user.practice_session_models"
+    ),
 )
 def update_practice_session_model(
     session_model_id: int = Path(..., ge=1),
@@ -600,6 +644,10 @@ def update_practice_session_model(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_session_model",
     summary="세션모델삭제",
+    description=(
+        "세션에서 모델 제거. 본인 소유 세션의 모델만 가능. 복구 불가.\n\n"
+        "- 스키마: user.practice_session_models"
+    ),
 )
 def delete_practice_session_model(
     session_model_id: int = Path(..., ge=1),
@@ -620,6 +668,15 @@ def delete_practice_session_model(
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
     summary="빠른실행",
+    description=(
+        "새 세션 생성 + 첫 턴 실행을 한 번에 수행.\n"
+        "session_id=0으로 내부 처리되어 새 세션이 자동 생성됨.\n"
+        "세션 타이틀은 첫 응답 기반으로 백그라운드 자동 생성.\n\n"
+        "- 스키마: user.practice_sessions + user.practice_responses\n"
+        "- class_id: 필수 (query param)\n"
+        "- knowledge_ids: 지식베이스 문서 연결 (선택)\n"
+        "- few_shot_example_ids: 본인 소유 예시만 허용"
+    ),
 )
 def run_practice_turn_new_session_endpoint(
     background_tasks: BackgroundTasks,
@@ -675,150 +732,18 @@ def run_practice_turn_new_session_endpoint(
 
 
 @router.post(
-    "/sessions/run/upload",
-    response_model=PracticeTurnResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="파일첨부빠른실행",
-)
-def run_practice_turn_new_session_with_upload(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    body: str = Form(..., description="PracticeTurnRequestNewSession JSON 문자열"),
-    class_id: int = Query(..., ge=1),
-    db: Session = Depends(get_db),
-    me: AppUser = Depends(get_current_user),
-):
-    """파일 첨부 + 새 세션 생성 + 첫 턴 (multipart/form-data).
-
-    1. body JSON → PracticeTurnRequestNewSession 검증
-    2. 파일 크기 검증
-    3. 동기 임베딩 (session scope document)
-    4. knowledge_id를 body.knowledge_ids에 merge
-    5. run_practice_turn_for_session 호출
-    6. 세션 생성 후 doc.session_id back-patch
-    """
-    # 1) JSON body 파싱
-    try:
-        raw = json.loads(body)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="invalid json in 'body'",
-        )
-    try:
-        parsed_body = PracticeTurnRequestNewSession.model_validate(raw)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=str(exc),
-        )
-
-    # 2) 파일 크기 검증
-    if not file.filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="file required")
-
-    max_bytes = config.DOCUMENT_MAX_SIZE_BYTES
-    file.file.seek(0, 2)
-    size = file.file.tell()
-    file.file.seek(0)
-    if size > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
-        )
-
-    # 3) 문서 init (scope=session, session_id는 아직 없으므로 None)
-    pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.init_document(file, scope="session", session_id=None)
-    db.commit()
-    db.refresh(doc)
-    knowledge_id = doc.knowledge_id
-
-    # 4) 동기 임베딩 (별도 DB 세션)
-    bg_db = SessionLocal()
-    try:
-        bg_pipeline = UploadPipeline(bg_db, user_id=me.user_id)
-        bg_pipeline.process_document(knowledge_id)
-    except Exception as exc:
-        log.exception("session upload document processing failed: knowledge_id=%s", knowledge_id)
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"document processing failed: {exc}",
-        )
-    finally:
-        bg_db.close()
-
-    # refresh 후 status 확인
-    db.refresh(doc)
-    if doc.status != "ready":
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"document processing failed: {doc.error_message or 'unknown'}",
-        )
-
-    # 5) knowledge_ids에 merge
-    existing_ids = list(parsed_body.knowledge_ids or [])
-    if knowledge_id not in existing_ids:
-        existing_ids.append(knowledge_id)
-    parsed_body = parsed_body.model_copy(update={"knowledge_ids": existing_ids})
-
-    if parsed_body.few_shot_example_ids:
-        validate_my_few_shot_example_ids(
-            db,
-            me=me,
-            example_ids=[int(x) for x in parsed_body.few_shot_example_ids],
-        )
-
-    # 6) 실행
-    turn_result = run_practice_turn_for_session(
-        db=db,
-        me=me,
-        session_id=0,
-        class_id=class_id,
-        body=parsed_body,
-        generate_title=False,
-    )
-
-    # 7) session_id back-patch
-    doc.session_id = turn_result.session_id
-    db.flush()
-
-    # --- activity tracking ---
-    track_event(
-        db, user_id=me.user_id, event_type="message_sent",
-        related_type="practice_session", related_id=turn_result.session_id,
-        metadata=_build_session_meta(
-            session_title=turn_result.session_title,
-            results=turn_result.results,
-            knowledge_ids=existing_ids,
-        ),
-    )
-    track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="kb_connected")
-    track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="file_attached")
-    if parsed_body.few_shot_example_ids:
-        track_feature(db, user_id=me.user_id, class_id=class_id, feature_type="fewshot_used")
-
-    db.commit()
-
-    if not turn_result.session_title:
-        answer = _pick_answer_text(turn_result)
-        if answer:
-            background_tasks.add_task(
-                generate_session_title_task,
-                session_id=turn_result.session_id,
-                question=turn_result.prompt_text,
-                answer=answer,
-            )
-
-    return turn_result
-
-
-@router.post(
     "/sessions/{session_id}/chat",
     response_model=PracticeTurnResponse,
     status_code=status.HTTP_201_CREATED,
     operation_id="run_practice_turn_for_existing_session",
     summary="세션턴실행",
+    description=(
+        "기존 세션에서 새 턴(대화) 실행. 본인 소유 세션만 가능.\n"
+        "세션에 class_id가 연결되어 있어야 함.\n"
+        "세션 타이틀이 없으면 첫 응답 기반으로 백그라운드 자동 생성.\n\n"
+        "- 스키마: user.practice_sessions + user.practice_responses\n"
+        "- knowledge_ids: 턴별 지식베이스 오버라이드 가능 (미지정 시 세션 기본값 사용)"
+    ),
 )
 def run_practice_turn_endpoint(
     background_tasks: BackgroundTasks,
@@ -881,6 +806,10 @@ def run_practice_turn_endpoint(
     response_model=List[PracticeResponseResponse],
     operation_id="list_practice_responses_by_model",
     summary="응답목록",
+    description=(
+        "특정 세션 모델의 응답(턴) 목록 조회. 본인 소유 세션의 모델만 가능.\n\n"
+        "- 스키마: user.practice_responses"
+    ),
 )
 def list_practice_responses_by_model(
     session_model_id: int = Path(..., ge=1),
@@ -898,6 +827,12 @@ def list_practice_responses_by_model(
     status_code=status.HTTP_201_CREATED,
     operation_id="create_practice_response",
     summary="응답생성",
+    description=(
+        "특정 세션 모델에 응답 수동 생성.\n"
+        "comparison_run_id 지정 시 해당 비교 실행과 연결됨 (세션 일치 필수).\n\n"
+        "- 스키마: user.practice_responses\n"
+        "- session_model_id, session_id, model_name은 서버에서 자동 설정"
+    ),
 )
 def create_practice_response(
     session_model_id: int = Path(..., ge=1),
@@ -929,6 +864,7 @@ def create_practice_response(
     response_model=PracticeResponseResponse,
     operation_id="get_practice_response",
     summary="응답조회",
+    description="응답 단건 조회. 본인 소유 세션의 응답만 접근 가능. 스키마: user.practice_responses",
 )
 def get_practice_response(
     response_id: int = Path(..., ge=1),
@@ -944,6 +880,11 @@ def get_practice_response(
     response_model=PracticeResponseResponse,
     operation_id="update_practice_response",
     summary="응답수정",
+    description=(
+        "응답 부분 수정. 본인 소유 세션의 응답만 가능.\n"
+        "comparison_run_id 변경 시 세션 일치 검증 수행.\n\n"
+        "- 스키마: user.practice_responses"
+    ),
 )
 def update_practice_response(
     response_id: int = Path(..., ge=1),
@@ -969,6 +910,7 @@ def update_practice_response(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_practice_response",
     summary="응답삭제",
+    description="응답 삭제. 본인 소유 세션의 응답만 가능. 복구 불가. 스키마: user.practice_responses",
 )
 def delete_practice_response(
     response_id: int = Path(..., ge=1),

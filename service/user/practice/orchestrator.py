@@ -30,6 +30,7 @@ from service.user.practice.ids import coerce_int_list, get_session_knowledge_ids
 from service.user.practice.models_sync import init_models_for_session_from_class
 from service.user.practice.turn_runner import run_practice_turn
 from service.user.fewshot import validate_my_few_shot_example_ids
+from crud.user.document import session_document_crud
 
 
 # =========================================
@@ -147,6 +148,11 @@ def prepare_practice_turn_for_session(
             sync_existing=True,
         )
 
+        # junction table 동기화: session↔document N:N 연결
+        session_document_crud.sync(
+            db, session_id=session.session_id, knowledge_ids=requested_knowledge_ids,
+        )
+
         db.flush()
         db.commit()
 
@@ -181,6 +187,12 @@ def prepare_practice_turn_for_session(
             session_update["prompt_ids"] = body.prompt_ids
         if body.knowledge_ids is not None:
             session_update["knowledge_ids"] = body.knowledge_ids
+            # junction table 동기화: session↔document 다대다 연결
+            session_document_crud.sync(
+                db,
+                session_id=session.session_id,
+                knowledge_ids=coerce_int_list(body.knowledge_ids),
+            )
         if session_update:
             session = (
                 practice_session_crud.update(

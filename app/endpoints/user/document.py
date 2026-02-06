@@ -112,6 +112,29 @@ def _resolve_document_file_path(*, doc, user_id: int) -> str:
     return os.path.join(base_dir, folder_path, doc.name)
 
 
+def _validate_scope_params(
+    db: Session, me: AppUser, scope: str, session_id: Optional[int],
+) -> None:
+    if scope not in ("knowledge_base", "session"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="scope must be 'knowledge_base' or 'session'",
+        )
+    if scope == "session" and session_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id required for scope 'session'",
+        )
+    if scope == "knowledge_base" and session_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id not allowed for scope 'knowledge_base'",
+        )
+    if scope == "session":
+        from service.user.practice.ownership import ensure_my_session
+        ensure_my_session(db, session_id, me)
+
+
 def _estimate_tokens(text: str, *, model: str) -> int:
     # preview에서만 쓰는 토큰 추정(실제로는 tiktoken 기반일 가능성이 높아서 정확)
     try:
@@ -158,6 +181,7 @@ def run_document_pipeline_background(user_id: int, knowledge_id: int) -> None:
     response_model=Page[DocumentResponse],
     operation_id="list_my_document",
     summary="내문서목록",
+    description="로그인 사용자의 문서 목록 조회. status 필터·문서명 검색 지원. 스키마: user.documents",
 )
 def list_my_document(
     page: int = Query(1, ge=1),
@@ -187,6 +211,7 @@ def list_my_document(
     response_model=List[DocumentUsageResponse],
     operation_id="list_document_usage",
     summary="문서사용처",
+    description="문서가 연결된 사용처(프로젝트·세션 등) 목록 조회. 읽기 전용. 스키마: user.document_usage",
 )
 def list_document_usage(
     knowledge_id: int = Path(..., ge=1),
@@ -206,6 +231,7 @@ def list_document_usage(
     response_model=List[DocumentPageResponse],
     operation_id="list_document_pages",
     summary="문서페이지",
+    description="문서 페이지 목록 조회. 읽기 전용. 스키마: user.document_pages",
 )
 def list_document_pages(
     knowledge_id: int = Path(..., ge=1),
@@ -222,6 +248,7 @@ def list_document_pages(
     response_model=List[DocumentChunkResponse],
     operation_id="list_document_chunks",
     summary="문서청크",
+    description="문서 청크 목록 조회. page_id로 특정 페이지 필터 가능. 읽기 전용. 스키마: user.document_chunks",
 )
 def list_document_chunks(
     knowledge_id: int = Path(..., ge=1),
@@ -248,6 +275,13 @@ def list_document_chunks(
     status_code=status.HTTP_201_CREATED,
     operation_id="create_document",
     summary="문서생성",
+    description=(
+        "문서 메타데이터 직접 생성 (파일 업로드 없이).\n"
+        "owner_id는 인증 토큰에서 자동 설정됨.\n\n"
+        "- 스키마: user.documents\n"
+        "- scope: 'knowledge_base' (기본) | 'session'\n"
+        "- session_id: scope='session'일 때 필수, scope='knowledge_base'일 때 null"
+    ),
 )
 def create_document(
     data: DocumentCreate,
@@ -269,10 +303,22 @@ def create_document(
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document",
     summary="문서업로드",
+    description=(
+        "파일 업로드 → 문서 생성 → 백그라운드 파이프라인(텍스트 추출·청킹·임베딩) 자동 실행.\n"
+        "업로드 즉시 문서 메타가 반환되며, status='uploading'으로 시작.\n"
+        "파이프라인 완료 시 status='completed'로 변경됨.\n\n"
+        "- 스키마: user.documents\n"
+        "- 최대 파일 크기: DOCUMENT_MAX_SIZE_MB (설정값)\n"
+        "- scope: 'knowledge_base' (기본) | 'session'\n"
+        "- session_id: scope='session'일 때 필수 (본인 세션만 허용), scope='knowledge_base'일 때 null\n"
+        "- 제약: scope='session' + session_id 누락 → 400, scope='knowledge_base' + session_id 존재 → 400"
+    ),
 )
 def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    scope: str = Form("knowledge_base"),
+    session_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
     me: AppUser = Depends(get_current_user),
 ):
@@ -289,8 +335,10 @@ def upload_document(
             detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
         )
 
+    _validate_scope_params(db, me, scope, session_id)
+
     pipeline = UploadPipeline(db, user_id=me.user_id)
-    doc = pipeline.init_document(file)
+    doc = pipeline.init_document(file, scope=scope, session_id=session_id)
 
     track_event(
         db, user_id=me.user_id, event_type="document_uploaded",
@@ -314,10 +362,23 @@ def upload_document(
     status_code=status.HTTP_201_CREATED,
     operation_id="upload_document_advanced",
     summary="문서고급업로드",
+    description=(
+        "파일 업로드 + 청킹/검색 설정 커스텀 지정 → 백그라운드 파이프라인 자동 실행.\n"
+        "ingestion_settings/search_settings를 JSON 문자열로 전달하여 기본 설정을 오버라이드할 수 있음.\n\n"
+        "- 스키마: user.documents + user.document_ingestion_settings + user.document_search_settings\n"
+        "- 최대 파일 크기: DOCUMENT_MAX_SIZE_MB (설정값)\n"
+        "- scope: 'knowledge_base' (기본) | 'session'\n"
+        "- session_id: scope='session'일 때 필수 (본인 세션만 허용), scope='knowledge_base'일 때 null\n"
+        "- ingestion_settings: JSON 문자열 (예: {\"chunk_size\": 800, \"chunking_mode\": \"parent_child\"})\n"
+        "- search_settings: JSON 문자열 (예: {\"top_k\": 10, \"min_score\": \"0.25\"})\n"
+        "- 제약: scope='session' + session_id 누락 → 400, scope='knowledge_base' + session_id 존재 → 400"
+    ),
 )
 def upload_document_advanced(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    scope: str = Form("knowledge_base"),
+    session_id: Optional[int] = Form(None),
     ingestion_settings: Optional[str] = Form(None),
     search_settings: Optional[str] = Form(None),
     db: Session = Depends(get_db),
@@ -336,6 +397,8 @@ def upload_document_advanced(
             detail=f"파일 최대용량 도달. 최대 {config.DOCUMENT_MAX_SIZE_MB}MB 까지만 업로드할 수 있음",
         )
 
+    _validate_scope_params(db, me, scope, session_id)
+
     ingestion_override = _safe_parse_json_dict(ingestion_settings, field_name="ingestion_settings")
     search_override = _safe_parse_json_dict(search_settings, field_name="search_settings")
 
@@ -344,6 +407,8 @@ def upload_document_advanced(
         file,
         ingestion_override=ingestion_override,
         search_override=search_override,
+        scope=scope,
+        session_id=session_id,
     )
 
     track_event(
@@ -364,6 +429,7 @@ def upload_document_advanced(
     response_model=DocumentResponse,
     operation_id="get_document_detail",
     summary="문서상세",
+    description="문서 상세 조회. 본인 소유 문서만 접근 가능. 스키마: user.documents",
 )
 def get_document_detail(
     knowledge_id: int = Path(..., ge=1),
@@ -379,6 +445,12 @@ def get_document_detail(
     response_model=DocumentResponse,
     operation_id="update_document",
     summary="문서수정",
+    description=(
+        "문서 메타데이터 부분 수정. 본인 소유 문서만 가능.\n"
+        "변경 가능 필드: name, folder_path, status, chunk_count, progress, error_message.\n"
+        "null이 아닌 필드만 업데이트됨 (partial update).\n\n"
+        "- 스키마: user.documents"
+    ),
 )
 def update_document(
     knowledge_id: int = Path(..., ge=1),
@@ -400,6 +472,10 @@ def update_document(
     status_code=status.HTTP_204_NO_CONTENT,
     operation_id="delete_document",
     summary="문서삭제",
+    description=(
+        "문서 및 관련 데이터(페이지, 청크, 설정) 삭제. 본인 소유 문서만 가능. 복구 불가.\n\n"
+        "- 스키마: user.documents (cascade)"
+    ),
 )
 def delete_document(
     knowledge_id: int = Path(..., ge=1),
@@ -420,6 +496,7 @@ def delete_document(
     response_model=DocumentIngestionSettingResponse,
     operation_id="get_document_ingestion_settings",
     summary="임베딩설정",
+    description="문서 임베딩/청킹 설정 조회. 설정이 없으면 기본값으로 자동 생성. 스키마: user.document_ingestion_settings",
 )
 def get_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -445,7 +522,16 @@ def get_document_ingestion_settings(
     response_model=DocumentIngestionSettingResponse,
     operation_id="patch_document_ingestion_settings",
     summary="청킹설정",
-    description="**chunking_mode** : `general`(일반) | `parent_child` (부모자식)",
+    description=(
+        "문서 청킹/임베딩 설정 부분 수정. null이 아닌 필드만 업데이트됨.\n"
+        "설정 변경 후 reindex를 호출해야 새 설정이 실제 청크에 반영됨.\n\n"
+        "- 스키마: user.document_ingestion_settings\n"
+        "- chunking_mode: 'general' (일반) | 'parent_child' (부모자식)\n"
+        "- chunk_strategy: 'recursive'만 지원 (MVP)\n"
+        "- chunk_overlap < chunk_size 필수\n"
+        "- parent_child 모드: segment_separator, parent_chunk_size, parent_chunk_overlap 사용\n"
+        "- general 모드: parent 관련 필드 자동 null 처리"
+    ),
 )
 def patch_document_ingestion_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -478,7 +564,15 @@ def patch_document_ingestion_settings(
     response_model=ChunkPreviewResponse,
     operation_id="preview_document_chunks",
     summary="청크프리뷰",
-    description="저장되지 않고 미리보기 새로고침을 통하여 볼수 있음 확정되면,\n 청킹 설정 patch 통하여 확정",
+    description=(
+        "청킹 설정 미리보기. DB에 저장되지 않음.\n"
+        "chunking_mode에 따라 general 또는 parent_child 모드로 프리뷰 생성.\n"
+        "확정 시 PATCH /document/{knowledge_id}/settings/ingestion으로 설정 저장 후 reindex 호출.\n\n"
+        "- 스키마: 저장 없음 (프리뷰 전용)\n"
+        "- chunking_mode: 'general' | 'parent_child'\n"
+        "- chunk_strategy: 'recursive'만 지원 (MVP)\n"
+        "- chunk_overlap < chunk_size 필수"
+    ),
 )
 def preview_document_chunks(
     knowledge_id: int = Path(..., ge=1),
@@ -633,6 +727,7 @@ def preview_document_chunks(
     response_model=DocumentSearchSettingResponse,
     operation_id="get_document_search_settings",
     summary="검색설정조회",
+    description="문서 검색 설정 조회. 설정이 없으면 기본값으로 자동 생성. 스키마: user.document_search_settings",
 )
 def get_document_search_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -658,6 +753,14 @@ def get_document_search_settings(
     response_model=DocumentSearchSettingResponse,
     operation_id="patch_document_search_settings",
     summary="검색설정수정",
+    description=(
+        "문서 검색 설정 부분 수정. null이 아닌 필드만 업데이트됨.\n"
+        "설정 변경 후 reindex를 호출해야 새 설정이 실제 검색에 반영됨.\n\n"
+        "- 스키마: user.document_search_settings\n"
+        "- score_type: 'cosine_similarity' (고정)\n"
+        "- min_score: 0.0 ~ 1.0 (Decimal)\n"
+        "- reranker_top_n <= top_k 필수"
+    ),
 )
 def patch_document_search_settings(
     knowledge_id: int = Path(..., ge=1),
@@ -688,6 +791,13 @@ def patch_document_search_settings(
     status_code=status.HTTP_202_ACCEPTED,
     operation_id="reindex_document",
     summary="문서재색인",
+    description=(
+        "기존 청크·페이지를 삭제하고 백그라운드에서 재처리 시작.\n"
+        "ingestion/search 설정 변경 후 호출하면 새 설정이 반영됨.\n"
+        "응답은 즉시 202 반환, 처리는 백그라운드 수행.\n\n"
+        "- 스키마: user.documents, user.document_pages, user.document_chunks (초기화 후 재생성)\n"
+        "- status가 'uploading'으로 리셋됨"
+    ),
 )
 def reindex_document(
     background_tasks: BackgroundTasks,

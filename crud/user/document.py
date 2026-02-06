@@ -14,6 +14,7 @@ from models.user.document import (
     DocumentChunk,
     DocumentIngestionSetting,
     DocumentSearchSetting,
+    SessionDocument,
 )
 
 from schemas.user.document import (
@@ -468,6 +469,45 @@ class DocumentChunkCRUD:
 
 
 document_chunk_crud = DocumentChunkCRUD()
+
+# =========================================================
+# Session Documents CRUD (junction table)
+# =========================================================
+class SessionDocumentCRUD:
+    def sync(
+        self,
+        db: Session,
+        *,
+        session_id: int,
+        knowledge_ids: Optional[List[int]],
+    ) -> None:
+        """세션의 문서 연결을 knowledge_ids로 동기화 (기존 삭제 → 새로 INSERT)"""
+        db.execute(
+            delete(SessionDocument).where(SessionDocument.session_id == int(session_id))
+        )
+        if not knowledge_ids:
+            return
+        stmt = (
+            pg_insert(SessionDocument)
+            .values([
+                {"session_id": int(session_id), "knowledge_id": int(kid)}
+                for kid in knowledge_ids
+            ])
+            .on_conflict_do_nothing(index_elements=["session_id", "knowledge_id"])
+        )
+        db.execute(stmt)
+
+    def list_by_session(self, db: Session, *, session_id: int) -> List[int]:
+        """세션에 연결된 knowledge_id 목록 반환"""
+        rows = db.scalars(
+            select(SessionDocument.knowledge_id)
+            .where(SessionDocument.session_id == int(session_id))
+            .order_by(SessionDocument.knowledge_id)
+        ).all()
+        return [int(r) for r in rows]
+
+
+session_document_crud = SessionDocumentCRUD()
 
 # =========================================================
 # Shortcut
