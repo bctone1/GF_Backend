@@ -14,8 +14,10 @@ from schemas.partner.usage import (
     InstructorUsageAnalyticsResponse,
     UsageEventResponse,
     UsageDailyResponse,
+    FeatureUsageResponse,
 )
 from service.partner.instructor_analytics import get_instructor_usage_analytics
+from service.partner.feature_usage import get_feature_usage as feature_usage_svc
 import crud.partner.usage as usage_crud
 
 router = APIRouter()
@@ -46,7 +48,7 @@ def read_instructor_usage_analytics(
 
     return get_instructor_usage_analytics(
         db,
-        partner_id=partner_id,
+        partner_id=me.org_id,
         start_date=start_date,
         end_date=end_date,
         request_type=request_type,
@@ -60,6 +62,30 @@ def read_instructor_usage_analytics(
 
 
 @router.get(
+    "/features",
+    response_model=FeatureUsageResponse,
+    summary="기능 활용 현황 (비교모드, RAG, 프로젝트)",
+)
+def get_feature_usage_stats(
+    partner_id: int,
+    *,
+    db: Session = Depends(get_db),
+    me: Partner = Depends(get_current_partner_user),
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+) -> FeatureUsageResponse:
+    if start_date and end_date and end_date < start_date:
+        raise HTTPException(status_code=400, detail="end_date must be >= start_date")
+
+    return feature_usage_svc(
+        db,
+        partner=me,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+
+@router.get(
     "/events",
     response_model=List[UsageEventResponse],
     summary="사용량 원천 이벤트 로그 조회(드릴다운/디버깅)",
@@ -68,7 +94,7 @@ def list_usage_events(
     partner_id: int,
     *,
     db: Session = Depends(get_db),
-    _: Partner = Depends(get_current_partner_user),
+    me: Partner = Depends(get_current_partner_user),
     start_at: Optional[datetime] = Query(default=None, description="시작 시각(포함)"),
     end_at: Optional[datetime] = Query(default=None, description="종료 시각(미만)"),
     request_type: Optional[str] = Query(default=None),
@@ -87,7 +113,7 @@ def list_usage_events(
 
     rows = usage_crud.list_usage_events(
         db,
-        partner_id=partner_id,
+        partner_id=me.org_id,
         start_at=start_at,
         end_at=end_at,
         request_type=request_type,
@@ -113,7 +139,7 @@ def list_usage_daily(
     partner_id: int,
     *,
     db: Session = Depends(get_db),
-    _: Partner = Depends(get_current_partner_user),
+    me: Partner = Depends(get_current_partner_user),
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
     dim_type: Optional[str] = Query(default=None, description="partner/class/enrollment/student"),
@@ -127,7 +153,7 @@ def list_usage_daily(
 
     rows = usage_crud.list_usage_daily_rows(
         db,
-        partner_id=partner_id,
+        partner_id=me.org_id,
         start_date=start_date,
         end_date=end_date,
         dim_type=dim_type,

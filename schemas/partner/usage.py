@@ -202,6 +202,26 @@ class UsageDimBreakdownItem(ORMBase):
     error_count: int = 0
 
 
+# =========================
+# Feature Usage (analytics 보강)
+# =========================
+class FeatureUsageItem(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    student_count: int = 0
+    total_students: int = 0
+    usage_count: int = 0
+
+
+class FeatureUsageResponse(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+
+    compare_mode: FeatureUsageItem
+    knowledge_base: FeatureUsageItem
+    agent: FeatureUsageItem
+    project: FeatureUsageItem
+
+
 class InstructorUsageAnalyticsResponse(ORMBase):
     model_config = ConfigDict(from_attributes=False, json_encoders={Decimal: str})
 
