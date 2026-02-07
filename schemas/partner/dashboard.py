@@ -1,10 +1,10 @@
-# schemas/partner/dashboard.py
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
 
+from pydantic import Field
 from schemas.base import ORMBase
 
 
@@ -28,7 +28,7 @@ class DashboardActivityEvent(ORMBase):
     description: Optional[str] = None
     class_id: Optional[int] = None
     student_id: Optional[int] = None
-    meta: Dict[str, Any] = {}
+    meta: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 
@@ -51,6 +51,6 @@ class DashboardClassBudget(ORMBase):
 class DashboardResponse(ORMBase):
     welcome: DashboardWelcome
     stat_cards: DashboardStatCards
-    recent_activity: List[DashboardActivityEvent] = []
-    top_students: List[DashboardTopStudent] = []
-    class_budgets: List[DashboardClassBudget] = []
+    recent_activity: List[DashboardActivityEvent] = Field(default_factory=list)  
+    top_students: List[DashboardTopStudent] = Field(default_factory=list)
+    class_budgets: List[DashboardClassBudget] = Field(default_factory=list)
