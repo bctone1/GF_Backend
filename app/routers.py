@@ -20,8 +20,6 @@ from app.endpoints.partner.usage import router as partner_usage
 from app.endpoints.partner.dashboard import router as partner_dashboard
 from app.endpoints.partner.settings import router as partner_settings
 from app.endpoints.partner.notify import router as partner_notify
-# from app.endpoints.partner.billing import router as partner_billing
-# from app.endpoints.partner.prompt import router as partner_prompt
 from app.endpoints.partner.analytics import router as partner_analytics
 
 
@@ -46,24 +44,22 @@ def register_routers(app: FastAPI) -> None:
     # Supervisor
     # ==============================
     # app.include_router(super_auth,        prefix="/supervisor",                     tags=["super/auth"])
-    app.include_router(super_core,        prefix="/supervisor/core",                tags=["super/core"])
+    app.include_router(super_core,        prefix="/supervisor/core",                tags=["super/core:플랫폼관리"])
 
     # ==============================
     # Partner
     # ==============================
-    app.include_router(partner_classes, prefix="/partner/{partner_id}/classes", tags=["partner/classes"])
-    app.include_router(partner_analytics, prefix="/partner/{partner_id}/analytics", tags=["partner/analytics"])
-    # app.include_router(partner_billing,   prefix="/partner/{partner_id}/billing",   tags=["partner/billing"])
+    app.include_router(partner_classes,   prefix="/partner/{partner_id}/classes",    tags=["partner/classes:강의실"])
+    app.include_router(partner_analytics, prefix="/partner/{partner_id}/analytics", tags=["partner/analytics:분석통계"])
     app.include_router(partner_catalog,   prefix="/partner/{partner_id}/catalog",   tags=["partner/catalog:모델등록"])
-    app.include_router(partner_course,    prefix="/partner/{partner_id}/course",    tags=["partner/course"])
-    app.include_router(partner_notify,    prefix="/partner/{partner_id}/notify",    tags=["partner/notify"])
-    app.include_router(partner_core,      prefix="/partner",                        tags=["partner/core"])
-    # app.include_router(partner_prompt,    prefix="/partner/{partner_id}/prompt",    tags=["partner/prompt"])
-    app.include_router(partner_session,   prefix="/partner/{partner_id}/session",   tags=["partner/session"])
-    app.include_router(partner_student,   prefix="/partner/{partner_id}/student",   tags=["partner/student"])
-    app.include_router(partner_usage,     prefix="/partner/{partner_id}/usage",     tags=["partner/usage"])
-    app.include_router(partner_dashboard, prefix="/partner/{partner_id}/dashboard", tags=["partner/dashboard"])
-    app.include_router(partner_settings,  prefix="/partner/{partner_id}/settings",  tags=["partner/settings"])
+    app.include_router(partner_course,    prefix="/partner/{partner_id}/course",    tags=["partner/course:강의관리"])
+    app.include_router(partner_notify,    prefix="/partner/{partner_id}/notify",    tags=["partner/notify:알림"])
+    app.include_router(partner_core,      prefix="/partner",                        tags=["partner/core:파트너계정"])
+    app.include_router(partner_session,   prefix="/partner/{partner_id}/session",   tags=["partner/session:세션"])
+    app.include_router(partner_student,   prefix="/partner/{partner_id}/student",   tags=["partner/student:훈련생"])
+    app.include_router(partner_usage,     prefix="/partner/{partner_id}/usage",     tags=["partner/usage:사용량"])
+    app.include_router(partner_dashboard, prefix="/partner/{partner_id}/dashboard", tags=["partner/dashboard:대시보드"])
+    app.include_router(partner_settings,  prefix="/partner/{partner_id}/settings",  tags=["partner/settings:설정"])
 
 
     # ==============================
