@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 
 from pydantic import ConfigDict, EmailStr
@@ -122,3 +123,40 @@ class StudentClassResponse(ORMBase):
     last_activity_at: Optional[datetime] = None  # 추후 세션/활동 로그 연동 예정
 
 StudentClassPage = Page[StudentClassResponse]
+
+
+# ==============================
+# Student Detail (통계 포함)
+# ==============================
+class StudentEnrollmentInfo(ORMBase):
+    enrollment_id: int
+    class_id: int
+    class_name: str
+    enrollment_status: str
+
+
+class StudentDetailResponse(ORMBase):
+    id: int
+    partner_id: int
+    full_name: str
+    email: Optional[str] = None
+    status: str
+    joined_at: datetime
+    primary_contact: Optional[str] = None
+    user_id: Optional[int] = None
+
+    enrollments: list[StudentEnrollmentInfo] = []
+
+    conversation_count: int = 0
+    total_cost: Decimal = Decimal("0")
+    last_activity_at: Optional[datetime] = None
+
+
+# ==============================
+# Student Stats (요약 통계)
+# ==============================
+class StudentStatsResponse(ORMBase):
+    total_students: int = 0
+    active_students: int = 0
+    completed_students: int = 0
+    engagement_rate: Decimal = Decimal("0")

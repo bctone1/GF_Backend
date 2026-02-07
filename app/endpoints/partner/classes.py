@@ -10,18 +10,25 @@ from sqlalchemy.orm import Session, selectinload
 from core.deps import get_db, get_current_partner_user
 
 # 스키마: 코스/클래스/초대코드가 같이 있는 모듈
+from decimal import Decimal
+
 from schemas.partner.classes import (
     ClassCreate,
     ClassUpdate,
     ClassResponse,
     ClassPage,
+    ClassSummaryResponse,
+    CostEstimateRequest,
+    CostEstimateResponse,
     InviteCodeResponse,
     InviteCodePage,
 )
 
 from crud.partner import classes as crud_classes
 from service.partner import class_code as class_code_service
+from service.partner.class_summary import list_classes_with_stats
 from models.partner.course import Class as ClassModel
+from models.partner.partner_core import Partner
 
 
 router = APIRouter()
@@ -135,6 +142,61 @@ def create_class(
 
 
 @router.get(
+    "/summary",
+    response_model=list[ClassSummaryResponse],
+    summary="강의 목록 + 통계 요약",
+)
+def list_classes_summary(
+    partner_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_partner: Partner = Depends(get_current_partner_user),
+):
+    """강의 카드 목록 — 학생 수, 대화 수, 비용, 예산 현황 포함."""
+    return list_classes_with_stats(
+        db,
+        partner=current_partner,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.post(
+    "/cost-estimate",
+    response_model=CostEstimateResponse,
+    summary="비용 견적 계산",
+)
+def estimate_cost(
+    partner_id: int = Path(..., ge=1),
+    payload: CostEstimateRequest = ...,
+    _=Depends(get_current_partner_user),
+):
+    """강의 생성 전 비용 견적. DB 불필요, 순수 계산."""
+    from core.config import (
+        PLATFORM_FEE_PER_STUDENT,
+        DAILY_API_FEE_ESTIMATE,
+        API_FEE_DISCOUNT_FACTOR,
+    )
+
+    platform_fee = payload.expected_students * PLATFORM_FEE_PER_STUDENT
+    api_fee = (
+        payload.expected_students
+        * payload.days
+        * DAILY_API_FEE_ESTIMATE
+        * payload.model_count
+        * API_FEE_DISCOUNT_FACTOR
+    )
+    return CostEstimateResponse(
+        platform_fee=platform_fee,
+        api_fee_estimate=api_fee,
+        total=platform_fee + api_fee,
+    )
+
+
+@router.get(
     "/{class_id}",
     response_model=ClassResponse,
     summary="단일 강의 조회",
@@ -186,6 +248,7 @@ def update_class(
             # LLM 설정
             primary_model_id=payload.primary_model_id,
             allowed_model_ids=payload.allowed_model_ids,
+            budget_limit=payload.budget_limit,
         )
     except ValueError as e:
         # 예: model_catalog 에 없는 모델 id 등

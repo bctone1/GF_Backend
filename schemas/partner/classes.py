@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Optional, List
+from decimal import Decimal
+from typing import Literal, Optional, List
 
 from pydantic import ConfigDict, Field
 
@@ -109,6 +110,9 @@ class ClassBase(ORMBase):
     primary_model_id: Optional[int] = None
     allowed_model_ids: List[int] = Field(default_factory=list)
 
+    # 예산
+    budget_limit: Optional[Decimal] = None
+
 
 class ClassCreate(ORMBase):
     """
@@ -133,6 +137,9 @@ class ClassCreate(ORMBase):
     primary_model_id: Optional[int] = None
     allowed_model_ids: List[int] = Field(default_factory=list)
 
+    # 예산
+    budget_limit: Optional[Decimal] = None
+
 
 class ClassUpdate(ORMBase):
     model_config = ConfigDict(from_attributes=False)
@@ -152,6 +159,9 @@ class ClassUpdate(ORMBase):
     # LLM 설정 (선택)
     primary_model_id: Optional[int] = None
     allowed_model_ids: Optional[List[int]] = None
+
+    # 예산
+    budget_limit: Optional[Decimal] = None
 
 
 class ClassResponse(ClassBase):
@@ -173,3 +183,50 @@ class ClassResponse(ClassBase):
 
 class ClassPage(Page[ClassResponse]):
     ...
+
+
+# ==============================
+# Class Summary (강의 카드용 요약)
+# ==============================
+class ClassSummaryResponse(ORMBase):
+    """강의 카드용 요약 — 목록에서 사용."""
+    id: int
+    name: str
+    status: str
+    description: Optional[str] = None
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
+    capacity: Optional[int] = None
+    budget_limit: Optional[Decimal] = None
+
+    # 통계
+    student_count: int = 0
+    conversation_count: int = 0
+    total_cost: Decimal = Decimal("0")
+    days_remaining: Optional[int] = None
+
+    # 예산
+    budget_used: Decimal = Decimal("0")
+    budget_percent: Decimal = Decimal("0")
+    budget_status: Literal["ok", "warning", "alert"] = "ok"
+
+    # 초대코드 (첫 active 코드)
+    invite_code: Optional[str] = None
+
+    created_at: datetime
+
+
+# ==============================
+# Cost Estimate (비용 견적)
+# ==============================
+class CostEstimateRequest(ORMBase):
+    model_config = ConfigDict(from_attributes=False)
+    expected_students: int = Field(..., ge=1)
+    model_count: int = Field(..., ge=1)
+    days: int = Field(..., ge=1)
+
+
+class CostEstimateResponse(ORMBase):
+    platform_fee: Decimal
+    api_fee_estimate: Decimal
+    total: Decimal
