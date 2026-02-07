@@ -1,7 +1,8 @@
 # crud/partner/classes.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 from typing import List, Optional, Tuple
 
 from sqlalchemy import select, delete, func, and_, desc
@@ -132,12 +133,15 @@ def create_class(
     # LLM 설정
     primary_model_id: Optional[int] = None,
     allowed_model_ids: Optional[List[int]] = None,
+    # 예산
+    budget_limit: Optional[Decimal] = None,
 ) -> Class:
     """
     - partner_id: 이 class 를 여는 강사(Partner.id) (필수)
     - course_id: course 에 소속되면 지정, 아니면 None
     - primary_model_id: 기본으로 사용할 LLM (partner.model_catalog.id)
     - allowed_model_ids: 허용 모델 목록 (JSONB; None 이면 [] 사용)
+    - budget_limit: 예산 한도(USD). None = 무제한
 
     모델 관련 규칙:
     - primary_model_id / allowed_model_ids 는 모두 model_catalog 에 존재해야 함.
@@ -167,6 +171,7 @@ def create_class(
         invite_only=invite_only if invite_only is not None else False,
         primary_model_id=primary_model_id,
         allowed_model_ids=normalized_allowed,  # JSONB 컬럼에 리스트로 저장
+        budget_limit=budget_limit,
     )
     db.add(obj)
     db.commit()
@@ -193,10 +198,16 @@ def update_class(
     # LLM 설정
     primary_model_id: Optional[int] = None,
     allowed_model_ids: Optional[List[int]] = None,
+    # 예산
+    budget_limit: Optional[Decimal] = None,
 ) -> Optional[Class]:
     obj = db.get(Class, class_id)
     if not obj:
         return None
+
+    # 예산 수정
+    if budget_limit is not None:
+        obj.budget_limit = budget_limit
 
     # 기본 정보 수정
     if name is not None:
@@ -328,7 +339,7 @@ def get_invite_for_redeem(db: Session, *, code: str) -> Optional[InviteCode]:
     if not invite:
         return None
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # 상태 체크
     if getattr(invite, "status", None) != "active":
@@ -366,7 +377,7 @@ def mark_invite_used(
     if not invite:
         return None
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # used_count 증가
     if hasattr(invite, "used_count"):

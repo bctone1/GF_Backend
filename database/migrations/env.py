@@ -43,6 +43,7 @@ import models.partner.usage
 import models.partner.billing
 import models.partner.notify
 import models.partner.analytics
+import models.partner.activity
 import models.user.account
 import models.user.prefs
 import models.user.project

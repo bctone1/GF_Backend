@@ -3,6 +3,7 @@ from sqlalchemy import (
     Column,
     BigInteger,
     Integer,
+    Numeric,
     Text,
     Boolean,
     Date,
@@ -140,6 +141,12 @@ class Class(Base):
         JSONB,
         nullable=False,
         server_default=text("'[]'::jsonb"),
+    )
+
+    budget_limit = Column(
+        Numeric(14, 2),
+        nullable=True,
+        comment="예산 한도(USD). NULL = 무제한",
     )
 
     created_at = Column(
