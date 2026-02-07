@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional, Literal, List, Any, Dict
 
 from pydantic import ConfigDict, Field
-from schemas.base import ORMBase
+from schemas.base import DecimalStr, ORMBase
 
 # =========================
 # type aliases
@@ -20,8 +20,6 @@ class UsageEventResponse(ORMBase):
     """
     원천 이벤트 로그(근거 데이터)
     """
-    model_config = ConfigDict(from_attributes=True, json_encoders={Decimal: str})
-
     id: int
     request_id: str
     occurred_at: datetime
@@ -40,7 +38,7 @@ class UsageEventResponse(ORMBase):
     media_duration_seconds: int
     latency_ms: Optional[int] = None
 
-    total_cost_usd: Decimal
+    total_cost_usd: DecimalStr
 
     success: bool
     error_code: Optional[str] = None
@@ -82,8 +80,6 @@ class UsageDailyResponse(ORMBase):
     """
     일 단위 집계(추후 ETL/물리화용). 현재 on-read면 당장 사용 안 해도 됨.
     """
-    model_config = ConfigDict(from_attributes=True, json_encoders={Decimal: str})
-
     id: int
 
     partner_id: int
@@ -105,7 +101,7 @@ class UsageDailyResponse(ORMBase):
     success_count: int
     error_count: int
 
-    total_cost_usd: Decimal
+    total_cost_usd: DecimalStr
 
 
 class UsageDailyListQuery(ORMBase):
@@ -129,8 +125,6 @@ class UsageDailyListQuery(ORMBase):
 # partner.usage_model_monthly (optional)
 # =========================
 class UsageModelMonthlyResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=True, json_encoders={Decimal: str})
-
     id: int
 
     partner_id: int
@@ -142,7 +136,7 @@ class UsageModelMonthlyResponse(ORMBase):
 
     request_count: int
     total_tokens: int
-    total_cost_usd: Decimal
+    total_cost_usd: DecimalStr
 
 
 # =========================
@@ -150,9 +144,9 @@ class UsageModelMonthlyResponse(ORMBase):
 # - on-read 집계 결과를 내려주는 용도
 # =========================
 class UsageKpiResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=False, json_encoders={Decimal: str})
+    model_config = ConfigDict(from_attributes=False)
 
-    total_cost_usd: Decimal = Decimal("0")
+    total_cost_usd: DecimalStr = Decimal("0")
     request_count: int = 0
     session_count: int = 0
     total_tokens: int = 0
@@ -161,42 +155,42 @@ class UsageKpiResponse(ORMBase):
     error_count: int = 0
 
     # on-read로 평균 정도는 가능(필요 시)
-    avg_latency_ms: Optional[Decimal] = None
+    avg_latency_ms: Optional[DecimalStr] = None
 
     active_students: int = 0
     active_classes: int = 0
 
 
 class UsageTimeSeriesPoint(ORMBase):
-    model_config = ConfigDict(from_attributes=False, json_encoders={Decimal: str})
+    model_config = ConfigDict(from_attributes=False)
 
     usage_date: date
-    total_cost_usd: Decimal = Decimal("0")
+    total_cost_usd: DecimalStr = Decimal("0")
     request_count: int = 0
     total_tokens: int = 0
     error_count: int = 0
 
 
 class UsageModelBreakdownItem(ORMBase):
-    model_config = ConfigDict(from_attributes=False, json_encoders={Decimal: str})
+    model_config = ConfigDict(from_attributes=False)
 
     provider: str
     model_name: Optional[str] = None
 
-    total_cost_usd: Decimal = Decimal("0")
+    total_cost_usd: DecimalStr = Decimal("0")
     request_count: int = 0
     total_tokens: int = 0
-    share_pct: Optional[Decimal] = None
+    share_pct: Optional[DecimalStr] = None
 
 
 class UsageDimBreakdownItem(ORMBase):
-    model_config = ConfigDict(from_attributes=False, json_encoders={Decimal: str})
+    model_config = ConfigDict(from_attributes=False)
 
     dim_type: UsageDimType
     dim_id: int
     dim_label: Optional[str] = None  # class_name / student_name 등 (조인해서 채우면 됨)
 
-    total_cost_usd: Decimal = Decimal("0")
+    total_cost_usd: DecimalStr = Decimal("0")
     request_count: int = 0
     total_tokens: int = 0
     error_count: int = 0
@@ -218,12 +212,12 @@ class FeatureUsageResponse(ORMBase):
 
     compare_mode: FeatureUsageItem
     knowledge_base: FeatureUsageItem
-    agent: FeatureUsageItem
+    prompt: FeatureUsageItem
     project: FeatureUsageItem
 
 
 class InstructorUsageAnalyticsResponse(ORMBase):
-    model_config = ConfigDict(from_attributes=False, json_encoders={Decimal: str})
+    model_config = ConfigDict(from_attributes=False)
 
     kpi: UsageKpiResponse
     timeseries: List[UsageTimeSeriesPoint] = Field(default_factory=list)

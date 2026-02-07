@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional, Dict, List, Any, Iterable, Tuple
 
-from sqlalchemy import select, func, desc, case
+from sqlalchemy import select, func, desc, case, literal
 from sqlalchemy.orm import Session
 
 import crud.partner.usage as usage_crud
@@ -152,7 +152,7 @@ def _events_kpi(
     stmt = select(
         func.coalesce(func.sum(UsageEvent.total_cost_usd), 0).label("total_cost_usd"),
         func.count(UsageEvent.id).label("request_count"),
-        func.count(func.distinct(UsageEvent.turn_id)).label("turn_count"),
+        literal(0).label("turn_count"),
         func.count(func.distinct(UsageEvent.session_id)).label("session_count"),
         # llm_chat을 "대화 response 수"로 보고 싶으면 여기 집계로 잡아도 됨
         func.coalesce(
@@ -520,7 +520,7 @@ def get_instructor_usage_analytics(
 
     daily_has_range = (start_date is None) or (start_date <= daily_end)
     if daily_has_range and daily_end >= date(1970, 1, 1):
-        daily_kpi_dict = usage_crud.get_usage_kpi(
+        daily_kpi_dict = usage_crud.get_usage_kpi_on_read(
             db,
             partner_id=partner_id,
             start_date=start_date,
@@ -529,7 +529,7 @@ def get_instructor_usage_analytics(
             provider=provider,
             model_name=model_name,
         )
-        daily_ts_rows = usage_crud.get_usage_timeseries_daily(
+        daily_ts_rows = usage_crud.get_usage_timeseries_daily_on_read(
             db,
             partner_id=partner_id,
             start_date=start_date,
@@ -538,7 +538,7 @@ def get_instructor_usage_analytics(
             provider=provider,
             model_name=model_name,
         )
-        daily_models_rows = usage_crud.get_usage_model_breakdown(
+        daily_models_rows = usage_crud.get_usage_model_breakdown_on_read(
             db,
             partner_id=partner_id,
             start_date=start_date,
@@ -551,7 +551,7 @@ def get_instructor_usage_analytics(
         # 기존 service가 하던 방식대로 "필터 있으면 직접 sum query"는 구현 범위가 커져서,
         # 여기서는 일단 daily breakdown은 기존 get_usage_dim_breakdown 그대로 사용한다.
         # (provider/model로 클래스/학생 breakdown까지 필터링이 꼭 필요하면, daily에도 동일한 filtered 쿼리 버전 추가해줘야 함)
-        daily_classes_rows = usage_crud.get_usage_dim_breakdown(
+        daily_classes_rows = usage_crud.get_usage_dim_breakdown_on_read(
             db,
             partner_id=partner_id,
             dim_type="class",
@@ -560,7 +560,7 @@ def get_instructor_usage_analytics(
             request_type=request_type,
             top_n=top_n_classes,
         )
-        daily_students_rows = usage_crud.get_usage_dim_breakdown(
+        daily_students_rows = usage_crud.get_usage_dim_breakdown_on_read(
             db,
             partner_id=partner_id,
             dim_type="student",

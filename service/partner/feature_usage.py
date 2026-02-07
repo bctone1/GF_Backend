@@ -7,10 +7,12 @@ from typing import Optional, List
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
+from models.partner.course import Class
 from models.partner.partner_core import Partner
 from models.partner.student import Student
 from models.partner.usage import UsageEvent
 from models.user.document import Document
+from models.user.practice import PracticeSession
 from models.user.project import UserProject
 
 from schemas.partner.usage import FeatureUsageResponse, FeatureUsageItem
@@ -28,7 +30,7 @@ def get_feature_usage(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
 ) -> FeatureUsageResponse:
-    """기능 활용 현황: 비교모드, 지식베이스(RAG), 에이전트, 프로젝트."""
+    """기능 활용 현황: 비교모드, 지식베이스(RAG), 프롬프트, 프로젝트."""
 
     # ── total active students under this partner ──
     total_students: int = db.execute(
@@ -114,16 +116,35 @@ def get_feature_usage(
     else:
         project = FeatureUsageItem(total_students=total_students)
 
-    # ── agent (placeholder — feature not yet implemented) ──
-    agent = FeatureUsageItem(
-        student_count=0,
+    # ── prompt (practice_sessions where prompt_ids is non-empty) ──
+    # partner's class IDs
+    class_ids_sq = select(Class.id).where(Class.partner_id == partner.id)
+
+    prompt_filters = [
+        PracticeSession.class_id.in_(class_ids_sq),
+        func.coalesce(func.jsonb_array_length(PracticeSession.prompt_ids), 0) > 0,
+    ]
+    if start_date:
+        prompt_filters.append(_seoul_date_expr(PracticeSession.created_at) >= start_date)
+    if end_date:
+        prompt_filters.append(_seoul_date_expr(PracticeSession.created_at) <= end_date)
+
+    prompt_row = db.execute(
+        select(
+            func.count(func.distinct(PracticeSession.user_id)),
+            func.count(PracticeSession.session_id),
+        ).where(*prompt_filters)
+    ).one()
+
+    prompt = FeatureUsageItem(
+        student_count=prompt_row[0] or 0,
         total_students=total_students,
-        usage_count=0,
+        usage_count=prompt_row[1] or 0,
     )
 
     return FeatureUsageResponse(
         compare_mode=compare_mode,
         knowledge_base=knowledge_base,
-        agent=agent,
+        prompt=prompt,
         project=project,
     )

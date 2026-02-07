@@ -1,10 +1,13 @@
 # schemas/base.py
 from __future__ import annotations
-from typing import Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, TypeVar
 from decimal import Decimal
-from pydantic import BaseModel, ConfigDict, model_validator  # ← model_validator 추가
+from pydantic import BaseModel, ConfigDict, PlainSerializer, model_serializer, model_validator
 
 T = TypeVar("T")
+
+# Decimal → str 직렬화 (json_encoders 대체, Pydantic v2 권장)
+DecimalStr = Annotated[Decimal, PlainSerializer(lambda v: str(v), return_type=str)]
 
 
 class ORMBase(BaseModel):
@@ -12,10 +15,16 @@ class ORMBase(BaseModel):
 
 
 class MoneyBase(ORMBase):
-    model_config = ConfigDict(
-        from_attributes=True,
-        json_encoders={Decimal: lambda v: format(v, "f")},
-    )
+    """Decimal 필드를 고정소수점 문자열로 직렬화하는 베이스 클래스."""
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_serializer(mode="wrap")
+    def _serialize_decimals(self, handler):  # type: ignore[override]
+        d = handler(self)
+        return {
+            k: format(v, "f") if isinstance(v, Decimal) else v
+            for k, v in d.items()
+        }
 
 
 class Page(ORMBase, Generic[T]):

@@ -15,7 +15,6 @@ from app.endpoints.partner.course import router as partner_course
 from app.endpoints.partner.student import router as partner_student
 from app.endpoints.partner.catalog import router as partner_catalog
 from app.endpoints.partner.classes import router as partner_classes
-from app.endpoints.partner.session import router as partner_session
 from app.endpoints.partner.usage import router as partner_usage
 from app.endpoints.partner.dashboard import router as partner_dashboard
 from app.endpoints.partner.settings import router as partner_settings
@@ -55,7 +54,6 @@ def register_routers(app: FastAPI) -> None:
     app.include_router(partner_course,    prefix="/partner/{partner_id}/course",    tags=["partner/course:강의관리"])
     app.include_router(partner_notify,    prefix="/partner/{partner_id}/notify",    tags=["partner/notify:알림"])
     app.include_router(partner_core,      prefix="/partner",                        tags=["partner/core:파트너계정"])
-    app.include_router(partner_session,   prefix="/partner/{partner_id}/session",   tags=["partner/session:세션"])
     app.include_router(partner_student,   prefix="/partner/{partner_id}/student",   tags=["partner/student:훈련생"])
     app.include_router(partner_usage,     prefix="/partner/{partner_id}/usage",     tags=["partner/usage:사용량"])
     app.include_router(partner_dashboard, prefix="/partner/{partner_id}/dashboard", tags=["partner/dashboard:대시보드"])
