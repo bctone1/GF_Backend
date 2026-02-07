@@ -106,6 +106,13 @@ API_PRICING = {
 }
 
 TIMEZONE = "Asia/Seoul"
+
+# 비용 견적 상수(구현 하기 전)
+from decimal import Decimal as _Decimal
+PLATFORM_FEE_PER_STUDENT = _Decimal("5000")       # 학생당 플랫폼 수수료 (KRW)
+DAILY_API_FEE_ESTIMATE = _Decimal("1500")          # 학생·일·모델당 API 비용 추정 (KRW)
+API_FEE_DISCOUNT_FACTOR = _Decimal("0.7")          # API 비용 할인 계수
+
 COST_PRECISION = 6
 TOKEN_UNIT = 1000
 LLM_TOKEN_MODE = "merged"
